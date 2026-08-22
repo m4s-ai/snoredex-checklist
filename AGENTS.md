@@ -1,121 +1,109 @@
-<!-- doc: role=operating rules and view-site contracts; stage=auto -->
-# AGENTS.md — working instructions for this repository
+<!-- doc: role=stable operating rules; stage=auto -->
+# AGENTS.md — working instructions
 
-The operating rules for an agent working here. It is short *relative to what it points at*: the
-detail lives in the documents and the upstream data contract linked below, and duplicating it here
-would create a second copy to keep in step. Read the pointers.
+Keep only stable operating rules here. Product plans, changing decisions, contract fields, counts
+and commands belong in their owning issues, schemas and workflows.
 
-## What this project is
+## Read before acting
 
-A **card-checklist view site** for the Snorlax TCG collection — the collector's daily-driver view:
-one physical card per row, grouped/sorted by set, with a per-card have / in-progress / don't-have
-status and a finish/rarity note. It is the **Option-B clean-split** path from
-`m4s-ai/snoredex-data` issue #229: a thin static site that *reads published JSON*, not a second
-copy of catalogue truth.
+- Read [checklist issue #2] **and every comment** for the product boundary and sequence. Treat its
+  linked upstream issues according to the roles assigned there, not as implicit current gates.
+- Before catalogue or state integration, read the reciprocally linked producer-contract issue and
+  its schema, migrations, manifest and consumer lock. Production integration stays blocked until
+  that contract and its reviewed fixtures are accepted and a pinned artifact/lock exists; until
+  then use reviewed synthetic fixtures only.
+- Read the relevant upstream README.md, HANDOVER.md and LESSONS.md when reasoning about catalogue
+  or evidence semantics. Read every comment and review on each issue or PR used as authority,
+  changed or cited.
 
-The authoritative source of `Snorlax` catalogue facts is **`m4s-ai/snoredex-data`**. This repo is a
-**view over that contract**, never a place where catalogue truth is re-derived, hand-edited, or
-allowed to silently diverge.
+## Authority and graph
 
-## Read before you act
+- m4s-ai/snoredex-data alone owns catalogue, evidence, locality, release, physical-printing,
+  relation and migration truth. This repository renders its public contract and never reconstructs
+  truth from internal stores or presentation labels.
+- This repository alone owns private collection state. There is no write-back edge to the producer.
+- One validated, committed vendor snapshot is the sole catalogue input to normal builds. Its lock
+  pins producer revision, published artifact URL, contract version, semantic fingerprint and byte
+  digest. Only an issue-backed sync updates snapshot and lock together; runtime and normal builds
+  do not fetch mutable upstream data.
 
-| Document / source | Read it before |
-|---|---|
-| `snoredex-data` `README.md` | touching any card identity, set, finish, or status logic — the caveats there are load-bearing |
-| `snoredex-data` `analysis_checklist.json` | reading or mapping the row model — it is the data contract (v1.4.0, `{meta, items}`, 839 items) |
-| `snoredex-data` `HANDOVER.md` / `LESSONS.md` | any reasoning about the data model — the incidents behind the rules live there |
-| `m4s-ai/snoredex-data` issues **#229** and **#120** | the planning and the open "separate vs integrated" question that still gates this repo's scope |
+Preserve these distinct identities and edges:
 
-The upstream `analysis_checklist.json` is a dict `{meta, items}`, keyed fields include
-`checklistId` (stable id), `cardName`, `setCode`/`setName`, `number`, `language`, `finish`/
-`finishFamily`, `rarity`, `releaseDate`, `image`, `cardmarketUrl`, `editionScope`, `completenessStatus`
-(see README data contract § for the current schema). **Do not invent fields; expose only what the
-contract carries. Pin the schema version you consumed and fail loudly if it moves.**
+~~~text
+Locality         --scopes-----> LocalSet
+SetEdition       --belongs-to--> LocalSet
+Localization     --classifies--> SetEdition             (contract projection)
+CardRelease      --belongs-to--> SetEdition
+CardRelease      --implements--> Work                 (only when mapped)
+PhysicalPrinting --realizes----> CardRelease
+CollectorItem    --references--> exactly one CardRelease
+VerifiedItem     --projects----> exactly one PhysicalPrinting
+PrivateState     --keyed-by----> trackable itemId
+Migration        old itemId ---> zero or more new itemIds
+~~~
 
-## Non-negotiable rules
+A verified-printing item must reference exactly one matching PhysicalPrinting; finish candidates
+and research placeholders must not invent one. Localization is the contract projection of locality,
+language and script; language alone is not locality. Work is optional display grouping and never
+merges or deduplicates release or item identity. Treat IDs as opaque, group by stable IDs rather
+than labels, and never infer or cross-product missing identities or attributes. Technical finish
+and collector-facing finish family remain distinct.
 
-1. **Catalogue truth lives upstream; this repo only renders it.** Every displayed set/number/name/
-   language/finish must resolve to a row you read from the published JSON. The site may add *view
-   state* (have/wanted), never *catalogue facts*.
-2. **Owner have/don't-have state is private and local.** Per #229 Option B, the owner's collection
-   status belongs in the user's own browser/tracker — never committed to this public repo. If you
-   add persistence, it must be a local-only surface (e.g. localStorage) and never a public artifact.
-3. **Never render "does not exist".** The upstream checklist excludes `contradicted`, `disputed`
-   and `not-printed` cards as a *promise that nobody hunts a card never made*. Preserve the split:
-   confirmed items are collectible; contradicted/disputed stay out of the checklist view or are
-   clearly marked, never asserted as absent. A gap in a source is a gap, not proof of absence.
-4. **Never hand-edit a generated file.** `index.html`, the JSON bundles the site ships, and any
-   derived artifact carry `<!-- generated: … -->`-style provenance. Change the source/generator,
-   then regenerate. Silent divergence between generated output and its source is how this class of
-   project corrupts.
-5. **Run checks before and after every write pass.** A view generator can silently regress against
-   the schema; the check is cheap and catches it. See [Commands](#commands).
+## Safety invariants
 
-## Data-model traps (learned upstream)
+1. Trust producer-assigned item and progress classes. Research is read-only catalogue state, not a
+   private collection status or normal progress item. Omission, null, candidate, conflict or
+   retirement never means “does not exist”.
+2. Private state is local, versioned and recoverable. It never enters source, build artifacts,
+   URLs, analytics, logs or public issues; public reproductions use synthetic data.
+3. Every catalogue transition conserves old state:
 
-- **`checklistId` is the stable join key**, not a human label. Group/sort by set + number for
-  display, but key equality and dedupe by `checklistId`.
-- **`finish` (technical: non-holo/holo/reverse-holo/mirror-holo) vs `finishFamily` (presentation:
-  reverse + mirror both → "Reverse Holo") are distinct fields.** Never collapse the technical value
-  while rendering or you lose auditable detail.
-- **A card exists per `language`** — one physical printing per row. Do not merge languages into a
-  single row unless the contract already does so.
-- **`completenessStatus` and resolved-vs-placeholder items both appear.** 176 of 839 items are
-  explicit unresolved placeholders by design; they are items too and must not be dropped or relabelled
-  as confirmed.
-- **The `items` key shape lives upstream, not here.** If the schema moves, update the pinned contract
-  and the mapper together — never silently guess a field.
+   ~~~text
+   old IDs = retained + explicit safe migration + retired/orphaned + unresolved conflict
+   ~~~
 
-## Commands
+   Automatically migrate only an explicit identity-preserving 1:1 transition. Never copy, merge or
+   delete state for 1:N, N:1 or unresolved transitions. Back up first and advance the stored
+   fingerprint only after atomic success.
+4. Fail closed on an unsupported contract, digest mismatch, unresolved reference, missing
+   transition, invalid import or failed conservation check. Preserve the last known-good catalogue
+   and private state.
+5. Every shared schema, semantic, ID, rekey, locality, fingerprint, publication or rollout change
+   is recorded before merge in reciprocally linked issues. PRs, reviews, chat and CI are not the
+   cross-project record. Use closing keywords only for the local implementation issue. The loop
+   closes only after the published producer artifact and deployed consumer are end-to-end VERIFIED
+   in both issues for the same version and fingerprint.
+6. Validate untrusted data, render it as text, and preserve privacy, recovery, keyboard,
+   screen-reader and small-screen usability.
+7. Vendor data, locks and build artifacts change only through their documented sync/build path.
+   Normal source HTML, CSS and modules are not generated merely by convention.
 
-Python 3.11, **standard library only**. All scripts derive paths from `Path(__file__)` (CI may run
-from a different working directory). Serve locally with `python -m http.server 8000`.
+## Working loop
 
-The repo currently has **no generator yet** — the first committed pass (row mapper or site
-generator) establishes the real pre/post write gate. Whatever its shape, that gate must:
+1. Sync main; read the owning issue, all comments and linked cross-repo issues.
+2. Identify the owning authority and invariant, then make the smallest change there. Prefer native
+   platform features and existing tooling; add no speculative framework, backend, generator or
+   abstraction.
+3. Run the smallest check that would catch the change failing, then inspect the diff and any
+   catalogue/state accounting.
+4. Run the full repository gates before the PR and deployment. Record contract-impacting findings
+   and verification in the owning issues.
+5. Stop at a missing authority, transition or acceptance condition. Preserve the last known-good
+   state instead of guessing across the gap.
 
-1. parse the pinned `analysis_checklist.json` contract,
-2. map every `checklistId` → rendered row without dropping or inventing fields,
-3. regenerate the site deterministically (a second run produces an identical diff).
+Commands belong in the README and workflows once they exist. Non-trivial logic leaves a runnable
+regression check; trust-boundary and migration checks are never optional.
 
-Until then the pattern is: non-trivial mapping/filter logic leaves **one runnable check** behind —
-an `assert`-based self-check or a small `test_*.py` that fails if the logic breaks. No test
-frameworks beyond stdlib.
+## Repository and publication
 
-## Conventions
+- Use one feature branch per issue and a pull request; do not push directly to main. Partial work
+  references rather than closes the master issue.
+- A merge is not publication. Deployment is explicit and records app revision, producer revision,
+  contract version and fingerprint. Roll back with the previous app revision and lock without
+  rewriting private browser state.
+- Follow LICENSE.md and third-party notices. Project grants do not automatically license card
+  images; publish them only with recorded approval and attribution, otherwise use a placeholder.
+- AGENTS.md is canonical and CLAUDE.md is only its pointer. Keep LF without UTF-8 BOM. Backlog and
+  changing decisions stay in GitHub issues, not here.
 
-- **This `AGENTS.md` is the canonical agent instructions.** [`CLAUDE.md`](CLAUDE.md) is a thin
-  Claude-Code-specific pointer to it; when a Claude user wants the real rules they are here. Keep
-  the operating truth in **this** file, not split across both.
-- Do not load generic SOLID/DRY/KISS slogans. Follow concrete rules only where they fix an observed
-  local failure, and keep always-loaded context compact — pull the deep docs only when the task
-  touches them.
-- **LF line endings**, no UTF-8 BOM.
-- Catalogue data is **not** copied into this repo on import; the site pulls the published JSON from
-  `snoredex-data`. If a vendored snapshot is ever added, mark its provenance + pin the schema version
-  and add a check that it still matches upstream.
-
-## Git and publication
-
-- Repository is `github.com/m4s-ai/snoredex-checklist`. Work lands on a **feature branch via pull
-  request** — do not push to `main` directly.
-- The upstream data repo (`snoredex-data`) is the authoritative, gated publication surface. This
-  repo's deployment is its own gated step; **a merge to `main` here must not, by itself, publish.**
-  Publishing is an explicit, separate, quasi-irreversible action — track the intended publication
-  gate here as it is agreed in the planning issues.
-- End commit messages with the trailer
-  `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>` when Claude Code authored the change.
-
-## Open decisions (from the planning)
-
-- **Scope of the view persistence ([#229], [#120]):** is the have/don't-have toggle a
-  browser-local surface now, or do we align with the proposed GUI from #120? This repo's rules
-  above assume local-only until resolved — revisit when #120 lands.
-- **Deployment target / publication gate** for this site (the data repo uses a manual
-  `workflow_dispatch` gated Pages deploy; this repo has not chosen its own yet).
-- **License:** set to match `snoredex-data` — PolyForm Noncommercial 1.0.0 (code) +
-  CC BY-NC-SA 4.0 (rendered data/arrangement); see [`LICENSE.md`](LICENSE.md). Confirm the grants
-  with the owner (M4S.Collection) before any publication.
-
-[#229]: https://github.com/m4s-ai/snoredex-data/issues/229
-[#120]: https://github.com/m4s-ai/snoredex-data/issues/120
+[checklist issue #2]: https://github.com/m4s-ai/snoredex-checklist/issues/2
