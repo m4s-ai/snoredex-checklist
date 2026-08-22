@@ -113,9 +113,9 @@ frameworks beyond stdlib.
   above assume local-only until resolved — revisit when #120 lands.
 - **Deployment target / publication gate** for this site (the data repo uses a manual
   `workflow_dispatch` gated Pages deploy; this repo has not chosen its own yet).
-- **License** for this repo is not yet set (the upstream `snoredex-data` is mixed-license:
-  PolyForm Noncommercial 1.0.0 code / CC BY-NC-SA 4.0 data-selection). Do not assume this repo
-  inherits it; confirm before any publication.
+- **License:** set to match `snoredex-data` — PolyForm Noncommercial 1.0.0 (code) +
+  CC BY-NC-SA 4.0 (rendered data/arrangement); see [`LICENSE.md`](LICENSE.md). Confirm the grants
+  with the owner (M4S.Collection) before any publication.
 
 [#229]: https://github.com/m4s-ai/snoredex-data/issues/229
 [#120]: https://github.com/m4s-ai/snoredex-data/issues/120
