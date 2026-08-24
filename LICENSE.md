@@ -13,8 +13,9 @@ This project is **noncommercial and source-available**. It is deliberately **not
 
 ## 1. Original software — PolyForm Noncommercial 1.0.0
 
-Covers the code written for this **view site**: the site generator, the row mapper that reads the
-upstream `analysis_checklist.json`, the render logic, and any workflow/configuration authored here.
+Covers the code written for this **view site**: contract validation and sync tooling, state and
+reconciliation logic, rendering, tests, and workflow/configuration authored here. The legacy
+upstream `analysis_checklist.json` is not a supported production contract.
 
 Full text: `LICENSES/PolyForm-Noncommercial-1.0.0.md` · canonical source
 <https://polyformproject.org/licenses/noncommercial/1.0.0/>
@@ -24,10 +25,10 @@ redistribution. Commercial use requires a separate grant from the licensor.
 
 ## 2. Rendered data and arrangement — CC BY-NC-SA 4.0
 
-The site renders catalogue facts selected, arranged and annotated upstream in
-`m4s-ai/snoredex-data` under **CC BY-NC-SA 4.0**. Any copy of that data this site ships (its
-vendored JSON bundle) inherits the upstream licence and must preserve attribution and the
-ShareAlike/NonCommercial terms.
+The site will render catalogue facts selected, arranged and annotated upstream in
+`m4s-ai/snoredex-data` under **CC BY-NC-SA 4.0**. Any accepted copy of that data this site ships
+(its pinned vendored JSON snapshot) inherits the upstream licence and must preserve attribution and
+the ShareAlike/NonCommercial terms.
 
 Full text: `LICENSES/CC-BY-NC-SA-4.0.md` · canonical source
 <https://creativecommons.org/licenses/by-nc-sa/4.0/>
