@@ -27,6 +27,7 @@ its internal stores. Prototype work may use only reviewed synthetic fixtures.
 | [`SPECIFICATIONS.md`](SPECIFICATIONS.md) | How issue-driven specification work becomes executable evidence |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Stable system boundaries and data flow |
 | [`CROSS_REPO_PROTOCOL.md`](CROSS_REPO_PROTOCOL.md) | Cross-repository lifecycle and traceability |
+| [`docs/design/README.md`](docs/design/README.md) | Owner-approved visual baseline and interactive synthetic reference ([issue #30](https://github.com/m4s-ai/snoredex-checklist/issues/30)) |
 
 GitHub issues are the living specifications. Repository documents explain stable operation and link
 to those issues instead of copying changing decisions into a second source of truth.
