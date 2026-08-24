@@ -28,10 +28,11 @@ PROPOSED -> READY -> [ADOPTED] -> VERIFIED -> CLOSED
 ```
 
 `BLOCKED`, `SUPERSEDED`, `REJECTED`, and `SECURITY-EMBARGOED` are explicit exceptional states.
-Every transition is an issue comment naming the exact contract version and fingerprint. `READY`
-means the producer artifact is published and rollback is known; optional `ADOPTED` identifies the
-consumer commit/deployment and reconciliation result; `VERIFIED` proves both sides used the same
-artifact.
+Every transition is an issue comment naming the exact contract version and either the exact
+fingerprint or, before the first accepted fixture, explicit `TBD`. `READY` and every later state
+require the exact fingerprint. `READY` means the producer artifact is published and rollback is
+known; optional `ADOPTED` identifies the consumer commit/deployment and reconciliation result;
+`VERIFIED` proves both sides used the same artifact.
 
 ## Contract authorities
 
