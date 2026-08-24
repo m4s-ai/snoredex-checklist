@@ -1,0 +1,1232 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Snoredex approved design reference</title>
+  <style>
+    :root { color-scheme: light dark; }
+    html { background: #f4f4f2; }
+    body {
+      margin: 0;
+      padding: 16px;
+      background: #f4f4f2;
+      color: #202124;
+      font-family: "Nunito Sans", system-ui, sans-serif;
+    }
+    .form-label { color: inherit; font-weight: 500; }
+    .form-select,
+    .btn {
+      min-height: 40px;
+      border: 1px solid #747775;
+      border-radius: 10px;
+      background: #ffffff;
+      color: #202124;
+      font: inherit;
+    }
+    .form-select { padding: 8px 34px 8px 11px; }
+    .btn { padding: 8px 12px; cursor: pointer; }
+    .btn[aria-pressed="true"] { background: #456f78; color: #ffffff; }
+    [data-lucide] {
+      display: inline-grid;
+      width: 1em;
+      place-items: center;
+      font-style: normal;
+      line-height: 1;
+    }
+    [data-lucide="sun-moon"]::before { content: "☼"; }
+    [data-lucide="list-tree"]::before { content: "☷"; }
+    [data-lucide="database"]::before { content: "▣"; }
+    [data-lucide="search"]::before { content: "⌕"; }
+    [data-lucide="sliders-horizontal"]::before { content: "≡"; }
+    @media (prefers-color-scheme: dark) {
+      html, body { background: #151515; color: #f5f5f5; }
+      .form-select, .btn { background: #2b2b2b; color: #f5f5f5; border-color: #8a8a8a; }
+      .btn[aria-pressed="true"] { background: #79aeb8; color: #172326; }
+    }
+  </style>
+</head>
+<body>
+<div id="snoredex-design-proposal" data-resolved-theme="light">
+  <style>
+    #snoredex-design-proposal {
+      --sd-page: #fbf8ee;
+      --sd-surface: #ffffff;
+      --sd-soft: #f1edda;
+      --sd-ink: #23343a;
+      --sd-muted: #637176;
+      --sd-primary: #456f78;
+      --sd-primary-ink: #ffffff;
+      --sd-primary-soft: #dcebed;
+      --sd-accent: #a7c8b8;
+      --sd-highlight: #e8d69b;
+      --sd-danger: #ad5752;
+      --sd-danger-ink: #ffffff;
+      --sd-border: #d8ddd3;
+      --sd-control-border: #7c8b8a;
+      --sd-focus: #7a5c00;
+      --sd-shadow: rgba(46, 65, 67, 0.11);
+      width: 100%;
+      color: var(--sd-ink);
+    }
+
+    #snoredex-design-proposal[data-resolved-theme="dark"] {
+      --sd-page: #172326;
+      --sd-surface: #213136;
+      --sd-soft: #2a3c40;
+      --sd-ink: #f4f0dd;
+      --sd-muted: #b7c2bd;
+      --sd-primary: #79aeb8;
+      --sd-primary-ink: #213136;
+      --sd-primary-soft: #29464c;
+      --sd-accent: #9cc2af;
+      --sd-highlight: #d8c78e;
+      --sd-danger: #e28f87;
+      --sd-danger-ink: #172326;
+      --sd-border: #405257;
+      --sd-control-border: #7b8d8f;
+      --sd-focus: #f0d276;
+      --sd-shadow: rgba(0, 0, 0, 0.3);
+    }
+
+    #snoredex-design-proposal * { box-sizing: border-box; }
+    #snoredex-design-proposal [hidden] { display: none !important; }
+
+    #snoredex-design-proposal .sd-preview-controls {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    #snoredex-design-proposal .sd-preview-field {
+      display: grid;
+      gap: 4px;
+    }
+
+    #snoredex-design-proposal .sd-preview-select {
+      min-width: 180px;
+    }
+
+    #snoredex-design-proposal .sd-preview-themes {
+      display: inline-flex;
+      gap: 4px;
+    }
+
+    #snoredex-design-proposal .sd-product {
+      overflow: hidden;
+      background: var(--sd-page);
+      color: var(--sd-ink);
+      border: 1px solid var(--sd-border);
+      border-radius: 24px;
+      box-shadow: 0 18px 44px var(--sd-shadow);
+      font-family: "Nunito Sans", system-ui, sans-serif;
+      transition: background-color 180ms ease, color 180ms ease, border-color 180ms ease;
+    }
+
+    #snoredex-design-proposal .sd-product button,
+    #snoredex-design-proposal .sd-product input,
+    #snoredex-design-proposal .sd-product select,
+    #snoredex-design-proposal .sd-product textarea { font: inherit; }
+
+    #snoredex-design-proposal .sd-product a { color: var(--sd-primary); }
+
+    #snoredex-design-proposal .sd-product button:focus-visible,
+    #snoredex-design-proposal .sd-product a:focus-visible,
+    #snoredex-design-proposal .sd-product input:focus-visible,
+    #snoredex-design-proposal .sd-product select:focus-visible,
+    #snoredex-design-proposal .sd-product textarea:focus-visible,
+    #snoredex-design-proposal .sd-product summary:focus-visible {
+      outline: 3px solid var(--sd-focus);
+      outline-offset: 2px;
+    }
+
+    #snoredex-design-proposal .sd-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 14px;
+      padding: 16px 20px;
+      background: var(--sd-surface);
+      border-bottom: 1px solid var(--sd-border);
+    }
+
+    #snoredex-design-proposal .sd-brand {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      color: var(--sd-ink);
+      font-weight: 500;
+      text-decoration: none;
+    }
+
+    #snoredex-design-proposal .sd-brand-mark {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border-radius: 13px;
+      background: var(--sd-primary);
+      color: var(--sd-primary-ink);
+      box-shadow: inset 0 -5px 0 color-mix(in srgb, var(--sd-ink) 12%, transparent);
+      font-weight: 500;
+      letter-spacing: -0.04em;
+    }
+
+    #snoredex-design-proposal .sd-nav {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px 14px;
+    }
+
+    #snoredex-design-proposal .sd-nav a {
+      color: var(--sd-ink);
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    #snoredex-design-proposal .sd-external {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    #snoredex-design-proposal .sd-theme-symbol {
+      min-width: 44px;
+      min-height: 44px;
+      border: 1px solid var(--sd-control-border);
+      border-radius: 12px;
+      background: var(--sd-soft);
+      color: var(--sd-ink);
+      cursor: pointer;
+    }
+
+    #snoredex-design-proposal .sd-button,
+    #snoredex-design-proposal .sd-link-button {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 9px 13px;
+      border: 1px solid var(--sd-control-border);
+      border-radius: 12px;
+      background: var(--sd-soft);
+      color: var(--sd-ink);
+      cursor: pointer;
+      font-weight: 500;
+      text-decoration: none;
+    }
+
+    #snoredex-design-proposal .sd-button-primary,
+    #snoredex-design-proposal .sd-link-primary {
+      border-color: var(--sd-primary);
+      background: var(--sd-primary);
+      color: var(--sd-primary-ink);
+    }
+
+    #snoredex-design-proposal .sd-button-danger {
+      border-color: var(--sd-danger);
+      background: var(--sd-danger);
+      color: var(--sd-danger-ink);
+    }
+
+    #snoredex-design-proposal .sd-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: var(--sd-primary-soft);
+      color: var(--sd-ink);
+      font-weight: 500;
+    }
+
+    #snoredex-design-proposal .sd-muted { color: var(--sd-muted); }
+    #snoredex-design-proposal .sd-tabular { font-variant-numeric: tabular-nums; }
+
+    #snoredex-design-proposal .sd-sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    /* Design system overview */
+    #snoredex-design-proposal .sd-overview {
+      padding: 22px;
+    }
+
+    #snoredex-design-proposal .sd-overview h2,
+    #snoredex-design-proposal .sd-overview p { margin-top: 0; }
+
+    #snoredex-design-proposal .sd-direction {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+
+    #snoredex-design-proposal .sd-overview-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    #snoredex-design-proposal .sd-section-box {
+      padding: 16px;
+      border: 1px solid var(--sd-border);
+      border-radius: 18px;
+      background: var(--sd-surface);
+    }
+
+    #snoredex-design-proposal .sd-section-box h3 { margin-top: 0; }
+
+    #snoredex-design-proposal .sd-swatches {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 9px;
+    }
+
+    #snoredex-design-proposal .sd-swatch-block {
+      height: 44px;
+      margin-bottom: 5px;
+      border: 1px solid color-mix(in srgb, var(--sd-ink) 16%, transparent);
+      border-radius: 12px;
+    }
+
+    #snoredex-design-proposal .sd-swatch-name { font-weight: 500; }
+    #snoredex-design-proposal .sd-swatch-value { color: var(--sd-muted); overflow-wrap: anywhere; }
+
+    #snoredex-design-proposal .sd-type-sample {
+      display: grid;
+      gap: 10px;
+    }
+
+    #snoredex-design-proposal .sd-type-sample strong { font-weight: 500; }
+
+    #snoredex-design-proposal .sd-shapes {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 9px;
+    }
+
+    #snoredex-design-proposal .sd-shape {
+      display: grid;
+      place-items: center;
+      min-height: 74px;
+      background: var(--sd-soft);
+      border: 1px solid var(--sd-border);
+    }
+
+    #snoredex-design-proposal .sd-shape-control { border-radius: 12px; }
+    #snoredex-design-proposal .sd-shape-row { border-radius: 18px; }
+    #snoredex-design-proposal .sd-shape-hero { border-radius: 24px; }
+
+    #snoredex-design-proposal .sd-rules {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    #snoredex-design-proposal .sd-rules li + li { margin-top: 6px; }
+
+    #snoredex-design-proposal .sd-route {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    #snoredex-design-proposal .sd-route-node {
+      padding: 8px 10px;
+      border-radius: 12px;
+      background: var(--sd-soft);
+      font-weight: 500;
+    }
+
+    /* Landing page */
+    #snoredex-design-proposal .sd-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(240px, 0.75fr);
+      align-items: center;
+      gap: 26px;
+      padding: 42px 28px;
+    }
+
+    #snoredex-design-proposal .sd-hero-copy h1 {
+      margin: 0 0 10px;
+      font-weight: 500;
+      letter-spacing: -0.03em;
+    }
+
+    #snoredex-design-proposal .sd-hero-copy p {
+      margin: 0 0 18px;
+      color: var(--sd-muted);
+    }
+
+    #snoredex-design-proposal .sd-hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+    }
+
+    #snoredex-design-proposal .sd-hero-art {
+      position: relative;
+      min-height: 250px;
+      overflow: hidden;
+      border-radius: 24px;
+      background: linear-gradient(145deg, var(--sd-primary), color-mix(in srgb, var(--sd-primary) 68%, var(--sd-ink)));
+      box-shadow: 0 14px 32px var(--sd-shadow);
+    }
+
+    #snoredex-design-proposal .sd-hero-belly {
+      position: absolute;
+      width: 150px;
+      height: 180px;
+      left: 50%;
+      bottom: -42px;
+      transform: translateX(-50%) rotate(-4deg);
+      border-radius: 52% 52% 38% 38%;
+      background: var(--sd-highlight);
+    }
+
+    #snoredex-design-proposal .sd-hero-z {
+      position: absolute;
+      top: 22px;
+      right: 24px;
+      color: var(--sd-primary-ink);
+      font-weight: 500;
+      letter-spacing: 0.2em;
+      transform: rotate(-9deg);
+    }
+
+    #snoredex-design-proposal .sd-mini-card {
+      position: absolute;
+      width: 74px;
+      height: 98px;
+      left: 20px;
+      top: 34px;
+      border: 4px solid var(--sd-surface);
+      border-radius: 12px;
+      background: var(--sd-accent);
+      transform: rotate(-9deg);
+      box-shadow: 0 10px 20px var(--sd-shadow);
+    }
+
+    #snoredex-design-proposal .sd-mini-check {
+      position: absolute;
+      right: 24px;
+      bottom: 28px;
+      width: 52px;
+      height: 52px;
+      display: grid;
+      place-items: center;
+      border-radius: 18px;
+      background: var(--sd-surface);
+      color: var(--sd-primary);
+      font-weight: 500;
+      box-shadow: 0 10px 20px var(--sd-shadow);
+    }
+
+    #snoredex-design-proposal .sd-landing-section {
+      padding: 24px 28px;
+      border-top: 1px solid var(--sd-border);
+    }
+
+    #snoredex-design-proposal .sd-landing-section h2 { margin-top: 0; }
+
+    #snoredex-design-proposal .sd-benefits,
+    #snoredex-design-proposal .sd-steps {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    #snoredex-design-proposal .sd-benefit,
+    #snoredex-design-proposal .sd-step {
+      padding: 15px;
+      border-radius: 18px;
+      background: var(--sd-surface);
+      border: 1px solid var(--sd-border);
+    }
+
+    #snoredex-design-proposal .sd-benefit strong,
+    #snoredex-design-proposal .sd-step strong {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 500;
+    }
+
+    #snoredex-design-proposal .sd-landing-preview {
+      display: grid;
+      grid-template-columns: 86px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 14px;
+      padding: 14px;
+      border-radius: 18px;
+      background: var(--sd-surface);
+      border: 1px solid var(--sd-border);
+      box-shadow: 0 8px 22px var(--sd-shadow);
+    }
+
+    #snoredex-design-proposal .sd-card-art {
+      display: block;
+      position: relative;
+      min-height: 108px;
+      overflow: hidden;
+      border-radius: 14px;
+      background: linear-gradient(145deg, var(--sd-primary), color-mix(in srgb, var(--sd-primary) 70%, var(--sd-ink)));
+    }
+
+    #snoredex-design-proposal .sd-card-art::before {
+      content: "";
+      position: absolute;
+      width: 64px;
+      height: 76px;
+      left: 11px;
+      bottom: -15px;
+      border-radius: 52% 52% 38% 38%;
+      background: var(--sd-highlight);
+    }
+
+    #snoredex-design-proposal .sd-card-art::after {
+      content: "z z z";
+      position: absolute;
+      top: 11px;
+      right: 9px;
+      color: var(--sd-primary-ink);
+      font-weight: 500;
+      letter-spacing: 0.12em;
+    }
+
+    #snoredex-design-proposal .sd-landing-data {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 14px;
+    }
+
+    #snoredex-design-proposal .sd-footer {
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 18px 28px;
+      background: var(--sd-surface);
+      border-top: 1px solid var(--sd-border);
+      color: var(--sd-muted);
+    }
+
+    /* Collection page */
+    #snoredex-design-proposal .sd-mobile-browse { display: none; }
+
+    #snoredex-design-proposal .sd-collection-layout {
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr);
+      min-height: 620px;
+    }
+
+    #snoredex-design-proposal .sd-sidebar {
+      padding: 18px 14px;
+      background: var(--sd-surface);
+      border-right: 1px solid var(--sd-border);
+    }
+
+    #snoredex-design-proposal .sd-sidebar-title {
+      margin: 0 8px 10px;
+      color: var(--sd-muted);
+      font-weight: 500;
+    }
+
+    #snoredex-design-proposal .sd-tree,
+    #snoredex-design-proposal .sd-tree ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    #snoredex-design-proposal .sd-tree ul { padding-left: 13px; }
+
+    #snoredex-design-proposal .sd-tree button {
+      width: 100%;
+      min-height: 40px;
+      border: 0;
+      border-radius: 12px;
+      padding: 8px 9px;
+      background: transparent;
+      color: var(--sd-ink);
+      text-align: left;
+      cursor: pointer;
+    }
+
+    #snoredex-design-proposal .sd-tree button[aria-current="page"] {
+      background: var(--sd-primary-soft);
+      font-weight: 500;
+    }
+
+    #snoredex-design-proposal .sd-provenance {
+      margin-top: 18px;
+      padding: 10px 8px;
+      border-top: 1px solid var(--sd-border);
+      color: var(--sd-muted);
+    }
+
+    #snoredex-design-proposal .sd-collection-main { padding: 20px; min-width: 0; }
+
+    #snoredex-design-proposal .sd-collection-heading {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    #snoredex-design-proposal .sd-collection-heading h1,
+    #snoredex-design-proposal .sd-collection-heading p { margin: 0; }
+
+    #snoredex-design-proposal .sd-progress-copy { font-weight: 500; }
+
+    #snoredex-design-proposal .sd-progress-track {
+      height: 10px;
+      overflow: hidden;
+      margin: 8px 0 5px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--sd-muted) 20%, transparent);
+    }
+
+    #snoredex-design-proposal .sd-progress-fill {
+      width: 73%;
+      height: 100%;
+      background: var(--sd-primary);
+    }
+
+    #snoredex-design-proposal .sd-filter-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 8px;
+      margin: 15px 0;
+    }
+
+    #snoredex-design-proposal .sd-search-label {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 44px;
+      padding: 9px 11px;
+      border: 1px solid var(--sd-control-border);
+      border-radius: 12px;
+      background: var(--sd-surface);
+    }
+
+    #snoredex-design-proposal .sd-search-input {
+      width: 100%;
+      min-width: 0;
+      border: 0;
+      padding: 0;
+      background: transparent;
+      color: var(--sd-ink);
+    }
+
+    #snoredex-design-proposal .sd-search-input::placeholder,
+    #snoredex-design-proposal .sd-input::placeholder,
+    #snoredex-design-proposal .sd-textarea::placeholder { color: var(--sd-muted); opacity: 1; }
+
+    #snoredex-design-proposal .sd-card-list { display: grid; gap: 10px; }
+
+    #snoredex-design-proposal .sd-item-row {
+      display: grid;
+      grid-template-columns: 76px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 13px;
+      padding: 13px;
+      border: 1px solid var(--sd-border);
+      border-radius: 18px;
+      background: var(--sd-surface);
+      box-shadow: 0 6px 18px var(--sd-shadow);
+    }
+
+    #snoredex-design-proposal .sd-item-collected {
+      background: color-mix(in srgb, var(--sd-accent) 18%, var(--sd-surface));
+    }
+
+    #snoredex-design-proposal .sd-item-research {
+      border-style: dashed;
+      box-shadow: none;
+    }
+
+    #snoredex-design-proposal .sd-image-button {
+      display: block;
+      width: 76px;
+      min-height: 104px;
+      border: 0;
+      padding: 0;
+      border-radius: 14px;
+      background: transparent;
+      cursor: zoom-in;
+    }
+
+    #snoredex-design-proposal .sd-image-button .sd-card-art {
+      width: 100%;
+      min-height: 104px;
+      transition: transform 160ms ease;
+    }
+
+    #snoredex-design-proposal .sd-image-button:hover .sd-card-art,
+    #snoredex-design-proposal .sd-image-button:focus-visible .sd-card-art { transform: scale(1.04); }
+
+    #snoredex-design-proposal .sd-item-name {
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-bottom: 4px;
+    }
+
+    #snoredex-design-proposal .sd-item-name strong { font-weight: 500; }
+    #snoredex-design-proposal .sd-item-meta { margin-bottom: 8px; color: var(--sd-muted); }
+
+    #snoredex-design-proposal .sd-item-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    #snoredex-design-proposal .sd-item-actions {
+      display: grid;
+      gap: 7px;
+      min-width: 126px;
+    }
+
+    #snoredex-design-proposal .sd-quantity {
+      display: grid;
+      grid-template-columns: 40px 1fr 40px;
+      align-items: center;
+      border: 1px solid var(--sd-control-border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--sd-surface);
+    }
+
+    #snoredex-design-proposal .sd-quantity button {
+      min-height: 40px;
+      border: 0;
+      background: var(--sd-soft);
+      color: var(--sd-ink);
+      cursor: pointer;
+    }
+
+    #snoredex-design-proposal .sd-quantity output { text-align: center; font-variant-numeric: tabular-nums; }
+
+    #snoredex-design-proposal .sd-details { margin-top: 8px; }
+    #snoredex-design-proposal .sd-details summary { color: var(--sd-primary); cursor: pointer; font-weight: 500; }
+
+    #snoredex-design-proposal .sd-research-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    /* Components */
+    #snoredex-design-proposal .sd-components {
+      padding: 22px;
+    }
+
+    #snoredex-design-proposal .sd-components h2 { margin-top: 0; }
+
+    #snoredex-design-proposal .sd-components-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    #snoredex-design-proposal .sd-component-group {
+      padding: 16px;
+      border: 1px solid var(--sd-border);
+      border-radius: 18px;
+      background: var(--sd-surface);
+    }
+
+    #snoredex-design-proposal .sd-component-group h3 { margin-top: 0; }
+
+    #snoredex-design-proposal .sd-component-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    #snoredex-design-proposal .sd-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 9px;
+      border-radius: 999px;
+      background: var(--sd-soft);
+      color: var(--sd-ink);
+      font-weight: 500;
+    }
+
+    #snoredex-design-proposal .sd-status-collected { background: color-mix(in srgb, var(--sd-accent) 35%, var(--sd-surface)); }
+    #snoredex-design-proposal .sd-status-research { background: var(--sd-primary-soft); }
+
+    #snoredex-design-proposal .sd-form-stack { display: grid; gap: 10px; }
+    #snoredex-design-proposal .sd-field { display: grid; gap: 4px; }
+
+    #snoredex-design-proposal .sd-input,
+    #snoredex-design-proposal .sd-select,
+    #snoredex-design-proposal .sd-textarea {
+      width: 100%;
+      min-height: 44px;
+      border: 1px solid var(--sd-control-border);
+      border-radius: 12px;
+      padding: 9px 11px;
+      background: var(--sd-surface);
+      color: var(--sd-ink);
+    }
+
+    #snoredex-design-proposal .sd-textarea { min-height: 92px; resize: vertical; }
+
+    #snoredex-design-proposal .sd-feedback {
+      display: grid;
+      gap: 8px;
+    }
+
+    #snoredex-design-proposal .sd-message {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 11px;
+      border-radius: 12px;
+      background: var(--sd-soft);
+    }
+
+    #snoredex-design-proposal .sd-message-error {
+      border-left: 4px solid var(--sd-danger);
+    }
+
+    #snoredex-design-proposal .sd-dialog-example {
+      padding: 16px;
+      border: 1px solid var(--sd-control-border);
+      border-radius: 18px;
+      background: var(--sd-surface);
+      box-shadow: 0 12px 28px var(--sd-shadow);
+    }
+
+    #snoredex-design-proposal .sd-dialog-example h3 { margin-top: 0; }
+    #snoredex-design-proposal .sd-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+
+    @media (max-width: 700px) {
+      #snoredex-design-proposal .sd-overview-grid,
+      #snoredex-design-proposal .sd-components-grid { grid-template-columns: 1fr; }
+
+      #snoredex-design-proposal .sd-benefits,
+      #snoredex-design-proposal .sd-steps { grid-template-columns: 1fr; }
+
+      #snoredex-design-proposal .sd-hero { grid-template-columns: 1fr; padding: 28px 18px; }
+      #snoredex-design-proposal .sd-hero-art { min-height: 220px; }
+
+      #snoredex-design-proposal .sd-sidebar { display: none; }
+      #snoredex-design-proposal .sd-mobile-browse { display: inline-flex; }
+      #snoredex-design-proposal .sd-collection-layout { grid-template-columns: 1fr; }
+      #snoredex-design-proposal .sd-filter-row { grid-template-columns: 1fr 1fr; }
+      #snoredex-design-proposal .sd-filter-row .sd-search-label { grid-column: 1 / -1; }
+    }
+
+    @media (max-width: 520px) {
+      #snoredex-design-proposal .sd-preview-controls,
+      #snoredex-design-proposal .sd-header { align-items: flex-start; flex-direction: column; }
+
+      #snoredex-design-proposal .sd-preview-themes { width: 100%; }
+      #snoredex-design-proposal .sd-preview-themes .btn { flex: 1; }
+      #snoredex-design-proposal .sd-preview-select { width: 100%; }
+      #snoredex-design-proposal .sd-overview,
+      #snoredex-design-proposal .sd-components,
+      #snoredex-design-proposal .sd-collection-main { padding: 16px; }
+
+      #snoredex-design-proposal .sd-swatches { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      #snoredex-design-proposal .sd-landing-preview { grid-template-columns: 72px minmax(0, 1fr); }
+      #snoredex-design-proposal .sd-landing-preview .sd-button { grid-column: 1 / -1; }
+      #snoredex-design-proposal .sd-item-row { grid-template-columns: 66px minmax(0, 1fr); }
+      #snoredex-design-proposal .sd-image-button { width: 66px; min-height: 94px; }
+      #snoredex-design-proposal .sd-image-button .sd-card-art { min-height: 94px; }
+      #snoredex-design-proposal .sd-item-actions { grid-column: 1 / -1; grid-template-columns: 1fr 1fr; }
+      #snoredex-design-proposal .sd-research-actions { grid-column: 1 / -1; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #snoredex-design-proposal .sd-product,
+      #snoredex-design-proposal .sd-image-button .sd-card-art { transition: none; }
+    }
+  </style>
+
+  <div class="sd-preview-controls">
+    <label class="sd-preview-field form-label">
+      <span>Example</span>
+      <select class="sd-preview-select form-select" data-design-view>
+        <option value="overview">Design system</option>
+        <option value="landing">Index page</option>
+        <option value="collection">Collection page</option>
+        <option value="components">Components & states</option>
+      </select>
+    </label>
+    <div class="sd-preview-themes" aria-label="Preview theme">
+      <button class="btn" type="button" data-theme-mode="system" aria-pressed="true">System</button>
+      <button class="btn" type="button" data-theme-mode="light" aria-pressed="false">Light</button>
+      <button class="btn" type="button" data-theme-mode="dark" aria-pressed="false">Dark</button>
+    </div>
+  </div>
+
+  <div class="sd-product">
+    <section data-design-panel="overview" aria-label="Design system proposal">
+      <div class="sd-overview">
+        <div class="sd-direction">
+          <div>
+            <h2>Snoredex design system</h2>
+            <p class="sd-muted">Cutesy, relaxed, collector-focused — friendly without becoming childish.</p>
+          </div>
+          <span class="sd-pill">Light + Dark</span>
+        </div>
+
+        <div class="sd-overview-grid">
+          <section class="sd-section-box">
+            <h3>Relaxo-inspired palette</h3>
+            <div class="sd-swatches" aria-label="Color tokens">
+              <div><div class="sd-swatch-block" style="background: var(--sd-page)"></div><div class="sd-swatch-name">Sleepy cream</div><div class="sd-swatch-value" data-light="#FBF8EE" data-dark="#172326">#FBF8EE</div></div>
+              <div><div class="sd-swatch-block" style="background: var(--sd-surface)"></div><div class="sd-swatch-name">Cloud surface</div><div class="sd-swatch-value" data-light="#FFFFFF" data-dark="#213136">#FFFFFF</div></div>
+              <div><div class="sd-swatch-block" style="background: var(--sd-primary)"></div><div class="sd-swatch-name">Dozy teal</div><div class="sd-swatch-value" data-light="#456F78" data-dark="#79AEB8">#456F78</div></div>
+              <div><div class="sd-swatch-block" style="background: var(--sd-accent)"></div><div class="sd-swatch-name">Seafoam</div><div class="sd-swatch-value" data-light="#A7C8B8" data-dark="#9CC2AF">#A7C8B8</div></div>
+              <div><div class="sd-swatch-block" style="background: var(--sd-highlight)"></div><div class="sd-swatch-name">Belly cream</div><div class="sd-swatch-value" data-light="#E8D69B" data-dark="#D8C78E">#E8D69B</div></div>
+              <div><div class="sd-swatch-block" style="background: var(--sd-danger)"></div><div class="sd-swatch-name">Soft coral</div><div class="sd-swatch-value" data-light="#AD5752" data-dark="#E28F87">#AD5752</div></div>
+            </div>
+          </section>
+
+          <section class="sd-section-box">
+            <h3>Typography</h3>
+            <div class="sd-type-sample">
+              <div><span class="sd-muted">Heading · Nunito Sans 500</span><br><strong>Your Snorlax collection</strong></div>
+              <div><span class="sd-muted">Body · Nunito Sans 400</span><br><span>Friendly, clear and comfortable for daily use.</span></div>
+              <div class="sd-tabular"><span class="sd-muted">Tabular numbers</span><br><strong>011/064 · 42/061 · ×02</strong></div>
+              <div class="sd-muted">Self-hosted font; system UI fallback.</div>
+            </div>
+          </section>
+
+          <section class="sd-section-box">
+            <h3>Shapes & depth</h3>
+            <div class="sd-shapes">
+              <div class="sd-shape sd-shape-control">12 px<br><span class="sd-muted">Controls</span></div>
+              <div class="sd-shape sd-shape-row">18 px<br><span class="sd-muted">Rows</span></div>
+              <div class="sd-shape sd-shape-hero">24 px<br><span class="sd-muted">Hero</span></div>
+            </div>
+            <p class="sd-muted">Tonal layers and subtle shadows. Pills only for status, tags and theme controls.</p>
+          </section>
+
+          <section class="sd-section-box">
+            <h3>Accessibility & motion</h3>
+            <ul class="sd-rules">
+              <li>WCAG 2.2 AA: text ≥ 4.5:1; controls and focus ≥ 3:1.</li>
+              <li>Color always paired with text or icon.</li>
+              <li>44 px minimum interactive targets and visible focus.</li>
+              <li>Short functional transitions only; no looping motion.</li>
+              <li>Reduced motion disables non-essential transitions.</li>
+            </ul>
+          </section>
+
+          <section class="sd-section-box">
+            <h3>Information architecture</h3>
+            <div class="sd-route" aria-label="Page structure">
+              <span class="sd-route-node">/ Index</span><span aria-hidden="true">→</span><span class="sd-route-node">/collection/</span>
+            </div>
+            <p class="sd-muted">Public search and filters stay in the collection URL. Private state never does.</p>
+          </section>
+
+          <section class="sd-section-box">
+            <h3>Design guardrails</h3>
+            <ul class="sd-rules">
+              <li>Do keep the English name primary and local name adjacent.</li>
+              <li>Do separate Research from collection progress.</li>
+              <li>Do use original abstract sleep imagery.</li>
+              <li>Don’t imply complete catalogue coverage.</li>
+              <li>Don’t copy official Pokémon artwork or UI styling.</li>
+            </ul>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section data-design-panel="landing" aria-label="Index page proposal" hidden>
+      <header class="sd-header">
+        <a class="sd-brand" href="#sd-home"><span class="sd-brand-mark" aria-hidden="true">zZ</span><span>Snoredex</span></a>
+        <nav class="sd-nav" aria-label="Main navigation">
+          <a href="#sd-how">How it works</a>
+          <a class="sd-external" href="#sd-data">Snoredex Data <span aria-hidden="true">↗</span><span class="sd-sr-only">External site</span></a>
+          <a class="sd-link-button sd-link-primary" href="#sd-collection">Open collection</a>
+          <button class="sd-theme-symbol" type="button" aria-label="Theme settings"><i data-lucide="sun-moon" aria-hidden="true"></i></button>
+        </nav>
+      </header>
+
+      <main>
+        <section class="sd-hero" id="sd-home">
+          <div class="sd-hero-copy">
+            <span class="sd-pill">Private by design</span>
+            <h1>Your Snorlax collection.<br>One checklist.</h1>
+            <p>Track current-known printings, keep your notes private, and explore the evidence behind the catalogue.</p>
+            <div class="sd-hero-actions">
+              <a class="sd-link-button sd-link-primary" href="#sd-collection">Open your collection</a>
+              <a class="sd-link-button" href="#sd-how">How it works</a>
+            </div>
+          </div>
+          <div class="sd-hero-art" role="img" aria-label="Abstract sleepy teal and cream collection illustration">
+            <span class="sd-mini-card" aria-hidden="true"></span>
+            <span class="sd-hero-belly" aria-hidden="true"></span>
+            <span class="sd-hero-z" aria-hidden="true">z z z</span>
+            <span class="sd-mini-check" aria-hidden="true">✓</span>
+          </div>
+        </section>
+
+        <section class="sd-landing-section">
+          <h2>Built for collectors</h2>
+          <div class="sd-benefits">
+            <div class="sd-benefit"><strong>Private by design</strong><span class="sd-muted">Statuses, quantities and notes stay in your browser.</span></div>
+            <div class="sd-benefit"><strong>Evidence-aware</strong><span class="sd-muted">Catalogue facts and Research remain visibly distinct.</span></div>
+            <div class="sd-benefit"><strong>Portable & recoverable</strong><span class="sd-muted">Export, validate and restore your collection safely.</span></div>
+          </div>
+        </section>
+
+        <section class="sd-landing-section" id="sd-how">
+          <h2>How it works</h2>
+          <div class="sd-steps">
+            <div class="sd-step"><span class="sd-pill">1</span><strong>Browse</strong><span class="sd-muted">Choose a locality, set and edition.</span></div>
+            <div class="sd-step"><span class="sd-pill">2</span><strong>Track</strong><span class="sd-muted">Save collection status, quantity and notes.</span></div>
+            <div class="sd-step"><span class="sd-pill">3</span><strong>Back up</strong><span class="sd-muted">Export a private, versioned recovery file.</span></div>
+          </div>
+        </section>
+
+        <section class="sd-landing-section">
+          <h2>A daily-driver checklist</h2>
+          <div class="sd-landing-preview">
+            <div class="sd-card-art" role="img" aria-label="Abstract card image placeholder"></div>
+            <div><strong>Snorlax</strong> <span class="sd-muted">Relaxo</span><br><span class="sd-muted sd-tabular">Jungle · 11/64 · English · Holo</span></div>
+            <button class="sd-button sd-button-primary" type="button">✓ Have</button>
+          </div>
+        </section>
+
+        <section class="sd-landing-section sd-landing-data" id="sd-data">
+          <div><h2>Catalogue data with provenance</h2><p class="sd-muted">Snoredex renders the reviewed public collector contract and links evidence corrections back to its owner.</p></div>
+          <a class="sd-link-button sd-external" href="#sd-external">Visit Snoredex Data <span aria-hidden="true">↗</span><span class="sd-sr-only">External site</span></a>
+        </section>
+      </main>
+
+      <footer class="sd-footer"><span>Snoredex checklist</span><span>English · Light and dark themes · Accessible by default</span></footer>
+    </section>
+
+    <section data-design-panel="collection" aria-label="Collection page proposal" hidden>
+      <header class="sd-header">
+        <a class="sd-brand" href="#sd-home"><span class="sd-brand-mark" aria-hidden="true">zZ</span><span>Snoredex</span></a>
+        <nav class="sd-nav" aria-label="Collection navigation">
+          <a href="#sd-home">Home</a>
+          <a class="sd-external" href="#sd-data">Snoredex Data <span aria-hidden="true">↗</span><span class="sd-sr-only">External site</span></a>
+          <button class="sd-theme-symbol" type="button" aria-label="Theme settings"><i data-lucide="sun-moon" aria-hidden="true"></i></button>
+        </nav>
+      </header>
+
+      <div class="sd-collection-layout">
+        <aside class="sd-sidebar" aria-label="Catalogue navigation">
+          <div class="sd-sidebar-title">Browse sets</div>
+          <ul class="sd-tree">
+            <li><button type="button" aria-expanded="true">▾ WEST</button>
+              <ul>
+                <li><button type="button" aria-current="page">Jungle</button></li>
+                <li><button type="button">Black Star Promos</button></li>
+              </ul>
+            </li>
+            <li><button type="button" aria-expanded="false">› JP locality</button></li>
+            <li><button type="button" aria-expanded="false">› CN locality</button></li>
+          </ul>
+          <div class="sd-provenance">Catalogue version<br><span class="sd-tabular">App · Producer · Fingerprint</span></div>
+        </aside>
+
+        <main class="sd-collection-main">
+          <button class="sd-button sd-mobile-browse" type="button"><i data-lucide="list-tree" aria-hidden="true"></i>Browse sets</button>
+
+          <div class="sd-collection-heading">
+            <div><h1>Jungle</h1><p class="sd-muted">WEST · English edition</p></div>
+            <button class="sd-button" type="button"><i data-lucide="database" aria-hidden="true"></i>Collection data</button>
+          </div>
+
+          <div class="sd-progress-copy sd-tabular">8 of 11 owned · 73% current-known</div>
+          <div class="sd-progress-track" role="progressbar" aria-label="Collection progress" aria-valuemin="0" aria-valuemax="11" aria-valuenow="8"><div class="sd-progress-fill"></div></div>
+          <div class="sd-muted">2 Research items · excluded from progress</div>
+
+          <div class="sd-filter-row">
+            <label class="sd-search-label"><span class="sd-sr-only">Search cards, sets and numbers</span><i data-lucide="search" aria-hidden="true"></i><input class="sd-search-input" type="search" placeholder="Search cards, sets, numbers…"></label>
+            <button class="sd-button" type="button"><i data-lucide="sliders-horizontal" aria-hidden="true"></i>Filters</button>
+            <select class="sd-select" aria-label="Collection status filter"><option>All statuses</option><option>Need</option><option>Ordered</option><option>Have</option><option>Skip</option></select>
+          </div>
+
+          <div class="sd-card-list">
+            <article class="sd-item-row sd-item-collected">
+              <button class="sd-image-button" type="button" aria-label="Enlarge image for Snorlax, Jungle 11 of 64"><span class="sd-card-art" role="img" aria-label="Abstract card image placeholder"></span></button>
+              <div>
+                <div class="sd-item-name"><strong>Snorlax</strong><span class="sd-muted">Relaxo</span></div>
+                <div class="sd-item-meta sd-tabular">11/64 · English · Holo</div>
+                <div class="sd-item-tags"><span class="sd-status sd-status-collected">✓ Have</span><span class="sd-pill">Exact printing</span></div>
+                <details class="sd-details"><summary>Details and sources</summary></details>
+              </div>
+              <div class="sd-item-actions">
+                <button class="sd-button sd-button-primary" type="button">✓ Have</button>
+                <div class="sd-quantity" aria-label="Quantity"><button type="button" aria-label="Decrease quantity">−</button><output aria-label="Quantity 2">2</output><button type="button" aria-label="Increase quantity">+</button></div>
+                <button class="sd-button" type="button">Add note</button>
+              </div>
+            </article>
+
+            <article class="sd-item-row">
+              <button class="sd-image-button" type="button" aria-label="Enlarge image for Snorlax, Jungle 11 of 64 reverse holo"><span class="sd-card-art" role="img" aria-label="Abstract card image placeholder"></span></button>
+              <div>
+                <div class="sd-item-name"><strong>Snorlax</strong><span class="sd-muted">Relaxo</span></div>
+                <div class="sd-item-meta sd-tabular">11/64 · English · Reverse Holo</div>
+                <div class="sd-item-tags"><span class="sd-status">○ Need</span><span class="sd-pill">Card-release image</span></div>
+                <details class="sd-details"><summary>Details and sources</summary></details>
+              </div>
+              <div class="sd-item-actions">
+                <button class="sd-button" type="button">Mark Have</button>
+                <button class="sd-button" type="button">Add note</button>
+              </div>
+            </article>
+
+            <article class="sd-item-row sd-item-research">
+              <div class="sd-card-art" role="img" aria-label="Placeholder for a Research item without an approved image"></div>
+              <div>
+                <div class="sd-item-name"><strong>Snorlax</strong><span class="sd-muted">Local name unknown</span></div>
+                <div class="sd-item-meta">Possible finish variation · identity not verified</div>
+                <div class="sd-item-tags"><span class="sd-status sd-status-research"><i data-lucide="search" aria-hidden="true"></i>Research</span></div>
+                <div class="sd-research-actions"><a class="sd-external" href="#sd-source">View evidence <span aria-hidden="true">↗</span></a><a class="sd-external" href="#sd-correction">Submit evidence or correction <span aria-hidden="true">↗</span></a></div>
+              </div>
+            </article>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <section data-design-panel="components" aria-label="Component and state proposal" hidden>
+      <div class="sd-components">
+        <h2>Components & states</h2>
+        <div class="sd-components-grid">
+          <section class="sd-component-group">
+            <h3>Actions</h3>
+            <div class="sd-component-row">
+              <button class="sd-button sd-button-primary" type="button">Primary action</button>
+              <button class="sd-button" type="button">Secondary</button>
+              <button class="sd-button sd-button-danger" type="button">Clear data</button>
+            </div>
+          </section>
+
+          <section class="sd-component-group">
+            <h3>Collection states</h3>
+            <div class="sd-component-row">
+              <span class="sd-status sd-status-collected">✓ Have</span>
+              <span class="sd-status">○ Need</span>
+              <span class="sd-status sd-status-research"><i data-lucide="search" aria-hidden="true"></i>Research</span>
+            </div>
+          </section>
+
+          <section class="sd-component-group">
+            <h3>Inputs</h3>
+            <div class="sd-form-stack">
+              <label class="sd-field"><span>Search</span><input class="sd-input" type="search" placeholder="Search cards, sets, numbers…"></label>
+              <label class="sd-field"><span>Status</span><select class="sd-select"><option>Need</option><option>Ordered</option><option>Have</option><option>Skip</option></select></label>
+              <label class="sd-field"><span>Private note</span><textarea class="sd-textarea" placeholder="Saved on blur or after 3 seconds"></textarea></label>
+            </div>
+          </section>
+
+          <section class="sd-component-group">
+            <h3>Feedback</h3>
+            <div class="sd-feedback">
+              <div class="sd-message"><span aria-hidden="true">✓</span><span><strong>Saved</strong><br><span class="sd-muted">Private state is stored locally.</span></span></div>
+              <div class="sd-message sd-message-error" role="alert"><span aria-hidden="true">!</span><span><strong>Couldn’t save this change</strong><br><span class="sd-muted">Your last saved data is unchanged. Try again.</span></span></div>
+            </div>
+          </section>
+
+          <section class="sd-component-group">
+            <h3>Portable collection data</h3>
+            <div class="sd-dialog-example" role="dialog" aria-labelledby="sd-dialog-title" aria-describedby="sd-dialog-copy">
+              <h3 id="sd-dialog-title">Replace collection data?</h3>
+              <p id="sd-dialog-copy" class="sd-muted">The file is valid. Your current collection will be backed up before replacement.</p>
+              <div class="sd-dialog-actions"><button class="sd-button" type="button">Cancel</button><button class="sd-button sd-button-primary" type="button">Back up and replace</button></div>
+            </div>
+          </section>
+
+          <section class="sd-component-group">
+            <h3>Content rules</h3>
+            <ul class="sd-rules">
+              <li>English product copy only.</li>
+              <li>English card name first; local name adjacent.</li>
+              <li>Evidence status only where it changes item meaning.</li>
+              <li>Errors use fixed safe copy, never raw input or logs.</li>
+              <li>External destinations are visibly marked.</li>
+            </ul>
+          </section>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="sd-sr-only" aria-live="polite" data-design-status>Design system example shown</div>
+
+  <script>
+    (() => {
+      const root = document.getElementById("snoredex-design-proposal");
+      const viewSelect = root.querySelector("[data-design-view]");
+      const panels = Array.from(root.querySelectorAll("[data-design-panel]"));
+      const themeButtons = Array.from(root.querySelectorAll("[data-theme-mode]"));
+      const colorValues = Array.from(root.querySelectorAll(".sd-swatch-value"));
+      const status = root.querySelector("[data-design-status]");
+      const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+
+      const viewLabels = {
+        overview: "Design system",
+        landing: "Index page",
+        collection: "Collection page",
+        components: "Components and states"
+      };
+
+      function showView(view) {
+        panels.forEach((panel) => { panel.hidden = panel.dataset.designPanel !== view; });
+        status.textContent = `${viewLabels[view]} example shown`;
+        if (window.lucide) window.lucide.createIcons({ attrs: { width: 16, height: 16 } });
+      }
+
+      function applyTheme(mode) {
+        const resolved = mode === "system" ? (systemDark.matches ? "dark" : "light") : mode;
+        root.dataset.resolvedTheme = resolved;
+        themeButtons.forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.themeMode === mode)));
+        colorValues.forEach((value) => { value.textContent = resolved === "dark" ? value.dataset.dark : value.dataset.light; });
+      }
+
+      viewSelect.addEventListener("change", () => showView(viewSelect.value));
+      themeButtons.forEach((button) => button.addEventListener("click", () => applyTheme(button.dataset.themeMode)));
+      systemDark.addEventListener("change", () => {
+        const systemButton = themeButtons.find((button) => button.dataset.themeMode === "system");
+        if (systemButton.getAttribute("aria-pressed") === "true") applyTheme("system");
+      });
+
+      showView("overview");
+      applyTheme("system");
+    })();
+  </script>
+</div>
+</body>
+</html>
