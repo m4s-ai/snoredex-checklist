@@ -5,13 +5,13 @@ A mobile-friendly, static checklist for the Snorlax current-known catalogue. Cat
 from [`m4s-ai/snoredex-data`](https://github.com/m4s-ai/snoredex-data); private collection state
 belongs only to this consumer and stays in the browser.
 
-## Status
+## Project status
 
-The project is in **PROPOSED / contract-first preparation**. There is no supported application,
-catalogue snapshot, or production deployment yet. Real catalogue integration is blocked until the
-producer contract and reviewed fixtures in
-[`snoredex-data#254`](https://github.com/m4s-ai/snoredex-data/issues/254) are accepted and a
-published artifact can be pinned by commit, semantic fingerprint, and exact-byte digest.
+Current implementation, contract, and deployment status lives in
+[`snoredex-checklist#2`](https://github.com/m4s-ai/snoredex-checklist/issues/2) and
+[`snoredex-data#254`](https://github.com/m4s-ai/snoredex-data/issues/254). Real catalogue
+integration requires an accepted producer contract and reviewed fixtures plus a published artifact
+pinned by commit, semantic fingerprint, and exact-byte digest.
 
 Do not use `analysis_checklist.json` as a production API and do not reconstruct producer truth from
 its internal stores. Prototype work may use only reviewed synthetic fixtures.

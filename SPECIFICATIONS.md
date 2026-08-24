@@ -37,16 +37,16 @@ locations:
 Do not create placeholder files merely to resemble this layout. Add an artifact when an accepted
 specification gives it content and an owning validation path.
 
-## Current specification register
+## Specification authorities
 
-| State | Specification | Next gate |
-| --- | --- | --- |
-| PROPOSED | [`snoredex-checklist#2`](https://github.com/m4s-ai/snoredex-checklist/issues/2) | Resolve the Phase 0 contract-freeze decisions and accept fixtures |
-| PROPOSED | [`snoredex-data#254`](https://github.com/m4s-ai/snoredex-data/issues/254) | Publish and verify the producer contract artifacts at an exact commit and digest |
+| Specification | Authority |
+| --- | --- |
+| [`snoredex-checklist#2`](https://github.com/m4s-ai/snoredex-checklist/issues/2) | Consumer product, private state, implementation and acceptance |
+| [`snoredex-data#254`](https://github.com/m4s-ai/snoredex-data/issues/254) | Producer contract semantics, artifacts, fixtures and publication evidence |
 
-The consumer may design state and reconciliation against reviewed synthetic fixtures while the
-producer contract is pending. It must not vendor or integrate real catalogue data before Phase 0 is
-accepted in both issues.
+Before the producer contract is accepted, consumer work is limited to reviewed synthetic fixtures.
+Real catalogue data may be vendored only after both issues record the required acceptance and
+publication evidence.
 
 ## From specification to verified release
 

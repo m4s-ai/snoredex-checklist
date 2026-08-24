@@ -3,10 +3,10 @@
 
 ## Status
 
-The product boundary is accepted in
-[`snoredex-checklist#2`](https://github.com/m4s-ai/snoredex-checklist/issues/2). The producer contract
-is still PROPOSED in [`snoredex-data#254`](https://github.com/m4s-ai/snoredex-data/issues/254), so
-field-level contract details and fixtures remain owned there.
+The product boundary and current implementation status live in
+[`snoredex-checklist#2`](https://github.com/m4s-ai/snoredex-checklist/issues/2). Field-level producer
+contract details, fixtures, and lifecycle status remain owned by
+[`snoredex-data#254`](https://github.com/m4s-ai/snoredex-data/issues/254).
 
 ## System context
 

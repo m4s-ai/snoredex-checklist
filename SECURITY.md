@@ -1,8 +1,8 @@
 <!-- doc: role=security and privacy policy; stage=stable -->
 # Security and privacy
 
-No supported release is deployed yet. Security and privacy boundaries still apply to every
-prototype and fixture.
+Supported-release and deployment status lives in the owning issues and release records. These
+security and privacy boundaries apply to every prototype, fixture, and release.
 
 ## Report a vulnerability
 

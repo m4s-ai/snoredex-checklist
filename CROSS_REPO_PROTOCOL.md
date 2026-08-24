@@ -33,14 +33,11 @@ means the producer artifact is published and rollback is known; optional `ADOPTE
 consumer commit/deployment and reconciliation result; `VERIFIED` proves both sides used the same
 artifact.
 
-## Current pair
+## Contract authorities
 
 - Consumer master: [`m4s-ai/snoredex-checklist#2`](https://github.com/m4s-ai/snoredex-checklist/issues/2)
 - Producer contract: [`m4s-ai/snoredex-data#254`](https://github.com/m4s-ai/snoredex-data/issues/254)
 - Historical decision: [`m4s-ai/snoredex-data#229`](https://github.com/m4s-ai/snoredex-data/issues/229)
-- State: `PROPOSED`
-- Proposed contract: `snoredex-collector-catalogue` 1.0.0
-- Fingerprint: `TBD`; no accepted or published artifact exists
 
-Production integration remains blocked until the pair records compatible accepted fixtures and a
-pinned published artifact.
+The issues own their current state, version, fingerprint, next action, and compatibility record.
+Production integration requires compatible accepted fixtures and a pinned published artifact.

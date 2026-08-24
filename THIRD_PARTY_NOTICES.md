@@ -16,4 +16,4 @@ this project's licence grants. They must not be published from this repository u
 issue records approval, provenance, required attribution, and the artifact preserves those notices.
 Use an accessible placeholder otherwise.
 
-No third-party runtime dependency or card-image asset is currently shipped by this repository.
+Record every shipped third-party runtime dependency and card-image asset here before publication.

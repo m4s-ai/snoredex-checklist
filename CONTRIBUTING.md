@@ -16,8 +16,8 @@ README, HANDOVER, and LESSONS documents.
 6. Inspect the diff and any catalogue/state-conservation report before requesting review.
 7. Record cross-repository lifecycle changes in both issues before merge or deployment.
 
-The repository has no application commands yet. Add commands to `README.md` and workflows together
-with the implementation that makes them true; do not document speculative tooling.
+Use the application commands documented in `README.md` and workflows. Add or change commands
+together with the implementation that makes them true; do not document speculative tooling.
 
 ## Pull-request contract
 
