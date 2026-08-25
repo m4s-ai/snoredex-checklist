@@ -227,6 +227,14 @@ function parseState(
     return fail("IMPORT_UNKNOWN_FIELD");
   }
   if (
+    !hasOwn(input, "datasetId") ||
+    !hasOwn(input, "catalogueFingerprint") ||
+    !hasOwn(input, "items") ||
+    (portable && (!hasOwn(input, "exportedAt") || !hasOwn(input, "appRevision")))
+  ) {
+    return fail("IMPORT_INVALID_STATE_DATA");
+  }
+  if (
     input.datasetId !== PRIVATE_DATASET_ID ||
     !isValidFingerprint(input.catalogueFingerprint) ||
     !Array.isArray(input.items)
@@ -361,6 +369,9 @@ function currentRecord(itemId: string, current?: PrivateItemState): StateResult<
   }
   if (current === undefined) {
     return ok({ itemId, status: "need", quantityOwned: 0, quantityOrdered: 0 });
+  }
+  if (current.itemId !== itemId) {
+    return fail("IMPORT_INVALID_STATE_DATA");
   }
   const result = normalizeRecordForImport(current);
   if (!result.ok) {

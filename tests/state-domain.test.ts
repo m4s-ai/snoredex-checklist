@@ -80,6 +80,22 @@ test("quantity edits validate before deriving status and prune only the implicit
   });
 });
 
+test("rejects edits whose requested item ID differs from the current record", () => {
+  const other = { itemId: itemB, status: "have" as const, quantityOwned: 1, quantityOrdered: 0 };
+  assert.deepEqual(applyStatusCommand(itemA, other, "need"), {
+    ok: false,
+    error: "IMPORT_INVALID_STATE_DATA",
+  });
+  assert.deepEqual(applyQuantityEdit(itemA, other, 0, 1), {
+    ok: false,
+    error: "IMPORT_INVALID_STATE_DATA",
+  });
+  assert.deepEqual(applyNoteEdit(itemA, other, "private"), {
+    ok: false,
+    error: "IMPORT_INVALID_STATE_DATA",
+  });
+});
+
 test("notes preserve meaningful multiline text and remove whitespace-only values", () => {
   const meaningful = applyNoteEdit(itemA, undefined, "  first\r\nsecond\r  ");
   assert.deepEqual(meaningful, {
@@ -164,4 +180,22 @@ test("portable serialization and validation retain fixed diagnostic metadata", (
     ok: false,
     error: "IMPORT_INVALID_STATE_DATA",
   });
+});
+
+test("requires envelope fields to be own properties", () => {
+  const inherited = Object.create({ datasetId: PRIVATE_DATASET_ID, catalogueFingerprint: fingerprint, items: [] }) as Record<string, unknown>;
+  inherited.schema = PRIVATE_STATE_SCHEMA;
+  inherited.schemaVersion = PRIVATE_STATE_VERSION;
+  assert.deepEqual(validatePrivateState(inherited), { ok: false, error: "IMPORT_INVALID_STATE_DATA" });
+
+  const portableInherited = Object.create({
+    datasetId: PRIVATE_DATASET_ID,
+    catalogueFingerprint: fingerprint,
+    exportedAt: "2026-08-25T18:00:00.000Z",
+    appRevision: "b".repeat(40),
+    items: [],
+  }) as Record<string, unknown>;
+  portableInherited.schema = PRIVATE_STATE_SCHEMA;
+  portableInherited.schemaVersion = PRIVATE_STATE_VERSION;
+  assert.deepEqual(validatePortableState(portableInherited), { ok: false, error: "IMPORT_INVALID_STATE_DATA" });
 });
