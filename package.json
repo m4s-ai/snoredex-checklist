@@ -22,7 +22,7 @@
   "scripts": {
     "check": "npm run typecheck && npm test && npm run smoke",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/catalogue-validator.test.ts tests/catalogue-sync.test.ts",
+    "test": "node --test tests/catalogue-validator.test.ts tests/catalogue-sync.test.ts tests/state-domain.test.ts",
     "smoke": "node tests/toolchain-smoke.ts",
     "sync:catalogue": "node scripts/sync-catalogue.ts"
   },
