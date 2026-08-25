@@ -219,6 +219,20 @@ test("coordinates the complete cross-tab commit through one lock", async () => {
   assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(2) });
 });
 
+test("rejects an unobserved existing envelope instead of adopting it as a baseline", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+
+  const uninitialized = new OrderedStateStore(storage);
+  assert.deepEqual(await uninitialized.saveImmediate(state(2)), {
+    ok: false,
+    error: "STORAGE_COMMIT_UNCERTAIN",
+  });
+  assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(1) });
+  assert.deepEqual(uninitialized.unsaved(), state(2));
+});
+
 test("quota and read-back failures preserve the last known-good state", async () => {
   const storage = new FakeStorage();
   const store = new OrderedStateStore(storage);

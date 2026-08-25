@@ -287,12 +287,24 @@ export class OrderedStateStore {
     } catch {
       return error("STORAGE_UNAVAILABLE");
     }
-    if (this.hasObservedRaw && previous !== this.observedRaw) {
-      return error("STORAGE_COMMIT_UNCERTAIN");
-    }
     if (!this.hasObservedRaw) {
+      if (previous !== null) {
+        let previousCandidate: unknown;
+        try {
+          previousCandidate = JSON.parse(previous) as unknown;
+        } catch {
+          return error("LOCAL_STATE_UNREADABLE");
+        }
+        const previousState = validatePrivateState(previousCandidate);
+        if (!previousState.ok) {
+          return error(classifyStateError(previousState.error));
+        }
+        return error("STORAGE_COMMIT_UNCERTAIN");
+      }
       this.observedRaw = previous;
       this.hasObservedRaw = true;
+    } else if (previous !== this.observedRaw) {
+      return error("STORAGE_COMMIT_UNCERTAIN");
     }
     if (previous !== null) {
       let previousCandidate: unknown;
