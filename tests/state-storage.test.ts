@@ -107,6 +107,26 @@ class FakeLock implements StorageLockLike {
   }
 }
 
+class BlockingLock implements StorageLockLike {
+  private gate: Promise<void>;
+  private releaseGate!: () => void;
+
+  public constructor() {
+    this.gate = new Promise<void>((resolve) => {
+      this.releaseGate = resolve;
+    });
+  }
+
+  public release(): void {
+    this.releaseGate();
+  }
+
+  public async request<T>(_name: string, callback: () => Promise<T>): Promise<T> {
+    await this.gate;
+    return callback();
+  }
+}
+
 class FakeClock implements TimerClock {
   private now = 0;
   private next = 0;
@@ -198,6 +218,17 @@ test("keeps pending recovery records separate across tabs", async () => {
   assert.deepEqual(secondTab.unsaved(), state(0, "second tab"));
 });
 
+test("does not let a tab discard another tab's orphaned recovery draft", () => {
+  const storage = new FakeStorage();
+  const firstTab = new OrderedStateStore(storage);
+  firstTab.scheduleNoteSave(state(0, "keep this draft"));
+  const secondTab = new OrderedStateStore(storage);
+  assert.deepEqual(secondTab.read(), { ok: true, value: undefined });
+  assert.deepEqual(secondTab.unsaved(), state(0, "keep this draft"));
+  secondTab.discardUnsavedDraft();
+  assert.equal(storage.draftValues.size, 1);
+});
+
 test("durable recovery restores its original concurrency baseline", async () => {
   const storage = new FakeStorage();
   const clock = new FakeClock();
@@ -258,6 +289,36 @@ test("allows an explicit discard of a recovered draft", () => {
   assert.equal(storage.draftValues.size, 0);
   assert.equal(store.unsaved(), undefined);
   assert.equal(store.hasPendingNote(), false);
+});
+
+test("clears its superseded recovery draft only after an immediate save succeeds", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+  const store = new OrderedStateStore(storage);
+  assert.deepEqual(store.read(), { ok: true, value: state(1) });
+  store.scheduleNoteSave(state(1, "superseded note"));
+  assert.equal(storage.draftValues.size, 1);
+  assert.deepEqual(await store.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
+  assert.equal(storage.draftValues.size, 0);
+  assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(2) });
+});
+
+test("skips a note flush discarded while waiting for the cross-tab lock", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+  const lock = new BlockingLock();
+  storage.withLock = <T>(callback: () => Promise<T>) => lock.request(PRIVATE_STATE_LOCK_NAME, callback);
+  const store = new OrderedStateStore(storage);
+  assert.deepEqual(store.read(), { ok: true, value: state(1) });
+  store.scheduleNoteSave(state(1, "discarded while locked"));
+  const flush = store.flushNote();
+  await Promise.resolve();
+  store.discardUnsavedDraft();
+  lock.release();
+  assert.deepEqual(await flush, { ok: true, value: { state: state(1), skipped: true } });
+  assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(1) });
 });
 
 test("keeps the previous durable draft when replacing it fails", async () => {
