@@ -9,6 +9,9 @@ export const PRIVATE_STATE_STORAGE_KEY = "snoredex-checklist.private-state";
 export const PRIVATE_STATE_LOCK_NAME = "snoredex-checklist.private-state-write";
 export const PRIVATE_STATE_NOTE_DRAFT_KEY = "snoredex-checklist.private-state.note-draft";
 export const NOTE_AUTOSAVE_DELAY_MS = 3_000;
+/** A pending draft is considered owned while its tab refreshes this lease. */
+export const DRAFT_OWNER_LEASE_MS = 30_000;
+const DRAFT_OWNER_HEARTBEAT_MS = 5_000;
 
 const PRIVATE_STATE_NOTE_DRAFT_SCHEMA = "snoredex-checklist.pending-note";
 const PRIVATE_STATE_NOTE_DRAFT_VERSION = 1;
@@ -107,7 +110,12 @@ function createDraftId(): string {
 }
 
 const browserClock: TimerClock = {
-  setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+  setTimeout: (callback, delayMs) => {
+    const handle = globalThis.setTimeout(callback, delayMs);
+    // Do not keep non-browser runtimes alive solely for a recovery lease heartbeat.
+    (handle as unknown as { unref?: () => void }).unref?.();
+    return handle;
+  },
   clearTimeout: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>),
 };
 
@@ -215,6 +223,7 @@ export class OrderedStateStore {
   private lastKnownGood: PrivateState | undefined;
   private unsavedDraft: PrivateState | undefined;
   private pendingNote: PendingNote | undefined;
+  private draftHeartbeatTimer: unknown;
   private activeDraftReference: DraftReference | undefined;
   private activeDraftOwned = false;
   private observedRaw: string | null | undefined;
@@ -303,9 +312,12 @@ export class OrderedStateStore {
       this.lastKnownGood = previousLastKnownGood;
       return error("STORAGE_WRITE_FAILED");
     }
-    if (previousReference !== undefined && persistedReference?.key !== previousReference.key) {
+    if (previousReference !== undefined
+      && persistedReference?.key !== previousReference.key
+      && (previousReference.draftId === this.draftId || !this.isDraftOwnerActive(previousReference))) {
       this.clearPendingNoteDraft(previousReference);
     }
+    this.startDraftHeartbeat();
     return success(draft);
   }
 
@@ -350,6 +362,7 @@ export class OrderedStateStore {
       }
     }, NOTE_AUTOSAVE_DELAY_MS);
     this.pendingNote = { state: cloneState(state), generation, timer, draftToken, draftStorageReference };
+    this.startDraftHeartbeat();
   }
 
   /** Flush on blur or pagehide; callers may ignore the returned promise for pagehide. */
@@ -366,7 +379,7 @@ export class OrderedStateStore {
     if (pending === undefined || pending.generation !== generation) {
       return Promise.resolve(success({ state: this.lastReadable(), skipped: true }));
     }
-    this.cancelPendingNote();
+    this.cancelPendingNote(true);
     return this.enqueue(pending.state, {
       kind: "note",
       generation: pending.generation,
@@ -375,10 +388,13 @@ export class OrderedStateStore {
     });
   }
 
-  private cancelPendingNote(): void {
+  private cancelPendingNote(keepDraftHeartbeat = false): void {
     if (this.pendingNote !== undefined) {
       this.clock.clearTimeout(this.pendingNote.timer);
       this.pendingNote = undefined;
+    }
+    if (!keepDraftHeartbeat) {
+      this.stopDraftHeartbeat();
     }
   }
 
@@ -424,6 +440,45 @@ export class OrderedStateStore {
     }
   }
 
+  private startDraftHeartbeat(): void {
+    if (this.draftHeartbeatTimer !== undefined || !this.activeDraftOwned) {
+      return;
+    }
+    this.draftHeartbeatTimer = this.clock.setTimeout(() => {
+      this.draftHeartbeatTimer = undefined;
+      if (!this.activeDraftOwned || this.unsavedDraft === undefined) {
+        return;
+      }
+      this.persistPendingNoteDraft(this.unsavedDraft);
+      this.startDraftHeartbeat();
+    }, DRAFT_OWNER_HEARTBEAT_MS);
+  }
+
+  private stopDraftHeartbeat(): void {
+    if (this.draftHeartbeatTimer !== undefined) {
+      this.clock.clearTimeout(this.draftHeartbeatTimer);
+      this.draftHeartbeatTimer = undefined;
+    }
+  }
+
+  private isDraftOwnerActive(reference: DraftReference): boolean {
+    if (reference.draftId === this.draftId) {
+      return true;
+    }
+    try {
+      const draftStorage = this.storage.draftStorage;
+      const raw = draftStorage?.getItem(reference.key);
+      if (raw === null || raw === undefined) {
+        return false;
+      }
+      const parsed = this.parseDraftReference({ ...reference, value: raw });
+      return parsed !== undefined && Date.now() - parsed.updatedAt <= DRAFT_OWNER_LEASE_MS;
+    } catch {
+      // An unreadable owner marker is not evidence that a foreign tab is live.
+      return false;
+    }
+  }
+
   private clearPendingNoteDraft(expectedReference: DraftReference | undefined): void {
     if (expectedReference === undefined) {
       return;
@@ -436,6 +491,7 @@ export class OrderedStateStore {
           && this.activeDraftReference.value === expectedReference.value) {
           this.activeDraftReference = undefined;
           this.activeDraftOwned = false;
+          this.stopDraftHeartbeat();
         }
       }
     } catch {

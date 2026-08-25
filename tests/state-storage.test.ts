@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  DRAFT_OWNER_LEASE_MS,
   NOTE_AUTOSAVE_DELAY_MS,
   OrderedStateStore,
   PRIVATE_STATE_STORAGE_KEY,
@@ -266,6 +267,12 @@ test("allows an explicit rebase after a recovered draft conflicts", async () => 
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
 
+  const foreignKey = [...storage.draftValues.keys()][0];
+  const foreignRecord = JSON.parse(storage.draftValues.get(foreignKey) as string) as Record<string, unknown>;
+  storage.draftValues.set(foreignKey, JSON.stringify({
+    ...foreignRecord,
+    updatedAt: Date.now() - DRAFT_OWNER_LEASE_MS - 1,
+  }));
   const recovered = new OrderedStateStore(storage);
   assert.deepEqual(recovered.read(), { ok: true, value: state(2) });
   assert.deepEqual(await recovered.saveImmediate(state(1, "draft to rebase")), {
@@ -280,6 +287,30 @@ test("allows an explicit rebase after a recovered draft conflicts", async () => 
   });
   assert.equal(storage.draftValues.size, 0);
   assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(1, "draft to rebase") });
+});
+
+test("preserves a live foreign recovery draft during rebase", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1) });
+  writer.scheduleNoteSave(state(1, "live draft"));
+
+  const otherTab = new OrderedStateStore(storage);
+  assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
+  assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
+
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: state(2) });
+  assert.deepEqual(recovered.rebaseUnsavedDraft(), { ok: true, value: state(1, "live draft") });
+  assert.equal(storage.draftValues.size, 2);
+  assert.deepEqual(await recovered.saveImmediate(state(1, "live draft")), {
+    ok: true,
+    value: { state: state(1, "live draft") },
+  });
+  assert.equal(storage.draftValues.size, 1);
 });
 
 test("keeps the old baseline when rebasing cannot persist the replacement draft", async () => {
