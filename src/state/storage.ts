@@ -10,6 +10,9 @@ export const PRIVATE_STATE_LOCK_NAME = "snoredex-checklist.private-state-write";
 export const PRIVATE_STATE_NOTE_DRAFT_KEY = "snoredex-checklist.private-state.note-draft";
 export const NOTE_AUTOSAVE_DELAY_MS = 3_000;
 
+const PRIVATE_STATE_NOTE_DRAFT_SCHEMA = "snoredex-checklist.pending-note";
+const PRIVATE_STATE_NOTE_DRAFT_VERSION = 1;
+
 export const PERSISTENCE_ERROR_CODES = [
   "LOCAL_STATE_UNSUPPORTED",
   "LOCAL_STATE_UNREADABLE",
@@ -58,12 +61,22 @@ interface PendingNote {
   readonly generation: number;
   readonly timer: unknown;
   readonly draftToken: number;
+  readonly draftStorageValue: string | undefined;
 }
 
 interface SaveOperation {
   readonly kind: "immediate" | "note";
   readonly generation: number;
   readonly draftToken: number;
+  readonly draftStorageValue: string | undefined;
+}
+
+interface PendingNoteDraftRecord {
+  readonly schema: typeof PRIVATE_STATE_NOTE_DRAFT_SCHEMA;
+  readonly schemaVersion: typeof PRIVATE_STATE_NOTE_DRAFT_VERSION;
+  readonly state: unknown;
+  readonly hasObservedRaw: boolean;
+  readonly observedRaw: string | null;
 }
 
 const browserClock: TimerClock = {
@@ -108,23 +121,19 @@ export function getBrowserStorage(): PersistenceResult<StorageLike> {
     if (typeof globalThis.localStorage === "undefined") {
       return error("STORAGE_UNAVAILABLE");
     }
-    if (typeof globalThis.sessionStorage === "undefined") {
-      return error("STORAGE_UNAVAILABLE");
-    }
     const locks = getBrowserLockManager();
     if (locks === undefined) {
       return error("STORAGE_UNAVAILABLE");
     }
     const storage = globalThis.localStorage;
-    const draftStorage = globalThis.sessionStorage;
     return success({
       getItem: (key) => storage.getItem(key),
       setItem: (key, value) => storage.setItem(key, value),
       withLock: (callback) => locks.request(PRIVATE_STATE_LOCK_NAME, callback),
       draftStorage: {
-        getItem: (key) => draftStorage.getItem(key),
-        setItem: (key, value) => draftStorage.setItem(key, value),
-        removeItem: (key) => draftStorage.removeItem(key),
+        getItem: (key) => storage.getItem(key),
+        setItem: (key, value) => storage.setItem(key, value),
+        removeItem: (key) => storage.removeItem(key),
       },
     });
   } catch {
@@ -214,23 +223,29 @@ export class OrderedStateStore {
 
   public saveImmediate(state: PrivateState): Promise<SaveResult> {
     const generation = ++this.immediateGeneration;
+    const previousDraft = this.readPendingNoteDraft();
     this.cancelPendingNote();
-    this.clearPendingNoteDraft();
     const draftToken = this.rememberDraft(state);
-    return this.enqueue(state, { kind: "immediate", generation, draftToken });
+    return this.enqueue(state, {
+      kind: "immediate",
+      generation,
+      draftToken,
+      draftStorageValue: this.draftMatchesState(previousDraft, state) ? previousDraft : undefined,
+    });
   }
 
   public scheduleNoteSave(state: PrivateState): void {
     const generation = ++this.noteGeneration;
     this.cancelPendingNote();
     const draftToken = this.rememberDraft(state);
-    this.persistPendingNoteDraft(state);
+    const previousDraft = this.readPendingNoteDraft();
+    const draftStorageValue = this.persistPendingNoteDraft(state) ?? previousDraft;
     const timer = this.clock.setTimeout(() => {
       if (this.pendingNote?.generation === generation) {
         void this.flushNoteForGeneration(generation);
       }
     }, NOTE_AUTOSAVE_DELAY_MS);
-    this.pendingNote = { state: cloneState(state), generation, timer, draftToken };
+    this.pendingNote = { state: cloneState(state), generation, timer, draftToken, draftStorageValue };
   }
 
   /** Flush on blur or pagehide; callers may ignore the returned promise for pagehide. */
@@ -247,21 +262,19 @@ export class OrderedStateStore {
     if (pending === undefined || pending.generation !== generation) {
       return Promise.resolve(success({ state: this.lastReadable(), skipped: true }));
     }
-    this.cancelPendingNote(false);
+    this.cancelPendingNote();
     return this.enqueue(pending.state, {
       kind: "note",
       generation: pending.generation,
       draftToken: pending.draftToken,
+      draftStorageValue: pending.draftStorageValue,
     });
   }
 
-  private cancelPendingNote(clearDraft = true): void {
+  private cancelPendingNote(): void {
     if (this.pendingNote !== undefined) {
       this.clock.clearTimeout(this.pendingNote.timer);
       this.pendingNote = undefined;
-    }
-    if (clearDraft) {
-      this.clearPendingNoteDraft();
     }
   }
 
@@ -272,25 +285,68 @@ export class OrderedStateStore {
     return draftToken;
   }
 
-  private persistPendingNoteDraft(state: PrivateState): void {
+  private persistPendingNoteDraft(state: PrivateState): string | undefined {
     const draftStorage = this.storage.draftStorage;
     if (draftStorage === undefined) {
-      return;
+      return undefined;
     }
     const serialized = serializePrivateState(state);
     if (!serialized.ok) {
-      return;
+      return undefined;
     }
+    if (this.hasObservedRaw && this.observedRaw === undefined) {
+      return undefined;
+    }
+    const record: PendingNoteDraftRecord = {
+      schema: PRIVATE_STATE_NOTE_DRAFT_SCHEMA,
+      schemaVersion: PRIVATE_STATE_NOTE_DRAFT_VERSION,
+      state: JSON.parse(serialized.value) as unknown,
+      hasObservedRaw: this.hasObservedRaw,
+      observedRaw: this.hasObservedRaw ? this.observedRaw ?? null : null,
+    };
     try {
-      draftStorage.setItem(PRIVATE_STATE_NOTE_DRAFT_KEY, serialized.value);
+      const value = JSON.stringify(record);
+      draftStorage.setItem(PRIVATE_STATE_NOTE_DRAFT_KEY, value);
+      return value;
     } catch {
       // Keep the in-memory draft and let the canonical save report its own result.
+      return undefined;
     }
   }
 
-  private clearPendingNoteDraft(): void {
+  private readPendingNoteDraft(): string | undefined {
     try {
-      this.storage.draftStorage?.removeItem(PRIVATE_STATE_NOTE_DRAFT_KEY);
+      return this.storage.draftStorage?.getItem(PRIVATE_STATE_NOTE_DRAFT_KEY) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private draftMatchesState(raw: string | undefined, state: PrivateState): boolean {
+    if (raw === undefined) {
+      return false;
+    }
+    try {
+      const candidate = JSON.parse(raw) as Partial<PendingNoteDraftRecord>;
+      const serialized = serializePrivateState(state);
+      return serialized.ok
+        && candidate.schema === PRIVATE_STATE_NOTE_DRAFT_SCHEMA
+        && candidate.schemaVersion === PRIVATE_STATE_NOTE_DRAFT_VERSION
+        && JSON.stringify(candidate.state) === serialized.value;
+    } catch {
+      return false;
+    }
+  }
+
+  private clearPendingNoteDraft(expectedValue: string | undefined): void {
+    if (expectedValue === undefined) {
+      return;
+    }
+    try {
+      const draftStorage = this.storage.draftStorage;
+      if (draftStorage?.getItem(PRIVATE_STATE_NOTE_DRAFT_KEY) === expectedValue) {
+        draftStorage.removeItem(PRIVATE_STATE_NOTE_DRAFT_KEY);
+      }
     } catch {
       // A successful canonical save remains authoritative even if cleanup fails.
     }
@@ -311,10 +367,33 @@ export class OrderedStateStore {
       return;
     }
     try {
-      const candidate = JSON.parse(raw) as unknown;
-      const validated = validatePrivateState(candidate);
+      const candidate = JSON.parse(raw) as Partial<PendingNoteDraftRecord>;
+      if (
+        candidate.schema !== PRIVATE_STATE_NOTE_DRAFT_SCHEMA
+        || candidate.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_VERSION
+        || typeof candidate.hasObservedRaw !== "boolean"
+        || (candidate.hasObservedRaw
+          ? (typeof candidate.observedRaw !== "string" && candidate.observedRaw !== null)
+          : candidate.observedRaw !== null)
+      ) {
+        return;
+      }
+      const validated = validatePrivateState(candidate.state);
       if (validated.ok) {
+        if (candidate.hasObservedRaw && typeof candidate.observedRaw === "string") {
+          let baselineCandidate: unknown;
+          try {
+            baselineCandidate = JSON.parse(candidate.observedRaw) as unknown;
+          } catch {
+            return;
+          }
+          if (!validatePrivateState(baselineCandidate).ok) {
+            return;
+          }
+        }
         this.unsavedDraft = cloneState(validated.value);
+        this.hasObservedRaw = candidate.hasObservedRaw;
+        this.observedRaw = candidate.hasObservedRaw ? candidate.observedRaw : undefined;
       }
     } catch {
       // Ignore an unusable recovery draft without touching the canonical state.
@@ -332,7 +411,7 @@ export class OrderedStateStore {
       return this.commit(state).then((result) => {
         if (result.ok && operation.draftToken === this.latestDraftToken) {
           this.unsavedDraft = undefined;
-          this.clearPendingNoteDraft();
+          this.clearPendingNoteDraft(operation.draftStorageValue);
         }
         return result;
       });
