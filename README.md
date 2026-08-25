@@ -43,9 +43,19 @@ to those issues instead of copying changing decisions into a second source of tr
 
 ## Development
 
-There is intentionally no install or build command yet: the implementation stack and executable
-contract have not crossed their acceptance gates. Follow [`CONTRIBUTING.md`](CONTRIBUTING.md) and
-the owning issue. Commands belong here and in workflows once the code that implements them exists.
+The executable baseline is Node.js 26.7.0 with its bundled npm 11.19.0 and TypeScript 7.0.2. The
+exact Node version is also recorded in `.node-version`; unsupported Node or npm versions fail the
+repository commands. Node 26 patch updates, including its later LTS release, are reviewed toolchain
+changes rather than a switch to another major version.
+
+```sh
+npm ci
+npm run check
+```
+
+`npm run check` type-checks the repository and runs the deterministic toolchain smoke check. It
+does not fetch producer catalogue data or build an application artifact. Follow
+[`CONTRIBUTING.md`](CONTRIBUTING.md) and the owning issue before adding implementation commands.
 
 ## Licensing
 
