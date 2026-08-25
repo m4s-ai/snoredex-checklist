@@ -1,0 +1,444 @@
+{
+  "meta": {
+    "schema": "snoredex-collector-catalogue-fixture",
+    "schemaVersion": "1.0.0"
+  },
+  "catalogue": {
+    "meta": {
+      "schema": "snoredex-collector-catalogue",
+      "schemaVersion": "1.0.0",
+      "datasetId": "fixture",
+      "sourceRepository": "https://github.com/m4s-ai/snoredex-data",
+      "dataAsOf": "2026-08-24",
+      "catalogueFingerprint": "sha256:c9317230775c5e58a5101e0d68a4c4a10029a217e00138185d475761f61a22a3",
+      "previousFingerprint": null,
+      "assetBaseUrl": "https://m4s-ai.github.io/snoredex-data/",
+      "scope": {
+        "policy": "positive-evidence/current-known",
+        "allLocalitiesComplete": false,
+        "absenceIsNotEvidence": true
+      },
+      "licenceRefs": [
+        "LICENSE.md",
+        "THIRD_PARTY_NOTICES.md"
+      ]
+    },
+    "localizations": [
+      {
+        "localizationId": "fixture-loc-west-es",
+        "locality": "WEST",
+        "languageId": "LANG:Spanish",
+        "language": "Spanish",
+        "languageTag": "es-ES",
+        "script": "Latn",
+        "displayName": "Spanish (Europe)",
+        "displayOrder": 10
+      },
+      {
+        "localizationId": "fixture-loc-latam-es",
+        "locality": "LATAM",
+        "languageId": "LANG:Spanish",
+        "language": "Spanish",
+        "languageTag": "es-419",
+        "script": "Latn",
+        "displayName": "Spanish (Latin America)",
+        "displayOrder": 20
+      },
+      {
+        "localizationId": "fixture-loc-west-en",
+        "locality": "WEST",
+        "languageId": "LANG:English",
+        "language": "English",
+        "languageTag": "en",
+        "script": "Latn",
+        "displayName": "English",
+        "displayOrder": 30
+      },
+      {
+        "localizationId": "fixture-loc-west-pt",
+        "locality": "WEST",
+        "languageId": "LANG:Portuguese",
+        "language": "Portuguese",
+        "languageTag": "pt",
+        "script": "Latn",
+        "displayName": "Portuguese",
+        "displayOrder": 40
+      },
+      {
+        "localizationId": "fixture-loc-cn-zh-hans",
+        "locality": "CN",
+        "languageId": "LANG:S-Chinese",
+        "language": "S-Chinese",
+        "languageTag": "zh-Hans",
+        "script": "Hans",
+        "displayName": "Chinese (Simplified)",
+        "displayOrder": 50
+      },
+      {
+        "localizationId": "fixture-loc-tw-zh-hant",
+        "locality": "TW",
+        "languageId": "LANG:T-Chinese",
+        "language": "T-Chinese",
+        "languageTag": "zh-Hant",
+        "script": "Hant",
+        "displayName": "Chinese (Traditional)",
+        "displayOrder": 60
+      }
+    ],
+    "localSets": [
+      {
+        "localSetId": "fixture-set-1",
+        "locality": "WEST",
+        "localSetCode": "FX",
+        "localSetName": "Fixture Set",
+        "productKind": "fixture",
+        "identityState": "identified",
+        "sourceRefs": [
+          "fixture-source"
+        ],
+        "sortKey": "1"
+      },
+      {
+        "localSetId": "fixture-set-2",
+        "locality": "LATAM",
+        "localSetCode": "FX",
+        "localSetName": "Fixture Set",
+        "productKind": "fixture",
+        "identityState": "identified",
+        "sourceRefs": [
+          "fixture-source"
+        ],
+        "sortKey": "2"
+      },
+      {
+        "localSetId": "fixture-set-3",
+        "locality": "WEST",
+        "localSetCode": "FX",
+        "localSetName": "Fixture Set",
+        "productKind": "fixture",
+        "identityState": "identified",
+        "sourceRefs": [
+          "fixture-source"
+        ],
+        "sortKey": "3"
+      }
+    ],
+    "setEditions": [
+      {
+        "setEditionId": "fixture-edition-1",
+        "localSetId": "fixture-set-1",
+        "localizationId": "fixture-loc-west-es",
+        "localSetCode": "FX",
+        "localSetName": "Fixture Set",
+        "identityState": "identified",
+        "releaseDate": "2026-01-01",
+        "releaseDatePrecision": "day",
+        "releaseApproximate": false,
+        "releaseEventId": "fixture-event-1",
+        "sortKey": "1"
+      },
+      {
+        "setEditionId": "fixture-edition-2",
+        "localSetId": "fixture-set-2",
+        "localizationId": "fixture-loc-latam-es",
+        "localSetCode": "FX",
+        "localSetName": "Fixture Set",
+        "identityState": "identified",
+        "releaseDate": "2026-01-01",
+        "releaseDatePrecision": "day",
+        "releaseApproximate": false,
+        "releaseEventId": "fixture-event-2",
+        "sortKey": "2"
+      },
+      {
+        "setEditionId": "fixture-edition-3",
+        "localSetId": "fixture-set-3",
+        "localizationId": "fixture-loc-west-en",
+        "localSetCode": "FX",
+        "localSetName": "Fixture Set",
+        "identityState": "identified",
+        "releaseDate": "2026-01-01",
+        "releaseDatePrecision": "day",
+        "releaseApproximate": false,
+        "releaseEventId": "fixture-event-3",
+        "sortKey": "3"
+      }
+    ],
+    "works": [
+      {
+        "workId": "fixture-work",
+        "cardKey": "fixture-work",
+        "displayName": "Snorlax"
+      }
+    ],
+    "items": [
+      {
+        "itemId": "item-00000000-0000-5000-8000-000000000001",
+        "legacyChecklistIds": [],
+        "active": true,
+        "itemKind": "verified-printing",
+        "progressClass": "current-known",
+        "workId": "fixture-work",
+        "workMappingState": "mapped",
+        "setEditionId": "fixture-edition-1",
+        "localSetId": "fixture-set-1",
+        "cardReleaseId": "fixture-release-1",
+        "physicalPrintingId": "fixture-physical-1",
+        "sourcePrintingId": null,
+        "finishUnitId": null,
+        "sourceClaimRefs": [
+          "fixture-claim"
+        ],
+        "localizationId": "fixture-loc-west-es",
+        "cardName": "Snorlax",
+        "localCardName": null,
+        "localSetCode": "FX",
+        "localSetName": "Fixture Set",
+        "collectorNumber": "1",
+        "collectorNumberDenominator": "10",
+        "collectorNumberSortKey": "000000000001",
+        "edition": null,
+        "editionAssignmentStatus": "not-applicable",
+        "finishVerificationStatus": "confirmed",
+        "finish": "holo",
+        "finishFamily": "holo",
+        "finishGroupId": "fixture-group-verified-printing",
+        "foilPattern": null,
+        "markings": [],
+        "distribution": null,
+        "cardSize": "standard",
+        "errorClass": null,
+        "rarity": {
+          "display": null,
+          "normalizedId": null,
+          "evidenceStatus": "unknown",
+          "claimRefs": []
+        },
+        "completenessStatus": "positive-evidence-only",
+        "releaseDate": "2026-01-01",
+        "releaseDatePrecision": "day",
+        "releaseApproximate": false,
+        "releaseSortKey": "2026-01-01|fixture",
+        "imageAssetId": null,
+        "imageScope": "unknown",
+        "sourceLinks": [],
+        "evidenceLinks": [],
+        "correctionLink": "https://github.com/m4s-ai/snoredex-data/issues/new?template=printing-correction.yml&title=%5BCorrection%5D+Snorlax+%E2%80%94+FX+%E2%80%94+Fixture+Set+1+%28verified-printing%29&row-id=item-00000000-0000-5000-8000-000000000001&card-name=Snorlax&set-code=FX+%E2%80%94+Fixture+Set&card-number=1&current-state=Item+kind%3A+verified-printing+Progress%3A+current-known+Evidence+state%3A+confirmed+Completeness%3A+positive-evidence-only+Edition+status%3A+not-applicable+Edition%3A+unknown+Finish%3A+holo+Finish+family%3A+holo+Foil+pattern%3A+unknown+Markings%3A+unknown+Distribution%3A+unknown+Card+size%3A+standard"
+      },
+      {
+        "itemId": "item-00000000-0000-5000-8000-000000000002",
+        "legacyChecklistIds": [],
+        "active": true,
+        "itemKind": "finish-candidate",
+        "progressClass": "research",
+        "workId": "fixture-work",
+        "workMappingState": "mapped",
+        "setEditionId": "fixture-edition-2",
+        "localSetId": "fixture-set-2",
+        "cardReleaseId": "fixture-release-2",
+        "physicalPrintingId": null,
+        "sourcePrintingId": null,
+        "finishUnitId": null,
+        "sourceClaimRefs": [
+          "fixture-claim"
+        ],
+        "localizationId": "fixture-loc-latam-es",
+        "cardName": "Snorlax",
+        "localCardName": null,
+        "localSetCode": "FX",
+        "localSetName": "Fixture Set",
+        "collectorNumber": "1",
+        "collectorNumberDenominator": "10",
+        "collectorNumberSortKey": "000000000001",
+        "edition": null,
+        "editionAssignmentStatus": "not-applicable",
+        "finishVerificationStatus": "marketplace-claimed",
+        "finish": "reverse-holo",
+        "finishFamily": "reverse-holo",
+        "finishGroupId": "fixture-group-finish-candidate",
+        "foilPattern": null,
+        "markings": [],
+        "distribution": null,
+        "cardSize": "standard",
+        "errorClass": null,
+        "rarity": {
+          "display": null,
+          "normalizedId": null,
+          "evidenceStatus": "unknown",
+          "claimRefs": []
+        },
+        "completenessStatus": "positive-evidence-only",
+        "releaseDate": "2026-01-01",
+        "releaseDatePrecision": "day",
+        "releaseApproximate": false,
+        "releaseSortKey": "2026-01-01|fixture",
+        "imageAssetId": null,
+        "imageScope": "unknown",
+        "sourceLinks": [],
+        "evidenceLinks": [],
+        "correctionLink": "https://github.com/m4s-ai/snoredex-data/issues/new?template=printing-correction.yml&title=%5BCorrection%5D+Snorlax+%E2%80%94+FX+%E2%80%94+Fixture+Set+1+%28finish-candidate%29&row-id=item-00000000-0000-5000-8000-000000000002&card-name=Snorlax&set-code=FX+%E2%80%94+Fixture+Set&card-number=1&current-state=Item+kind%3A+finish-candidate+Progress%3A+research+Evidence+state%3A+marketplace-claimed+Completeness%3A+positive-evidence-only+Edition+status%3A+not-applicable+Edition%3A+unknown+Finish%3A+reverse-holo+Finish+family%3A+reverse-holo+Foil+pattern%3A+unknown+Markings%3A+unknown+Distribution%3A+unknown+Card+size%3A+standard"
+      },
+      {
+        "itemId": "item-00000000-0000-5000-8000-000000000003",
+        "legacyChecklistIds": [],
+        "active": true,
+        "itemKind": "research-placeholder",
+        "progressClass": "research",
+        "workId": "fixture-work",
+        "workMappingState": "mapped",
+        "setEditionId": "fixture-edition-3",
+        "localSetId": "fixture-set-3",
+        "cardReleaseId": "fixture-release-3",
+        "physicalPrintingId": null,
+        "sourcePrintingId": null,
+        "finishUnitId": null,
+        "sourceClaimRefs": [
+          "fixture-claim"
+        ],
+        "localizationId": "fixture-loc-west-en",
+        "cardName": "Snorlax",
+        "localCardName": null,
+        "localSetCode": "FX",
+        "localSetName": "Fixture Set",
+        "collectorNumber": "1",
+        "collectorNumberDenominator": "10",
+        "collectorNumberSortKey": "000000000001",
+        "edition": null,
+        "editionAssignmentStatus": "not-applicable",
+        "finishVerificationStatus": "pending",
+        "finish": null,
+        "finishFamily": null,
+        "finishGroupId": "fixture-group-research-placeholder",
+        "foilPattern": null,
+        "markings": [],
+        "distribution": null,
+        "cardSize": "standard",
+        "errorClass": null,
+        "rarity": {
+          "display": null,
+          "normalizedId": null,
+          "evidenceStatus": "unknown",
+          "claimRefs": []
+        },
+        "completenessStatus": "positive-evidence-only",
+        "releaseDate": "2026-01-01",
+        "releaseDatePrecision": "day",
+        "releaseApproximate": false,
+        "releaseSortKey": "2026-01-01|fixture",
+        "imageAssetId": null,
+        "imageScope": "unknown",
+        "sourceLinks": [],
+        "evidenceLinks": [],
+        "correctionLink": "https://github.com/m4s-ai/snoredex-data/issues/new?template=printing-correction.yml&title=%5BCorrection%5D+Snorlax+%E2%80%94+FX+%E2%80%94+Fixture+Set+1+%28research-placeholder%29&row-id=item-00000000-0000-5000-8000-000000000003&card-name=Snorlax&set-code=FX+%E2%80%94+Fixture+Set&card-number=1&current-state=Item+kind%3A+research-placeholder+Progress%3A+research+Evidence+state%3A+pending+Completeness%3A+positive-evidence-only+Edition+status%3A+not-applicable+Edition%3A+unknown+Finish%3A+unknown+Finish+family%3A+unknown+Foil+pattern%3A+unknown+Markings%3A+unknown+Distribution%3A+unknown+Card+size%3A+standard"
+      }
+    ],
+    "assets": [],
+    "qualitySummary": {
+      "fixture": true
+    }
+  },
+  "reconciliationCases": [
+    {
+      "caseId": "retained-identity",
+      "fromItemId": "item-00000000-0000-5000-8000-000000000001",
+      "fromItemIds": [
+        "item-00000000-0000-5000-8000-000000000001"
+      ],
+      "toItemIds": [
+        "item-00000000-0000-5000-8000-000000000001"
+      ],
+      "changeKind": "retained",
+      "expectedAutomaticStateAction": "preserve",
+      "expectedResolution": "identity-retained",
+      "expectedStateDisposition": "active",
+      "expectedAdoption": "allowed-after-atomic-conservation"
+    },
+    {
+      "caseId": "safe-1-to-1",
+      "fromItemId": "item-10000000-0000-5000-8000-000000000002",
+      "fromItemIds": [
+        "item-10000000-0000-5000-8000-000000000002"
+      ],
+      "toItemIds": [
+        "item-00000000-0000-5000-8000-000000000002"
+      ],
+      "changeKind": "rekey-1:1",
+      "expectedAutomaticStateAction": "preserve",
+      "expectedResolution": "one-to-one-preserve",
+      "expectedStateDisposition": "migrated",
+      "expectedAdoption": "allowed-after-atomic-conservation"
+    },
+    {
+      "caseId": "retired-to-orphan",
+      "fromItemId": "item-10000000-0000-5000-8000-000000000004",
+      "fromItemIds": [
+        "item-10000000-0000-5000-8000-000000000004"
+      ],
+      "toItemIds": [],
+      "changeKind": "retired-1:0",
+      "expectedAutomaticStateAction": "none",
+      "expectedResolution": "retire-to-orphan",
+      "expectedStateDisposition": "orphan",
+      "expectedAdoption": "allowed-after-atomic-conservation"
+    },
+    {
+      "caseId": "U0414-1-to-many",
+      "sourceGraphRef": "legacy-issue-rekey:U0414",
+      "fromItemId": "item-10000000-0000-5000-8000-000000000005",
+      "fromItemIds": [
+        "item-10000000-0000-5000-8000-000000000005"
+      ],
+      "toItemIds": [
+        "item-00000000-0000-5000-8000-000000000001",
+        "item-00000000-0000-5000-8000-000000000002"
+      ],
+      "changeKind": "split-1:N",
+      "expectedAutomaticStateAction": "none",
+      "expectedResolution": "requires-user-resolution",
+      "expectedStateDisposition": "orphan-and-conflict",
+      "expectedAdoption": "allowed-after-atomic-conservation"
+    },
+    {
+      "caseId": "merge-many-to-1",
+      "fromItemId": "item-10000000-0000-5000-8000-000000000008",
+      "fromItemIds": [
+        "item-10000000-0000-5000-8000-000000000008",
+        "item-10000000-0000-5000-8000-000000000009"
+      ],
+      "toItemIds": [
+        "item-00000000-0000-5000-8000-000000000003"
+      ],
+      "changeKind": "merge-N:1",
+      "expectedAutomaticStateAction": "none",
+      "expectedResolution": "requires-user-resolution",
+      "expectedStateDisposition": "orphans-and-conflict",
+      "expectedAdoption": "allowed-after-atomic-conservation"
+    },
+    {
+      "caseId": "unresolved-transition",
+      "fromItemId": "item-10000000-0000-5000-8000-000000000011",
+      "fromItemIds": [
+        "item-10000000-0000-5000-8000-000000000011"
+      ],
+      "toItemIds": [],
+      "changeKind": "unresolved",
+      "expectedAutomaticStateAction": "none",
+      "expectedResolution": "requires-user-resolution",
+      "expectedStateDisposition": "orphan-and-conflict",
+      "expectedAdoption": "allowed-after-atomic-conservation"
+    },
+    {
+      "caseId": "missing-transition-chain",
+      "fromItemId": "item-10000000-0000-5000-8000-000000000012",
+      "fromItemIds": [
+        "item-10000000-0000-5000-8000-000000000012"
+      ],
+      "toItemIds": [],
+      "changeKind": "missing-chain",
+      "expectedAutomaticStateAction": "none",
+      "expectedResolution": "fail-closed",
+      "expectedStateDisposition": "last-known-good",
+      "expectedAdoption": "blocked-with-stored-fingerprint-unchanged"
+    }
+  ]
+}
