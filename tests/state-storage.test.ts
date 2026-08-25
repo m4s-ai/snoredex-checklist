@@ -5,6 +5,8 @@ import {
   NOTE_AUTOSAVE_DELAY_MS,
   OrderedStateStore,
   PRIVATE_STATE_STORAGE_KEY,
+  PRIVATE_STATE_LOCK_NAME,
+  type StorageLockLike,
   type StorageLike,
   type TimerClock,
 } from "../src/state/storage.ts";
@@ -41,6 +43,7 @@ function state(quantityOwned: number, note?: string): PrivateState {
 
 class FakeStorage implements StorageLike {
   public values = new Map<string, string>();
+  public withLock: StorageLike["withLock"] = undefined;
   public failGet = false;
   public failSet: unknown = undefined;
   public rewriteOnRead: string | undefined;
@@ -65,6 +68,26 @@ class FakeStorage implements StorageLike {
       this.rewriteOnRead = this.rewriteAfterWrite;
       this.rewriteAfterWrite = undefined;
     }
+  }
+}
+
+class FakeLock implements StorageLockLike {
+  private queue: Promise<void> = Promise.resolve();
+  public active = 0;
+  public maximumActive = 0;
+
+  public request<T>(_name: string, callback: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(async () => {
+      this.active += 1;
+      this.maximumActive = Math.max(this.maximumActive, this.active);
+      try {
+        return await callback();
+      } finally {
+        this.active -= 1;
+      }
+    });
+    this.queue = run.then(() => undefined, () => undefined);
+    return run;
   }
 }
 
@@ -171,6 +194,29 @@ test("detects a concurrent tab write before replacing the observed envelope", as
   });
   assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(2) });
   assert.deepEqual(secondTab.unsaved(), state(3));
+});
+
+test("coordinates the complete cross-tab commit through one lock", async () => {
+  const storage = new FakeStorage();
+  const lock = new FakeLock();
+  storage.withLock = <T>(callback: () => Promise<T>) => lock.request(PRIVATE_STATE_LOCK_NAME, callback);
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+
+  const firstTab = new OrderedStateStore(storage);
+  const secondTab = new OrderedStateStore(storage);
+  assert.deepEqual(firstTab.read(), { ok: true, value: state(1) });
+  assert.deepEqual(secondTab.read(), { ok: true, value: state(1) });
+  const first = firstTab.saveImmediate(state(2));
+  const second = secondTab.saveImmediate(state(3));
+  const results = await Promise.all([first, second]);
+
+  assert.equal(lock.maximumActive, 1);
+  assert.deepEqual(results, [
+    { ok: true, value: { state: state(2) } },
+    { ok: false, error: "STORAGE_COMMIT_UNCERTAIN" },
+  ]);
+  assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(2) });
 });
 
 test("quota and read-back failures preserve the last known-good state", async () => {

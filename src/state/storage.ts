@@ -6,6 +6,7 @@ import {
 } from "./domain.ts";
 
 export const PRIVATE_STATE_STORAGE_KEY = "snoredex-checklist.private-state";
+export const PRIVATE_STATE_LOCK_NAME = "snoredex-checklist.private-state-write";
 export const NOTE_AUTOSAVE_DELAY_MS = 3_000;
 
 export const PERSISTENCE_ERROR_CODES = [
@@ -22,9 +23,14 @@ export type PersistenceResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: PersistenceErrorCode };
 
+export interface StorageLockLike {
+  request<T>(name: string, callback: () => Promise<T>): Promise<T>;
+}
+
 export interface StorageLike {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  readonly withLock?: <T>(callback: () => Promise<T>) => Promise<T>;
 }
 
 export interface TimerClock {
@@ -94,10 +100,39 @@ export function getBrowserStorage(): PersistenceResult<StorageLike> {
     if (typeof globalThis.localStorage === "undefined") {
       return error("STORAGE_UNAVAILABLE");
     }
-    return success(globalThis.localStorage);
+    const locks = getBrowserLockManager();
+    if (locks === undefined) {
+      return error("STORAGE_UNAVAILABLE");
+    }
+    const storage = globalThis.localStorage;
+    return success({
+      getItem: (key) => storage.getItem(key),
+      setItem: (key, value) => storage.setItem(key, value),
+      withLock: (callback) => locks.request(PRIVATE_STATE_LOCK_NAME, callback),
+    });
   } catch {
     return error("STORAGE_UNAVAILABLE");
   }
+}
+
+function getBrowserLockManager(): StorageLockLike | undefined {
+  const navigatorValue = (globalThis as { navigator?: { locks?: unknown } }).navigator;
+  const locks = navigatorValue?.locks;
+  if (typeof locks !== "object" || locks === null) {
+    return undefined;
+  }
+  const request = (locks as { request?: unknown }).request;
+  if (typeof request !== "function") {
+    return undefined;
+  }
+  return {
+    request: <T>(name: string, callback: () => Promise<T>): Promise<T> =>
+      (request as (lockName: string, lockCallback: () => Promise<T>) => Promise<T>).call(
+        locks,
+        name,
+        callback,
+      ),
+  };
 }
 
 /**
@@ -221,17 +256,27 @@ export class OrderedStateStore {
       if (operation.generation < latestGeneration) {
         return success({ state: this.lastReadable(), skipped: true });
       }
-      const result = this.commit(state);
-      if (result.ok && operation.draftToken === this.latestDraftToken) {
-        this.unsavedDraft = undefined;
-      }
-      return result;
+      return this.commit(state).then((result) => {
+        if (result.ok && operation.draftToken === this.latestDraftToken) {
+          this.unsavedDraft = undefined;
+        }
+        return result;
+      });
     });
     this.queue = run.then(() => undefined, () => undefined);
     return run;
   }
 
-  private commit(state: PrivateState): SaveResult {
+  private commit(state: PrivateState): Promise<SaveResult> {
+    if (this.storage.withLock === undefined) {
+      return Promise.resolve(this.commitWithinLock(state));
+    }
+    return this.storage.withLock(() => Promise.resolve(this.commitWithinLock(state))).catch(() =>
+      error("STORAGE_COMMIT_UNCERTAIN"),
+    );
+  }
+
+  private commitWithinLock(state: PrivateState): SaveResult {
     const serialized = serializePrivateState(state);
     if (!serialized.ok) {
       return error("STORAGE_WRITE_FAILED");
