@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { lstat, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { semanticFingerprint, validateCatalogue } from "./validate.ts";
 
@@ -20,6 +20,7 @@ export const SYNC_ERROR_CODES = [
   "SYNC_BYTE_DIGEST_MISMATCH",
   "SYNC_PAIR_MISSING",
   "SYNC_PAIR_INVALID",
+  "SYNC_TRANSACTION_BUSY",
   "SYNC_TRANSACTION_FAILED",
   "SYNC_TRANSACTION_UNCERTAIN",
 ] as const;
@@ -75,6 +76,10 @@ interface TransactionJournal {
   readonly hadLock: boolean;
 }
 
+interface TransactionLock {
+  readonly release: () => Promise<void>;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -112,9 +117,17 @@ function isIssueUrl(value: unknown): value is string {
     return false;
   }
   const url = new URL(value);
-  return /^\/m4s-ai\/snoredex-(?:data|checklist)\/issues\/\d+$/.test(url.pathname) &&
+  return url.origin === "https://github.com" &&
+    /^\/m4s-ai\/snoredex-(?:data|checklist)\/issues\/\d+$/.test(url.pathname) &&
     url.search === "" &&
     url.hash === "";
+}
+
+function hasReciprocalIssueUrls(issueUrls: readonly string[]): boolean {
+  return (
+    issueUrls.some((url) => url.startsWith("https://github.com/m4s-ai/snoredex-checklist/issues/")) &&
+    issueUrls.some((url) => url.startsWith("https://github.com/m4s-ai/snoredex-data/issues/"))
+  );
 }
 
 function sha256(bytes: Uint8Array): string {
@@ -127,6 +140,10 @@ function cataloguePath(rootDirectory: string): string {
 
 function lockPath(rootDirectory: string): string {
   return resolve(rootDirectory, "catalogue.lock.json");
+}
+
+function transactionLockPath(rootDirectory: string): string {
+  return join(transactionDirectory(rootDirectory), "transaction.lock");
 }
 
 function transactionDirectory(rootDirectory: string): string {
@@ -151,6 +168,77 @@ async function exists(path: string): Promise<boolean> {
 
 function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {
   return isRecord(error) && error.code === code;
+}
+
+async function pathHasSymlink(rootDirectory: string, targetPath: string): Promise<boolean> {
+  const root = resolve(rootDirectory);
+  const target = resolve(targetPath);
+  const targetRelative = relative(root, target);
+  if (targetRelative.startsWith("..") || isAbsolute(targetRelative)) {
+    return true;
+  }
+  const components = targetRelative === "" ? [] : targetRelative.split(sep);
+  let current = root;
+  for (const component of ["", ...components]) {
+    if (component !== "") {
+      current = join(current, component);
+    }
+    try {
+      if ((await lstat(current)).isSymbolicLink()) {
+        return true;
+      }
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) {
+        return false;
+      }
+      throw error;
+    }
+  }
+  return false;
+}
+
+async function assertSafePaths(rootDirectory: string, paths: readonly string[]): Promise<void> {
+  for (const path of [rootDirectory, ...paths]) {
+    if (await pathHasSymlink(rootDirectory, path)) {
+      throw new Error("unsafe path");
+    }
+  }
+}
+
+async function acquireTransactionLock(rootDirectory: string): Promise<
+  | { readonly ok: true; readonly lock: TransactionLock }
+  | { readonly ok: false; readonly code: "SYNC_TRANSACTION_BUSY" | "SYNC_TRANSACTION_UNCERTAIN" }
+> {
+  const directory = transactionDirectory(rootDirectory);
+  const lockPathname = transactionLockPath(rootDirectory);
+  try {
+    await assertSafePaths(rootDirectory, [directory, lockPathname]);
+    await mkdir(directory, { recursive: true });
+    await assertSafePaths(rootDirectory, [directory, lockPathname]);
+  } catch {
+    return { ok: false, code: "SYNC_TRANSACTION_UNCERTAIN" };
+  }
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(lockPathname, "wx");
+  } catch (error) {
+    if (isNodeError(error, "EEXIST")) {
+      return { ok: false, code: "SYNC_TRANSACTION_BUSY" };
+    }
+    return { ok: false, code: "SYNC_TRANSACTION_UNCERTAIN" };
+  }
+  let released = false;
+  return {
+    ok: true,
+    lock: {
+      release: async () => {
+        if (released) return;
+        released = true;
+        await handle.close();
+        await rm(lockPathname, { force: true });
+      },
+    },
+  };
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {
@@ -187,7 +275,8 @@ function lockIsValid(value: unknown): value is CatalogueLock {
     byteLength > 0 &&
     Array.isArray(value.issueUrls) &&
     value.issueUrls.length > 0 &&
-    value.issueUrls.every(isIssueUrl)
+    value.issueUrls.every(isIssueUrl) &&
+    hasReciprocalIssueUrls(value.issueUrls)
   );
 }
 
@@ -322,6 +411,15 @@ async function readJournal(rootDirectory: string): Promise<JournalReadResult> {
 }
 
 async function rollback(journal: TransactionJournal): Promise<void> {
+  await assertSafePaths(journal.rootDirectory, [
+    journal.vendorPath,
+    journal.lockPath,
+    journal.stageDirectory,
+    journal.stageVendorPath,
+    journal.stageLockPath,
+    journal.backupVendorPath,
+    journal.backupLockPath,
+  ]);
   if (journal.phase === "committed") {
     await cleanupCommitted(journal);
     return;
@@ -346,6 +444,15 @@ async function rollback(journal: TransactionJournal): Promise<void> {
 }
 
 async function cleanupCommitted(journal: TransactionJournal): Promise<void> {
+  await assertSafePaths(journal.rootDirectory, [
+    journal.vendorPath,
+    journal.lockPath,
+    journal.stageDirectory,
+    journal.stageVendorPath,
+    journal.stageLockPath,
+    journal.backupVendorPath,
+    journal.backupLockPath,
+  ]);
   await rm(journal.stageDirectory, { recursive: true, force: true });
   await rm(journal.backupVendorPath, { force: true });
   await rm(journal.backupLockPath, { force: true });
@@ -354,9 +461,10 @@ async function cleanupCommitted(journal: TransactionJournal): Promise<void> {
 
 type RecoveryResult =
   | { readonly ok: true }
-  | { readonly ok: false; readonly code: "SYNC_TRANSACTION_UNCERTAIN" };
+  | { readonly ok: false; readonly code: "SYNC_TRANSACTION_BUSY" | "SYNC_TRANSACTION_UNCERTAIN" };
 
-export async function recoverCatalogueSync(rootDirectory: string): Promise<RecoveryResult> {
+async function recoverCatalogueSyncUnsafe(rootDirectory: string): Promise<RecoveryResult> {
+  await assertSafePaths(rootDirectory, [transactionDirectory(rootDirectory), journalPath(rootDirectory)]);
   const journalResult = await readJournal(rootDirectory);
   if (journalResult.kind === "missing") {
     return { ok: true };
@@ -372,13 +480,32 @@ export async function recoverCatalogueSync(rootDirectory: string): Promise<Recov
   }
 }
 
-export async function readCommittedCataloguePair(rootDirectory: string): Promise<CommittedPairResult> {
-  const recovery = await recoverCatalogueSync(rootDirectory);
+export async function recoverCatalogueSync(rootDirectory: string): Promise<RecoveryResult> {
+  const acquired = await acquireTransactionLock(resolve(rootDirectory));
+  if (!acquired.ok) {
+    return acquired;
+  }
+  try {
+    return await recoverCatalogueSyncUnsafe(resolve(rootDirectory));
+  } catch {
+    return { ok: false, code: "SYNC_TRANSACTION_UNCERTAIN" };
+  } finally {
+    await acquired.lock.release().catch(() => undefined);
+  }
+}
+
+async function readCommittedCataloguePairUnsafe(rootDirectory: string): Promise<CommittedPairResult> {
+  const recovery = await recoverCatalogueSyncUnsafe(rootDirectory);
   if (!recovery.ok) {
     return recovery;
   }
   const vendor = cataloguePath(rootDirectory);
   const lock = lockPath(rootDirectory);
+  try {
+    await assertSafePaths(rootDirectory, [vendor, lock]);
+  } catch {
+    return { ok: false, code: "SYNC_PAIR_INVALID" };
+  }
   const [hasVendor, hasLock] = await Promise.all([exists(vendor), exists(lock)]);
   if (!hasVendor && !hasLock) {
     return { ok: false, code: "SYNC_PAIR_MISSING" };
@@ -415,6 +542,20 @@ export async function readCommittedCataloguePair(rootDirectory: string): Promise
   }
 }
 
+export async function readCommittedCataloguePair(rootDirectory: string): Promise<CommittedPairResult> {
+  const acquired = await acquireTransactionLock(resolve(rootDirectory));
+  if (!acquired.ok) {
+    return acquired;
+  }
+  try {
+    return await readCommittedCataloguePairUnsafe(resolve(rootDirectory));
+  } catch {
+    return { ok: false, code: "SYNC_PAIR_INVALID" };
+  } finally {
+    await acquired.lock.release().catch(() => undefined);
+  }
+}
+
 export async function syncCataloguePair(request: CatalogueSyncRequest): Promise<SyncResult> {
   const rootDirectory = resolve(request.rootDirectory);
   if (
@@ -428,77 +569,100 @@ export async function syncCataloguePair(request: CatalogueSyncRequest): Promise<
     !Array.isArray(request.issueUrls) ||
     request.issueUrls.length === 0 ||
     !request.issueUrls.every(isIssueUrl) ||
+    !hasReciprocalIssueUrls(request.issueUrls) ||
     !(request.bytes instanceof Uint8Array)
   ) {
     return { ok: false, code: "SYNC_ARGUMENT_INVALID" };
   }
 
-  const recovery = await recoverCatalogueSync(rootDirectory);
-  if (!recovery.ok) {
-    return recovery;
+  const acquired = await acquireTransactionLock(rootDirectory);
+  if (!acquired.ok) {
+    return acquired;
   }
-  const existing = await readCommittedCataloguePair(rootDirectory);
-  if (!existing.ok && existing.code !== "SYNC_PAIR_MISSING") {
-    return existing;
-  }
-
-  const parsed = parseCatalogueBytes(
-    request.bytes,
-    request.expectedFingerprint,
-    request.expectedByteSha256,
-    request.contractVersion,
-  );
-  if (!parsed.ok) {
-    return parsed;
-  }
-
-  const vendor = cataloguePath(rootDirectory);
-  const lock = lockPath(rootDirectory);
-  const txId = randomUUID();
-  const stageDirectory = join(transactionDirectory(rootDirectory), txId);
-  const stageVendorPath = join(stageDirectory, "collector_catalogue.json");
-  const stageLockPath = join(stageDirectory, "catalogue.lock.json");
-  const journal: TransactionJournal = {
-    version: TRANSACTION_VERSION,
-    phase: "prepared",
-    rootDirectory,
-    vendorPath: vendor,
-    lockPath: lock,
-    stageDirectory,
-    stageVendorPath,
-    stageLockPath,
-    backupVendorPath: `${vendor}.backup-${txId}`,
-    backupLockPath: `${lock}.backup-${txId}`,
-    hadVendor: await exists(vendor),
-    hadLock: await exists(lock),
-  };
-  const catalogueLock = makeLock(request, request.bytes.byteLength);
-  const move = request.renameFile ?? rename;
 
   try {
-    await mkdir(dirname(vendor), { recursive: true });
-    await mkdir(stageDirectory, { recursive: true });
-    await writeFile(stageVendorPath, request.bytes);
-    await writeJson(stageLockPath, catalogueLock);
-    await writeJsonAtomically(journalPath(rootDirectory), journal);
+    const recovery = await recoverCatalogueSyncUnsafe(rootDirectory);
+    if (!recovery.ok) {
+      return recovery;
+    }
+    const existing = await readCommittedCataloguePairUnsafe(rootDirectory);
+    if (!existing.ok && existing.code !== "SYNC_PAIR_MISSING") {
+      return existing;
+    }
 
-    if (journal.hadVendor) {
-      await move(vendor, journal.backupVendorPath);
+    const parsed = parseCatalogueBytes(
+      request.bytes,
+      request.expectedFingerprint,
+      request.expectedByteSha256,
+      request.contractVersion,
+    );
+    if (!parsed.ok) {
+      return parsed;
     }
-    if (journal.hadLock) {
-      await move(lock, journal.backupLockPath);
-    }
-    await move(stageVendorPath, vendor);
-    await move(stageLockPath, lock);
-    await writeJsonAtomically(journalPath(rootDirectory), { ...journal, phase: "committed" });
-    await cleanupCommitted({ ...journal, phase: "committed" }).catch(() => undefined);
-    return { ok: true, lock: catalogueLock };
-  } catch {
+
+    const vendor = cataloguePath(rootDirectory);
+    const lock = lockPath(rootDirectory);
+    const txId = randomUUID();
+    const stageDirectory = join(transactionDirectory(rootDirectory), txId);
+    const stageVendorPath = join(stageDirectory, "collector_catalogue.json");
+    const stageLockPath = join(stageDirectory, "catalogue.lock.json");
+    const journal: TransactionJournal = {
+      version: TRANSACTION_VERSION,
+      phase: "prepared",
+      rootDirectory,
+      vendorPath: vendor,
+      lockPath: lock,
+      stageDirectory,
+      stageVendorPath,
+      stageLockPath,
+      backupVendorPath: `${vendor}.backup-${txId}`,
+      backupLockPath: `${lock}.backup-${txId}`,
+      hadVendor: await exists(vendor),
+      hadLock: await exists(lock),
+    };
+    const catalogueLock = makeLock(request, request.bytes.byteLength);
+    const move = request.renameFile ?? rename;
+
     try {
-      await rollback(journal);
+      await mkdir(dirname(vendor), { recursive: true });
+      await mkdir(stageDirectory, { recursive: true });
+      await assertSafePaths(rootDirectory, [
+        vendor,
+        lock,
+        transactionDirectory(rootDirectory),
+        journalPath(rootDirectory),
+        stageDirectory,
+        stageVendorPath,
+        stageLockPath,
+        journal.backupVendorPath,
+        journal.backupLockPath,
+      ]);
+      await writeFile(stageVendorPath, request.bytes);
+      await writeJson(stageLockPath, catalogueLock);
+      await writeJsonAtomically(journalPath(rootDirectory), journal);
+
+      if (journal.hadVendor) {
+        await move(vendor, journal.backupVendorPath);
+      }
+      if (journal.hadLock) {
+        await move(lock, journal.backupLockPath);
+      }
+      await move(stageVendorPath, vendor);
+      await move(stageLockPath, lock);
+      await writeJsonAtomically(journalPath(rootDirectory), { ...journal, phase: "committed" });
+      await cleanupCommitted({ ...journal, phase: "committed" }).catch(() => undefined);
+      return { ok: true, lock: catalogueLock };
     } catch {
-      return { ok: false, code: "SYNC_TRANSACTION_UNCERTAIN" };
+      try {
+        await rollback(journal);
+      } catch {
+        return { ok: false, code: "SYNC_TRANSACTION_UNCERTAIN" };
+      }
+      return { ok: false, code: "SYNC_TRANSACTION_FAILED" };
     }
-    return { ok: false, code: "SYNC_TRANSACTION_FAILED" };
+  } catch {
+    return { ok: false, code: "SYNC_TRANSACTION_UNCERTAIN" };
+  } finally {
+    await acquired.lock.release().catch(() => undefined);
   }
 }

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
@@ -150,6 +150,60 @@ test("rejects lock skew and manual edits without overwriting them", async () => 
       code: "SYNC_PAIR_INVALID",
     });
     assert.equal(JSON.parse(await readFile(lockPath, "utf8")).catalogueByteLength, initial.bytes.byteLength + 1);
+
+    const hostileIssue = {
+      ...requestFor(rootDirectory),
+      issueUrls: [
+        "https://attacker.example/m4s-ai/snoredex-checklist/issues/14",
+        "https://github.com/m4s-ai/snoredex-data/issues/300",
+      ],
+    };
+    assert.deepEqual(await syncCataloguePair(hostileIssue), {
+      ok: false,
+      code: "SYNC_ARGUMENT_INVALID",
+    });
+
+    const oneSidedIssue = {
+      ...requestFor(rootDirectory),
+      issueUrls: ["https://github.com/m4s-ai/snoredex-checklist/issues/14"],
+    };
+    assert.deepEqual(await syncCataloguePair(oneSidedIssue), {
+      ok: false,
+      code: "SYNC_ARGUMENT_INVALID",
+    });
+  } finally {
+    await cleanup(rootDirectory);
+  }
+});
+
+test("serializes concurrent sync operations", async () => {
+  const rootDirectory = await temporaryRoot();
+  try {
+    let enteredResolve!: () => void;
+    const entered = new Promise<void>((resolveEntered) => {
+      enteredResolve = resolveEntered;
+    });
+    let releaseResolve!: () => void;
+    const release = new Promise<void>((resolveRelease) => {
+      releaseResolve = resolveRelease;
+    });
+    let moveCount = 0;
+    const first = syncCataloguePair({
+      ...requestFor(rootDirectory),
+      renameFile: async (source, destination) => {
+        moveCount += 1;
+        if (moveCount === 1) {
+          enteredResolve();
+          await release;
+        }
+        await rename(source, destination);
+      },
+    });
+    await entered;
+    const second = await syncCataloguePair(requestFor(rootDirectory));
+    assert.deepEqual(second, { ok: false, code: "SYNC_TRANSACTION_BUSY" });
+    releaseResolve();
+    assert.equal((await first).ok, true);
   } finally {
     await cleanup(rootDirectory);
   }
@@ -199,6 +253,35 @@ test("fails closed on a journal that points outside the repository root", async 
     });
   } finally {
     await cleanup(rootDirectory);
+  }
+});
+
+test("rejects symlinked transaction directories", async (t) => {
+  const rootDirectory = await temporaryRoot();
+  const outsideDirectory = await temporaryRoot();
+  try {
+    await mkdir(rootDirectory, { recursive: true });
+    await mkdir(outsideDirectory, { recursive: true });
+    try {
+      await symlink(
+        outsideDirectory,
+        join(rootDirectory, ".catalogue-sync"),
+        process.platform === "win32" ? "junction" : "dir",
+      );
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && ["EPERM", "EACCES"].includes(String(error.code))) {
+        t.skip("symbolic links are unavailable in this environment");
+        return;
+      }
+      throw error;
+    }
+    assert.deepEqual(await syncCataloguePair(requestFor(rootDirectory)), {
+      ok: false,
+      code: "SYNC_TRANSACTION_UNCERTAIN",
+    });
+  } finally {
+    await cleanup(rootDirectory);
+    await cleanup(outsideDirectory);
   }
 });
 
