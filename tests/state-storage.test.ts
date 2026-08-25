@@ -273,11 +273,36 @@ test("allows an explicit rebase after a recovered draft conflicts", async () => 
     error: "STORAGE_COMMIT_UNCERTAIN",
   });
   assert.deepEqual(recovered.rebaseUnsavedDraft(), { ok: true, value: state(1, "draft to rebase") });
+  assert.equal(storage.draftValues.size, 1);
   assert.deepEqual(await recovered.saveImmediate(state(1, "draft to rebase")), {
     ok: true,
     value: { state: state(1, "draft to rebase") },
   });
+  assert.equal(storage.draftValues.size, 0);
   assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(1, "draft to rebase") });
+});
+
+test("keeps the old baseline when rebasing cannot persist the replacement draft", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1) });
+  writer.scheduleNoteSave(state(1, "draft with old baseline"));
+  const otherTab = new OrderedStateStore(storage);
+  assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
+  assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
+
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: state(2) });
+  storage.failDraftSet = new Error("quota");
+  assert.deepEqual(recovered.rebaseUnsavedDraft(), { ok: false, error: "STORAGE_WRITE_FAILED" });
+  storage.failDraftSet = undefined;
+  assert.deepEqual(await recovered.saveImmediate(state(1, "draft with old baseline")), {
+    ok: false,
+    error: "STORAGE_COMMIT_UNCERTAIN",
+  });
+  assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(2) });
 });
 
 test("allows an explicit discard of a recovered draft", () => {

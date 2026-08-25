@@ -290,15 +290,20 @@ export class OrderedStateStore {
     }
     const draft = cloneState(this.unsavedDraft);
     const previousReference = this.activeDraftReference;
-    const previousOwned = this.activeDraftOwned;
+    const previousObservedRaw = this.observedRaw;
+    const previousHasObservedRaw = this.hasObservedRaw;
+    const previousLastKnownGood = this.lastKnownGood === undefined ? undefined : cloneState(this.lastKnownGood);
     this.observedRaw = raw;
     this.hasObservedRaw = true;
     this.lastKnownGood = current === undefined ? undefined : cloneState(current);
     const persistedReference = this.persistPendingNoteDraft(draft);
     if (this.storage.draftStorage !== undefined && persistedReference === undefined) {
+      this.observedRaw = previousObservedRaw;
+      this.hasObservedRaw = previousHasObservedRaw;
+      this.lastKnownGood = previousLastKnownGood;
       return error("STORAGE_WRITE_FAILED");
     }
-    if (previousOwned && previousReference !== undefined && persistedReference?.key !== previousReference.key) {
+    if (previousReference !== undefined && persistedReference?.key !== previousReference.key) {
       this.clearPendingNoteDraft(previousReference);
     }
     return success(draft);
