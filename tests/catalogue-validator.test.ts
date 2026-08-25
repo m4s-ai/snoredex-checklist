@@ -179,6 +179,9 @@ test("enforces one Work mapping and set edition per card release", () => {
 
 test("allows missing images and checks present asset references and scope", () => {
   assert.equal(validateCatalogue(cloneCatalogue()).ok, true);
+  expectFailure((catalogue) => {
+    catalogue.meta.assetBaseUrl = "https://example.com:99999/";
+  }, "CATALOGUE_ASSET_INVALID");
 
   const catalogue = cloneCatalogue();
   catalogue.assets.push({

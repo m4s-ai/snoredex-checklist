@@ -284,7 +284,12 @@ function validateSemantics(catalogue: Catalogue): CatalogueErrorCode[] {
     string,
     { setEditionId: string; workId: string | null; workMappingState: string }
   >();
-  const assetBaseUrl = new URL(catalogue.meta.assetBaseUrl);
+  let assetBaseUrl: URL | undefined;
+  try {
+    assetBaseUrl = new URL(catalogue.meta.assetBaseUrl);
+  } catch {
+    errors.add("CATALOGUE_ASSET_INVALID");
+  }
 
   for (const item of items.values()) {
     const edition = editions.get(item.setEditionId);
@@ -360,6 +365,9 @@ function validateSemantics(catalogue: Catalogue): CatalogueErrorCode[] {
 
   for (const asset of assets.values()) {
     try {
+      if (!assetBaseUrl) {
+        continue;
+      }
       const resolved = new URL(asset.path, assetBaseUrl);
       if (!resolved.href.startsWith(assetBaseUrl.href) || resolved.href !== asset.url) {
         errors.add("CATALOGUE_ASSET_INVALID");
