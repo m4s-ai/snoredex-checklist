@@ -139,6 +139,40 @@ test("queued saves keep the newest edit authoritative and page-close flush is ex
   assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(2, "before close") });
 });
 
+test("immediate saves are not superseded by a note scheduled in the same task", async () => {
+  const storage = new FakeStorage();
+  const clock = new FakeClock();
+  const store = new OrderedStateStore(storage, clock);
+  const immediate = store.saveImmediate(state(1));
+  store.scheduleNoteSave(state(1, "same task note"));
+
+  assert.deepEqual(await immediate, { ok: true, value: { state: state(1) } });
+  assert.equal(storage.writes, 1);
+  assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(1) });
+
+  assert.deepEqual(await store.flushNote(), { ok: true, value: { state: state(1, "same task note") } });
+  assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(1, "same task note") });
+});
+
+test("detects a concurrent tab write before replacing the observed envelope", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+
+  const firstTab = new OrderedStateStore(storage);
+  const secondTab = new OrderedStateStore(storage);
+  assert.deepEqual(firstTab.read(), { ok: true, value: state(1) });
+  assert.deepEqual(secondTab.read(), { ok: true, value: state(1) });
+  assert.deepEqual(await firstTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
+
+  assert.deepEqual(await secondTab.saveImmediate(state(3)), {
+    ok: false,
+    error: "STORAGE_COMMIT_UNCERTAIN",
+  });
+  assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(2) });
+  assert.deepEqual(secondTab.unsaved(), state(3));
+});
+
 test("quota and read-back failures preserve the last known-good state", async () => {
   const storage = new FakeStorage();
   const store = new OrderedStateStore(storage);

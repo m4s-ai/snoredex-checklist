@@ -43,6 +43,13 @@ interface PendingNote {
   readonly state: PrivateState;
   readonly generation: number;
   readonly timer: unknown;
+  readonly draftToken: number;
+}
+
+interface SaveOperation {
+  readonly kind: "immediate" | "note";
+  readonly generation: number;
+  readonly draftToken: number;
 }
 
 const browserClock: TimerClock = {
@@ -101,10 +108,15 @@ export class OrderedStateStore {
   private readonly storage: StorageLike;
   private readonly clock: TimerClock;
   private queue: Promise<void> = Promise.resolve();
-  private generation = 0;
+  private immediateGeneration = 0;
+  private noteGeneration = 0;
+  private nextDraftToken = 0;
+  private latestDraftToken = 0;
   private lastKnownGood: PrivateState | undefined;
   private unsavedDraft: PrivateState | undefined;
   private pendingNote: PendingNote | undefined;
+  private observedRaw: string | null | undefined;
+  private hasObservedRaw = false;
 
   public constructor(storage: StorageLike, clock: TimerClock = browserClock) {
     this.storage = storage;
@@ -118,6 +130,8 @@ export class OrderedStateStore {
     } catch {
       return error("STORAGE_UNAVAILABLE");
     }
+    this.observedRaw = raw;
+    this.hasObservedRaw = true;
     if (raw === null) {
       this.lastKnownGood = undefined;
       return success(undefined);
@@ -145,21 +159,22 @@ export class OrderedStateStore {
   }
 
   public saveImmediate(state: PrivateState): Promise<SaveResult> {
-    this.generation += 1;
+    const generation = ++this.immediateGeneration;
     this.cancelPendingNote();
-    return this.enqueue(state, this.generation);
+    const draftToken = this.rememberDraft(state);
+    return this.enqueue(state, { kind: "immediate", generation, draftToken });
   }
 
   public scheduleNoteSave(state: PrivateState): void {
-    this.generation += 1;
+    const generation = ++this.noteGeneration;
     this.cancelPendingNote();
-    const generation = this.generation;
+    const draftToken = this.rememberDraft(state);
     const timer = this.clock.setTimeout(() => {
       if (this.pendingNote?.generation === generation) {
         void this.flushNoteForGeneration(generation);
       }
     }, NOTE_AUTOSAVE_DELAY_MS);
-    this.pendingNote = { state: cloneState(state), generation, timer };
+    this.pendingNote = { state: cloneState(state), generation, timer, draftToken };
   }
 
   /** Flush on blur or pagehide; callers may ignore the returned promise for pagehide. */
@@ -177,7 +192,11 @@ export class OrderedStateStore {
       return Promise.resolve(success({ state: this.lastReadable(), skipped: true }));
     }
     this.cancelPendingNote();
-    return this.enqueue(pending.state, pending.generation);
+    return this.enqueue(pending.state, {
+      kind: "note",
+      generation: pending.generation,
+      draftToken: pending.draftToken,
+    });
   }
 
   private cancelPendingNote(): void {
@@ -187,14 +206,23 @@ export class OrderedStateStore {
     }
   }
 
-  private enqueue(state: PrivateState, generation: number): Promise<SaveResult> {
+  private rememberDraft(state: PrivateState): number {
+    const draftToken = ++this.nextDraftToken;
+    this.latestDraftToken = draftToken;
     this.unsavedDraft = cloneState(state);
+    return draftToken;
+  }
+
+  private enqueue(state: PrivateState, operation: SaveOperation): Promise<SaveResult> {
     const run = this.queue.then(() => {
-      if (generation < this.generation) {
+      const latestGeneration = operation.kind === "immediate"
+        ? this.immediateGeneration
+        : this.noteGeneration;
+      if (operation.generation < latestGeneration) {
         return success({ state: this.lastReadable(), skipped: true });
       }
       const result = this.commit(state);
-      if (result.ok && generation === this.generation) {
+      if (result.ok && operation.draftToken === this.latestDraftToken) {
         this.unsavedDraft = undefined;
       }
       return result;
@@ -213,6 +241,13 @@ export class OrderedStateStore {
       previous = this.storage.getItem(PRIVATE_STATE_STORAGE_KEY);
     } catch {
       return error("STORAGE_UNAVAILABLE");
+    }
+    if (this.hasObservedRaw && previous !== this.observedRaw) {
+      return error("STORAGE_COMMIT_UNCERTAIN");
+    }
+    if (!this.hasObservedRaw) {
+      this.observedRaw = previous;
+      this.hasObservedRaw = true;
     }
     if (previous !== null) {
       let previousCandidate: unknown;
@@ -245,6 +280,8 @@ export class OrderedStateStore {
     if (!validated.ok) {
       return error("STORAGE_COMMIT_UNCERTAIN");
     }
+    this.observedRaw = readBack;
+    this.hasObservedRaw = true;
     this.lastKnownGood = cloneState(validated.value);
     return success({ state: cloneState(validated.value) });
   }
