@@ -286,7 +286,19 @@ function validateSemantics(catalogue: Catalogue): CatalogueErrorCode[] {
   >();
   let assetBaseUrl: URL | undefined;
   try {
-    assetBaseUrl = new URL(catalogue.meta.assetBaseUrl);
+    const parsedAssetBaseUrl = new URL(catalogue.meta.assetBaseUrl);
+    if (
+      parsedAssetBaseUrl.protocol !== "https:" ||
+      parsedAssetBaseUrl.username !== "" ||
+      parsedAssetBaseUrl.password !== "" ||
+      !parsedAssetBaseUrl.pathname.endsWith("/") ||
+      parsedAssetBaseUrl.search !== "" ||
+      parsedAssetBaseUrl.hash !== ""
+    ) {
+      errors.add("CATALOGUE_ASSET_INVALID");
+    } else {
+      assetBaseUrl = parsedAssetBaseUrl;
+    }
   } catch {
     errors.add("CATALOGUE_ASSET_INVALID");
   }

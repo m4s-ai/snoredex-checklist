@@ -182,6 +182,12 @@ test("allows missing images and checks present asset references and scope", () =
   expectFailure((catalogue) => {
     catalogue.meta.assetBaseUrl = "https://example.com:99999/";
   }, "CATALOGUE_ASSET_INVALID");
+  expectFailure((catalogue) => {
+    catalogue.meta.assetBaseUrl = "https://example.com/assets";
+  }, "CATALOGUE_ASSET_INVALID");
+  expectFailure((catalogue) => {
+    catalogue.meta.assetBaseUrl = "file:///assets/";
+  }, "CATALOGUE_ASSET_INVALID");
 
   const catalogue = cloneCatalogue();
   catalogue.assets.push({
