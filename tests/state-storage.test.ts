@@ -4,7 +4,6 @@ import test from "node:test";
 import {
   NOTE_AUTOSAVE_DELAY_MS,
   OrderedStateStore,
-  PRIVATE_STATE_NOTE_DRAFT_KEY,
   PRIVATE_STATE_STORAGE_KEY,
   PRIVATE_STATE_LOCK_NAME,
   type DraftStorageLike,
@@ -56,6 +55,7 @@ class FakeStorage implements StorageLike {
     removeItem: (key) => {
       this.draftValues.delete(key);
     },
+    listKeys: (prefix) => [...this.draftValues.keys()].filter((key) => key.startsWith(prefix)),
   };
   public withLock: StorageLike["withLock"] = undefined;
   public failGet = false;
@@ -170,7 +170,7 @@ test("persists a pending note draft before pagehide and restores it after an int
   const store = new OrderedStateStore(storage, clock);
   store.scheduleNoteSave(state(0, "before pagehide"));
 
-  assert.equal(storage.draftValues.has(PRIVATE_STATE_NOTE_DRAFT_KEY), true);
+  assert.equal(storage.draftValues.size, 1);
   assert.equal(storage.writes, 0);
 
   const restored = new OrderedStateStore(storage, clock);
@@ -178,11 +178,24 @@ test("persists a pending note draft before pagehide and restores it after an int
   assert.deepEqual(restored.unsaved(), state(0, "before pagehide"));
 
   await store.flushNote();
-  assert.equal(storage.draftValues.has(PRIVATE_STATE_NOTE_DRAFT_KEY), false);
+  assert.equal(storage.draftValues.size, 0);
   assert.deepEqual(new OrderedStateStore(storage).read(), {
     ok: true,
     value: state(0, "before pagehide"),
   });
+});
+
+test("keeps pending recovery records separate across tabs", async () => {
+  const storage = new FakeStorage();
+  const firstTab = new OrderedStateStore(storage);
+  const secondTab = new OrderedStateStore(storage);
+  firstTab.scheduleNoteSave(state(0, "first tab"));
+  secondTab.scheduleNoteSave(state(0, "second tab"));
+
+  assert.equal(storage.draftValues.size, 2);
+  await firstTab.flushNote();
+  assert.equal(storage.draftValues.size, 1);
+  assert.deepEqual(secondTab.unsaved(), state(0, "second tab"));
 });
 
 test("durable recovery restores its original concurrency baseline", async () => {
@@ -209,21 +222,61 @@ test("durable recovery restores its original concurrency baseline", async () => 
   assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(2) });
 });
 
+test("allows an explicit rebase after a recovered draft conflicts", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1) });
+  writer.scheduleNoteSave(state(1, "draft to rebase"));
+
+  const otherTab = new OrderedStateStore(storage);
+  assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
+  assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
+
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: state(2) });
+  assert.deepEqual(await recovered.saveImmediate(state(1, "draft to rebase")), {
+    ok: false,
+    error: "STORAGE_COMMIT_UNCERTAIN",
+  });
+  assert.deepEqual(recovered.rebaseUnsavedDraft(), { ok: true, value: state(1, "draft to rebase") });
+  assert.deepEqual(await recovered.saveImmediate(state(1, "draft to rebase")), {
+    ok: true,
+    value: { state: state(1, "draft to rebase") },
+  });
+  assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(1, "draft to rebase") });
+});
+
+test("allows an explicit discard of a recovered draft", () => {
+  const storage = new FakeStorage();
+  const store = new OrderedStateStore(storage);
+  store.scheduleNoteSave(state(0, "discard me"));
+  assert.equal(storage.draftValues.size, 1);
+  store.discardUnsavedDraft();
+  assert.equal(storage.draftValues.size, 0);
+  assert.equal(store.unsaved(), undefined);
+  assert.equal(store.hasPendingNote(), false);
+});
+
 test("keeps the previous durable draft when replacing it fails", async () => {
   const storage = new FakeStorage();
   const clock = new FakeClock();
   const store = new OrderedStateStore(storage, clock);
   store.scheduleNoteSave(state(0, "first draft"));
-  const firstDraft = storage.draftValues.get(PRIVATE_STATE_NOTE_DRAFT_KEY);
+  const firstDraftKey = [...storage.draftValues.keys()][0];
+  assert.equal(typeof firstDraftKey, "string");
+  const firstDraft = storage.draftValues.get(firstDraftKey as string);
   assert.equal(typeof firstDraft, "string");
 
   storage.failDraftSet = new Error("quota");
   store.scheduleNoteSave(state(0, "second draft"));
-  assert.equal(storage.draftValues.get(PRIVATE_STATE_NOTE_DRAFT_KEY), firstDraft);
+  assert.equal(storage.draftValues.get(firstDraftKey as string), firstDraft);
 
   storage.failDraftSet = undefined;
   assert.deepEqual(await store.flushNote(), { ok: true, value: { state: state(0, "second draft") } });
-  assert.equal(storage.draftValues.has(PRIVATE_STATE_NOTE_DRAFT_KEY), false);
+  assert.equal(storage.draftValues.has(firstDraftKey as string), false);
 });
 
 test("queued saves keep the newest edit authoritative and page-close flush is explicit", async () => {

@@ -12,6 +12,8 @@ export const NOTE_AUTOSAVE_DELAY_MS = 3_000;
 
 const PRIVATE_STATE_NOTE_DRAFT_SCHEMA = "snoredex-checklist.pending-note";
 const PRIVATE_STATE_NOTE_DRAFT_VERSION = 1;
+const PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:`;
+const PRIVATE_STATE_NOTE_DRAFT_TAB_ID_KEY = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:tab-id`;
 
 export const PERSISTENCE_ERROR_CODES = [
   "LOCAL_STATE_UNSUPPORTED",
@@ -35,6 +37,7 @@ export interface DraftStorageLike {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
   removeItem(key: string): void;
+  readonly listKeys?: (prefix: string) => readonly string[];
 }
 
 export interface StorageLike {
@@ -42,6 +45,7 @@ export interface StorageLike {
   setItem(key: string, value: string): void;
   readonly withLock?: <T>(callback: () => Promise<T>) => Promise<T>;
   readonly draftStorage?: DraftStorageLike;
+  readonly draftId?: string;
 }
 
 export interface TimerClock {
@@ -61,22 +65,46 @@ interface PendingNote {
   readonly generation: number;
   readonly timer: unknown;
   readonly draftToken: number;
-  readonly draftStorageValue: string | undefined;
+  readonly draftStorageReference: DraftReference | undefined;
 }
 
 interface SaveOperation {
   readonly kind: "immediate" | "note";
   readonly generation: number;
   readonly draftToken: number;
-  readonly draftStorageValue: string | undefined;
+  readonly draftStorageReference: DraftReference | undefined;
 }
 
 interface PendingNoteDraftRecord {
   readonly schema: typeof PRIVATE_STATE_NOTE_DRAFT_SCHEMA;
   readonly schemaVersion: typeof PRIVATE_STATE_NOTE_DRAFT_VERSION;
+  readonly draftId: string;
   readonly state: unknown;
   readonly hasObservedRaw: boolean;
   readonly observedRaw: string | null;
+  readonly updatedAt: number;
+}
+
+interface DraftReference {
+  readonly key: string;
+  readonly value: string;
+  readonly draftId: string;
+}
+
+export function getPendingNoteDraftKey(draftId: string): string {
+  return `${PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX}${draftId}`;
+}
+
+let generatedDraftId = 0;
+
+function createDraftId(): string {
+  generatedDraftId += 1;
+  const cryptoValue = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  const randomId = cryptoValue?.randomUUID?.();
+  if (randomId !== undefined) {
+    return `store-${randomId}`;
+  }
+  return `store-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${generatedDraftId.toString(36)}`;
 }
 
 const browserClock: TimerClock = {
@@ -126,18 +154,48 @@ export function getBrowserStorage(): PersistenceResult<StorageLike> {
       return error("STORAGE_UNAVAILABLE");
     }
     const storage = globalThis.localStorage;
+    const draftId = getBrowserDraftId();
     return success({
       getItem: (key) => storage.getItem(key),
       setItem: (key, value) => storage.setItem(key, value),
+      draftId,
       withLock: (callback) => locks.request(PRIVATE_STATE_LOCK_NAME, callback),
       draftStorage: {
         getItem: (key) => storage.getItem(key),
         setItem: (key, value) => storage.setItem(key, value),
         removeItem: (key) => storage.removeItem(key),
+        listKeys: (prefix) => {
+          const keys: string[] = [];
+          for (let index = 0; index < storage.length; index += 1) {
+            const key = storage.key(index);
+            if (key !== null && key.startsWith(prefix)) {
+              keys.push(key);
+            }
+          }
+          return keys;
+        },
       },
     });
   } catch {
     return error("STORAGE_UNAVAILABLE");
+  }
+}
+
+function getBrowserDraftId(): string | undefined {
+  try {
+    if (typeof globalThis.sessionStorage === "undefined") {
+      return undefined;
+    }
+    const sessionStorage = globalThis.sessionStorage;
+    const existing = sessionStorage.getItem(PRIVATE_STATE_NOTE_DRAFT_TAB_ID_KEY);
+    if (existing !== null && existing.length > 0) {
+      return existing;
+    }
+    const draftId = createDraftId();
+    sessionStorage.setItem(PRIVATE_STATE_NOTE_DRAFT_TAB_ID_KEY, draftId);
+    return draftId;
+  } catch {
+    return undefined;
   }
 }
 
@@ -168,6 +226,7 @@ function getBrowserLockManager(): StorageLockLike | undefined {
 export class OrderedStateStore {
   private readonly storage: StorageLike;
   private readonly clock: TimerClock;
+  private readonly draftId: string;
   private queue: Promise<void> = Promise.resolve();
   private immediateGeneration = 0;
   private noteGeneration = 0;
@@ -176,12 +235,14 @@ export class OrderedStateStore {
   private lastKnownGood: PrivateState | undefined;
   private unsavedDraft: PrivateState | undefined;
   private pendingNote: PendingNote | undefined;
+  private activeDraftReference: DraftReference | undefined;
   private observedRaw: string | null | undefined;
   private hasObservedRaw = false;
 
   public constructor(storage: StorageLike, clock: TimerClock = browserClock) {
     this.storage = storage;
     this.clock = clock;
+    this.draftId = storage.draftId ?? createDraftId();
   }
 
   public read(): PersistenceResult<PrivateState | undefined> {
@@ -221,16 +282,68 @@ export class OrderedStateStore {
     return this.unsavedDraft === undefined ? undefined : cloneState(this.unsavedDraft);
   }
 
+  /** Explicitly rebase a recovered draft onto the currently stored canonical envelope. */
+  public rebaseUnsavedDraft(): PersistenceResult<PrivateState | undefined> {
+    if (this.unsavedDraft === undefined) {
+      return success(undefined);
+    }
+    let raw: string | null;
+    try {
+      raw = this.storage.getItem(PRIVATE_STATE_STORAGE_KEY);
+    } catch {
+      return error("STORAGE_UNAVAILABLE");
+    }
+    let current: PrivateState | undefined;
+    if (raw !== null) {
+      let candidate: unknown;
+      try {
+        candidate = JSON.parse(raw) as unknown;
+      } catch {
+        return error("LOCAL_STATE_UNREADABLE");
+      }
+      const validated = validatePrivateState(candidate);
+      if (!validated.ok) {
+        return error(classifyStateError(validated.error));
+      }
+      current = validated.value;
+    }
+    const draft = cloneState(this.unsavedDraft);
+    const previousReference = this.activeDraftReference;
+    this.observedRaw = raw;
+    this.hasObservedRaw = true;
+    this.lastKnownGood = current === undefined ? undefined : cloneState(current);
+    const persistedReference = this.persistPendingNoteDraft(draft);
+    if (this.storage.draftStorage !== undefined && persistedReference === undefined) {
+      return error("STORAGE_WRITE_FAILED");
+    }
+    if (previousReference !== undefined && persistedReference?.key !== previousReference.key) {
+      this.clearPendingNoteDraft(previousReference);
+    }
+    return success(draft);
+  }
+
+  /** Explicitly discard a recovered or pending note draft without changing canonical state. */
+  public discardUnsavedDraft(): void {
+    this.noteGeneration += 1;
+    this.cancelPendingNote();
+    this.nextDraftToken += 1;
+    this.latestDraftToken = this.nextDraftToken;
+    const reference = this.activeDraftReference;
+    this.activeDraftReference = undefined;
+    this.unsavedDraft = undefined;
+    this.clearPendingNoteDraft(reference);
+  }
+
   public saveImmediate(state: PrivateState): Promise<SaveResult> {
     const generation = ++this.immediateGeneration;
-    const previousDraft = this.readPendingNoteDraft();
+    const previousDraft = this.activeDraftReference;
     this.cancelPendingNote();
     const draftToken = this.rememberDraft(state);
     return this.enqueue(state, {
       kind: "immediate",
       generation,
       draftToken,
-      draftStorageValue: this.draftMatchesState(previousDraft, state) ? previousDraft : undefined,
+      draftStorageReference: this.draftMatchesState(previousDraft, state) ? previousDraft : undefined,
     });
   }
 
@@ -238,14 +351,17 @@ export class OrderedStateStore {
     const generation = ++this.noteGeneration;
     this.cancelPendingNote();
     const draftToken = this.rememberDraft(state);
-    const previousDraft = this.readPendingNoteDraft();
-    const draftStorageValue = this.persistPendingNoteDraft(state) ?? previousDraft;
+    const previousDraft = this.activeDraftReference;
+    const draftStorageReference = this.persistPendingNoteDraft(state) ?? previousDraft;
+    if (draftStorageReference !== undefined && previousDraft?.key !== draftStorageReference.key) {
+      this.clearPendingNoteDraft(previousDraft);
+    }
     const timer = this.clock.setTimeout(() => {
       if (this.pendingNote?.generation === generation) {
         void this.flushNoteForGeneration(generation);
       }
     }, NOTE_AUTOSAVE_DELAY_MS);
-    this.pendingNote = { state: cloneState(state), generation, timer, draftToken, draftStorageValue };
+    this.pendingNote = { state: cloneState(state), generation, timer, draftToken, draftStorageReference };
   }
 
   /** Flush on blur or pagehide; callers may ignore the returned promise for pagehide. */
@@ -267,7 +383,7 @@ export class OrderedStateStore {
       kind: "note",
       generation: pending.generation,
       draftToken: pending.draftToken,
-      draftStorageValue: pending.draftStorageValue,
+      draftStorageReference: pending.draftStorageReference,
     });
   }
 
@@ -285,7 +401,7 @@ export class OrderedStateStore {
     return draftToken;
   }
 
-  private persistPendingNoteDraft(state: PrivateState): string | undefined {
+  private persistPendingNoteDraft(state: PrivateState): DraftReference | undefined {
     const draftStorage = this.storage.draftStorage;
     if (draftStorage === undefined) {
       return undefined;
@@ -300,52 +416,50 @@ export class OrderedStateStore {
     const record: PendingNoteDraftRecord = {
       schema: PRIVATE_STATE_NOTE_DRAFT_SCHEMA,
       schemaVersion: PRIVATE_STATE_NOTE_DRAFT_VERSION,
+      draftId: this.draftId,
       state: JSON.parse(serialized.value) as unknown,
       hasObservedRaw: this.hasObservedRaw,
       observedRaw: this.hasObservedRaw ? this.observedRaw ?? null : null,
+      updatedAt: Date.now(),
     };
     try {
       const value = JSON.stringify(record);
-      draftStorage.setItem(PRIVATE_STATE_NOTE_DRAFT_KEY, value);
-      return value;
+      const key = getPendingNoteDraftKey(this.draftId);
+      draftStorage.setItem(key, value);
+      const reference = { key, value, draftId: this.draftId };
+      this.activeDraftReference = reference;
+      return reference;
     } catch {
       // Keep the in-memory draft and let the canonical save report its own result.
       return undefined;
     }
   }
 
-  private readPendingNoteDraft(): string | undefined {
-    try {
-      return this.storage.draftStorage?.getItem(PRIVATE_STATE_NOTE_DRAFT_KEY) ?? undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  private draftMatchesState(raw: string | undefined, state: PrivateState): boolean {
-    if (raw === undefined) {
+  private draftMatchesState(reference: DraftReference | undefined, state: PrivateState): boolean {
+    if (reference === undefined) {
       return false;
     }
     try {
-      const candidate = JSON.parse(raw) as Partial<PendingNoteDraftRecord>;
+      const candidate = this.parseDraftReference(reference);
       const serialized = serializePrivateState(state);
-      return serialized.ok
-        && candidate.schema === PRIVATE_STATE_NOTE_DRAFT_SCHEMA
-        && candidate.schemaVersion === PRIVATE_STATE_NOTE_DRAFT_VERSION
-        && JSON.stringify(candidate.state) === serialized.value;
+      return candidate !== undefined && serialized.ok && JSON.stringify(candidate.state) === serialized.value;
     } catch {
       return false;
     }
   }
 
-  private clearPendingNoteDraft(expectedValue: string | undefined): void {
-    if (expectedValue === undefined) {
+  private clearPendingNoteDraft(expectedReference: DraftReference | undefined): void {
+    if (expectedReference === undefined) {
       return;
     }
     try {
       const draftStorage = this.storage.draftStorage;
-      if (draftStorage?.getItem(PRIVATE_STATE_NOTE_DRAFT_KEY) === expectedValue) {
-        draftStorage.removeItem(PRIVATE_STATE_NOTE_DRAFT_KEY);
+      if (draftStorage?.getItem(expectedReference.key) === expectedReference.value) {
+        draftStorage.removeItem(expectedReference.key);
+        if (this.activeDraftReference?.key === expectedReference.key
+          && this.activeDraftReference.value === expectedReference.value) {
+          this.activeDraftReference = undefined;
+        }
       }
     } catch {
       // A successful canonical save remains authoritative even if cleanup fails.
@@ -357,47 +471,106 @@ export class OrderedStateStore {
     if (draftStorage === undefined) {
       return;
     }
-    let raw: string | null;
-    try {
-      raw = draftStorage.getItem(PRIVATE_STATE_NOTE_DRAFT_KEY);
-    } catch {
-      return;
-    }
-    if (raw === null) {
-      return;
-    }
-    try {
-      const candidate = JSON.parse(raw) as Partial<PendingNoteDraftRecord>;
-      if (
-        candidate.schema !== PRIVATE_STATE_NOTE_DRAFT_SCHEMA
-        || candidate.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_VERSION
-        || typeof candidate.hasObservedRaw !== "boolean"
-        || (candidate.hasObservedRaw
-          ? (typeof candidate.observedRaw !== "string" && candidate.observedRaw !== null)
-          : candidate.observedRaw !== null)
-      ) {
-        return;
-      }
-      const validated = validatePrivateState(candidate.state);
-      if (validated.ok) {
-        if (candidate.hasObservedRaw && typeof candidate.observedRaw === "string") {
-          let baselineCandidate: unknown;
-          try {
-            baselineCandidate = JSON.parse(candidate.observedRaw) as unknown;
-          } catch {
-            return;
-          }
-          if (!validatePrivateState(baselineCandidate).ok) {
-            return;
-          }
+    const keys = this.draftKeys(draftStorage);
+    const candidates = keys
+      .map((key) => {
+        try {
+          const raw = draftStorage.getItem(key);
+          return raw === null ? undefined : this.parseDraftReference({
+            key,
+            value: raw,
+            draftId: key.slice(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX.length),
+          });
+        } catch {
+          return undefined;
         }
-        this.unsavedDraft = cloneState(validated.value);
-        this.hasObservedRaw = candidate.hasObservedRaw;
-        this.observedRaw = candidate.hasObservedRaw ? candidate.observedRaw : undefined;
+      })
+      .filter((candidate): candidate is PendingNoteDraftRecord & { readonly key: string; readonly value: string } =>
+        candidate !== undefined);
+    const selected = candidates.find((candidate) => candidate.draftId === this.draftId)
+      ?? candidates.sort((left, right) => right.updatedAt - left.updatedAt)[0];
+    if (selected === undefined) {
+      return;
+    }
+    this.activeDraftReference = {
+      key: selected.key,
+      value: selected.value,
+      draftId: selected.draftId,
+    };
+    const validated = validatePrivateState(selected.state);
+    if (!validated.ok) {
+      return;
+    }
+    this.unsavedDraft = cloneState(validated.value);
+    this.hasObservedRaw = selected.hasObservedRaw;
+    this.observedRaw = selected.hasObservedRaw ? selected.observedRaw : undefined;
+  }
+
+  private draftKeys(draftStorage: DraftStorageLike): readonly string[] {
+    const ownKey = getPendingNoteDraftKey(this.draftId);
+    try {
+      const keys = draftStorage.listKeys?.(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX);
+      if (keys !== undefined) {
+        return keys;
       }
     } catch {
-      // Ignore an unusable recovery draft without touching the canonical state.
+      return [ownKey];
     }
+    return [ownKey];
+  }
+
+  private parseDraftReference(reference: DraftReference): (PendingNoteDraftRecord & {
+    readonly key: string;
+    readonly value: string;
+  }) | undefined {
+    if (!reference.key.startsWith(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX)) {
+      return undefined;
+    }
+    let candidate: Partial<PendingNoteDraftRecord>;
+    try {
+      candidate = JSON.parse(reference.value) as Partial<PendingNoteDraftRecord>;
+    } catch {
+      return undefined;
+    }
+    if (
+      candidate.schema !== PRIVATE_STATE_NOTE_DRAFT_SCHEMA
+      || candidate.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_VERSION
+      || candidate.draftId !== reference.draftId
+      || typeof candidate.hasObservedRaw !== "boolean"
+      || typeof candidate.updatedAt !== "number"
+      || !Number.isFinite(candidate.updatedAt)
+      || (candidate.hasObservedRaw
+        ? (typeof candidate.observedRaw !== "string" && candidate.observedRaw !== null)
+        : candidate.observedRaw !== null)
+    ) {
+      return undefined;
+    }
+    const validated = validatePrivateState(candidate.state);
+    if (!validated.ok) {
+      return undefined;
+    }
+    if (candidate.hasObservedRaw && typeof candidate.observedRaw === "string") {
+      let baselineCandidate: unknown;
+      try {
+        baselineCandidate = JSON.parse(candidate.observedRaw) as unknown;
+      } catch {
+        return undefined;
+      }
+      if (!validatePrivateState(baselineCandidate).ok) {
+        return undefined;
+      }
+    }
+    return {
+      schema: PRIVATE_STATE_NOTE_DRAFT_SCHEMA,
+      schemaVersion: PRIVATE_STATE_NOTE_DRAFT_VERSION,
+      draftId: candidate.draftId,
+      state: candidate.state,
+      hasObservedRaw: candidate.hasObservedRaw,
+      observedRaw: candidate.observedRaw ?? null,
+      updatedAt: candidate.updatedAt,
+      key: reference.key,
+      value: reference.value,
+    };
   }
 
   private enqueue(state: PrivateState, operation: SaveOperation): Promise<SaveResult> {
@@ -411,7 +584,7 @@ export class OrderedStateStore {
       return this.commit(state).then((result) => {
         if (result.ok && operation.draftToken === this.latestDraftToken) {
           this.unsavedDraft = undefined;
-          this.clearPendingNoteDraft(operation.draftStorageValue);
+          this.clearPendingNoteDraft(operation.draftStorageReference);
         }
         return result;
       });
