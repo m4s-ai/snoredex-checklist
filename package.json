@@ -20,11 +20,15 @@
     }
   },
   "scripts": {
-    "check": "npm run typecheck && npm run smoke",
+    "check": "npm run typecheck && npm test && npm run smoke",
     "typecheck": "tsc --noEmit",
+    "test": "node --test tests/catalogue-validator.test.ts",
     "smoke": "node tests/toolchain-smoke.ts"
   },
   "devDependencies": {
+    "@types/node": "26.3.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
     "typescript": "7.0.2"
   }
 }
