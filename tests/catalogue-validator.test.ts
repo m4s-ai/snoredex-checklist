@@ -126,9 +126,54 @@ test("enforces item classes without using rarity as existence evidence", () => {
   }
 });
 
-test("rejects one card release projected through different set editions", () => {
+test("enforces one Work mapping and set edition per card release", () => {
+  expectFailure((catalogue) => {
+    catalogue.items[0].workId = null;
+  }, "CATALOGUE_RELEASE_RELATION_INVALID");
+  expectFailure((catalogue) => {
+    catalogue.items[0].workMappingState = "needs-explicit-equivalence";
+  }, "CATALOGUE_RELEASE_RELATION_INVALID");
+  expectFailure((catalogue) => {
+    catalogue.items[0].workMappingState = "unknown-state";
+  }, "CATALOGUE_RELEASE_RELATION_INVALID");
+
+  for (const workMappingState of ["mapped", "mapped-by-explicit-equivalence"]) {
+    const catalogue = cloneCatalogue();
+    catalogue.items[0].workMappingState = workMappingState;
+    assert.equal(validateCatalogue(seal(catalogue)).ok, true);
+  }
+  for (const workMappingState of ["unmapped", "needs-explicit-equivalence"]) {
+    const catalogue = cloneCatalogue();
+    catalogue.items[0].workMappingState = workMappingState;
+    catalogue.items[0].workId = null;
+    assert.equal(validateCatalogue(seal(catalogue)).ok, true);
+  }
+
   expectFailure((catalogue) => {
     catalogue.items[1].cardReleaseId = catalogue.items[0].cardReleaseId;
+  }, "CATALOGUE_RELEASE_RELATION_INVALID");
+
+  expectFailure((catalogue) => {
+    Object.assign(catalogue.items[1], {
+      cardReleaseId: catalogue.items[0].cardReleaseId,
+      setEditionId: catalogue.items[0].setEditionId,
+      localSetId: catalogue.items[0].localSetId,
+      localizationId: catalogue.items[0].localizationId,
+      workMappingState: "mapped-by-explicit-equivalence",
+    });
+  }, "CATALOGUE_RELEASE_RELATION_INVALID");
+
+  expectFailure((catalogue) => {
+    catalogue.works.push({
+      workId: "fixture-other-work",
+      cardKey: "fixture-other-work",
+      displayName: "Other Snorlax",
+    });
+    catalogue.items[1].cardReleaseId = catalogue.items[0].cardReleaseId;
+    catalogue.items[1].setEditionId = catalogue.items[0].setEditionId;
+    catalogue.items[1].localSetId = catalogue.items[0].localSetId;
+    catalogue.items[1].localizationId = catalogue.items[0].localizationId;
+    catalogue.items[1].workId = "fixture-other-work";
   }, "CATALOGUE_RELEASE_RELATION_INVALID");
 });
 

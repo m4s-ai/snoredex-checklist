@@ -20,6 +20,8 @@ const CORRECTION_FIELDS = new Set([
   "card-number",
   "current-state",
 ]);
+const MAPPED_WORK_STATES = new Set(["mapped", "mapped-by-explicit-equivalence"]);
+const UNMAPPED_WORK_STATES = new Set(["unmapped", "needs-explicit-equivalence"]);
 const RECONCILIATION_EXPECTATIONS = {
   retained: {
     action: "preserve",
@@ -127,6 +129,7 @@ interface Item {
   itemKind: "verified-printing" | "finish-candidate" | "research-placeholder";
   progressClass: "current-known" | "research";
   workId: string | null;
+  workMappingState: string;
   setEditionId: string;
   localSetId: string;
   cardReleaseId: string;
@@ -277,7 +280,10 @@ function validateSemantics(catalogue: Catalogue): CatalogueErrorCode[] {
 
   const physicalPrintingIds = new Set<string>();
   const legacyChecklistIds = new Set<string>();
-  const releaseEditions = new Map<string, string>();
+  const releaseMappings = new Map<
+    string,
+    { setEditionId: string; workId: string | null; workMappingState: string }
+  >();
   const assetBaseUrl = new URL(catalogue.meta.assetBaseUrl);
 
   for (const item of items.values()) {
@@ -294,11 +300,28 @@ function validateSemantics(catalogue: Catalogue): CatalogueErrorCode[] {
       errors.add("CATALOGUE_REFERENCE_INVALID");
     }
 
-    const releaseEdition = releaseEditions.get(item.cardReleaseId);
-    if (releaseEdition !== undefined && releaseEdition !== item.setEditionId) {
+    const workStateIsMapped = MAPPED_WORK_STATES.has(item.workMappingState);
+    if (
+      (!workStateIsMapped && !UNMAPPED_WORK_STATES.has(item.workMappingState)) ||
+      workStateIsMapped !== (item.workId !== null)
+    ) {
       errors.add("CATALOGUE_RELEASE_RELATION_INVALID");
     }
-    releaseEditions.set(item.cardReleaseId, item.setEditionId);
+
+    const releaseMapping = releaseMappings.get(item.cardReleaseId);
+    if (
+      releaseMapping !== undefined &&
+      (releaseMapping.setEditionId !== item.setEditionId ||
+        releaseMapping.workId !== item.workId ||
+        releaseMapping.workMappingState !== item.workMappingState)
+    ) {
+      errors.add("CATALOGUE_RELEASE_RELATION_INVALID");
+    }
+    releaseMappings.set(item.cardReleaseId, {
+      setEditionId: item.setEditionId,
+      workId: item.workId,
+      workMappingState: item.workMappingState,
+    });
 
     if (item.itemKind === "verified-printing") {
       if (item.physicalPrintingId === null || item.progressClass !== "current-known") {
