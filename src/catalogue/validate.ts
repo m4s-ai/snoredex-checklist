@@ -293,7 +293,8 @@ function validateSemantics(catalogue: Catalogue): CatalogueErrorCode[] {
       parsedAssetBaseUrl.password !== "" ||
       !parsedAssetBaseUrl.pathname.endsWith("/") ||
       parsedAssetBaseUrl.search !== "" ||
-      parsedAssetBaseUrl.hash !== ""
+      parsedAssetBaseUrl.hash !== "" ||
+      parsedAssetBaseUrl.href !== catalogue.meta.assetBaseUrl
     ) {
       errors.add("CATALOGUE_ASSET_INVALID");
     } else {
