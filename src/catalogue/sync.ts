@@ -298,10 +298,7 @@ async function readJournal(rootDirectory: string): Promise<JournalReadResult> {
 
 async function rollback(journal: TransactionJournal): Promise<void> {
   if (journal.phase === "committed") {
-    await rm(journal.stageDirectory, { recursive: true, force: true });
-    await rm(journal.backupVendorPath, { force: true });
-    await rm(journal.backupLockPath, { force: true });
-    await rm(journalPath(journal.rootDirectory), { force: true });
+    await cleanupCommitted(journal);
     return;
   }
 
@@ -317,6 +314,13 @@ async function rollback(journal: TransactionJournal): Promise<void> {
   } else if (!journal.hadLock) {
     await rm(journal.lockPath, { force: true });
   }
+  await rm(journal.stageDirectory, { recursive: true, force: true });
+  await rm(journal.backupVendorPath, { force: true });
+  await rm(journal.backupLockPath, { force: true });
+  await rm(journalPath(journal.rootDirectory), { force: true });
+}
+
+async function cleanupCommitted(journal: TransactionJournal): Promise<void> {
   await rm(journal.stageDirectory, { recursive: true, force: true });
   await rm(journal.backupVendorPath, { force: true });
   await rm(journal.backupLockPath, { force: true });
@@ -462,7 +466,7 @@ export async function syncCataloguePair(request: CatalogueSyncRequest): Promise<
     await move(stageVendorPath, vendor);
     await move(stageLockPath, lock);
     await writeJsonAtomically(journalPath(rootDirectory), { ...journal, phase: "committed" });
-    await rollback({ ...journal, phase: "committed" });
+    await cleanupCommitted({ ...journal, phase: "committed" }).catch(() => undefined);
     return { ok: true, lock: catalogueLock };
   } catch {
     try {
