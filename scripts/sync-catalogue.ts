@@ -1,4 +1,9 @@
-import { syncCataloguePair, MAX_CATALOGUE_BYTES, type SyncErrorCode } from "../src/catalogue/sync.ts";
+import {
+  MAX_CATALOGUE_BYTES,
+  SYNC_ERROR_CODES,
+  syncCataloguePair,
+  type SyncErrorCode,
+} from "../src/catalogue/sync.ts";
 
 function argument(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -79,7 +84,10 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (error) {
-  const code = error instanceof Error ? error.message : "SYNC_TRANSACTION_FAILED";
+  const message = error instanceof Error ? error.message : "";
+  const code: SyncErrorCode = (SYNC_ERROR_CODES as readonly string[]).includes(message)
+    ? (message as SyncErrorCode)
+    : "SYNC_TRANSACTION_FAILED";
   process.stderr.write(`${code}\n`);
   process.exitCode = 1;
 }
