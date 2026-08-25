@@ -57,6 +57,30 @@ npm run check
 does not fetch producer catalogue data or build an application artifact. Follow
 [`CONTRIBUTING.md`](CONTRIBUTING.md) and the owning issue before adding implementation commands.
 
+### Issue-backed catalogue sync
+
+Catalogue ingestion is an operator-invoked transaction; normal checks and runtime never fetch
+the producer. After a published producer artifact and its paired issues are accepted, run the
+sync with every identity value from the deployment manifest:
+
+```sh
+npm run sync:catalogue -- \
+  --artifact-url https://m4s-ai.github.io/snoredex-data/collector_catalogue.json \
+  --artifact-commit <40-hex-producer-commit> \
+  --contract-version 1.0.0 \
+  --fingerprint sha256:<64-hex-semantic-fingerprint> \
+  --byte-sha256 sha256:<64-hex-byte-digest> \
+  --issue-url https://github.com/m4s-ai/snoredex-checklist/issues/14 \
+  --issue-url https://github.com/m4s-ai/snoredex-data/issues/<publication-issue>
+```
+
+The command rejects unsupported or malformed input, oversized files, encoding/JSON failures,
+digest or semantic-fingerprint mismatches, skewed existing pairs and interrupted replacements.
+It stages and validates the bytes before replacing `vendor/snoredex-data/collector_catalogue.json`
+and `catalogue.lock.json` together. Do not run it against mutable branches or a producer issue that
+has not recorded the exact immutable URL, commit, contract version, fingerprint, digest and
+rollback identity.
+
 ## Licensing
 
 This is a mixed, noncommercial source-available work. See [`LICENSE.md`](LICENSE.md) and
