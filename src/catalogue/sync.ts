@@ -9,6 +9,8 @@ export const PRODUCER_REPOSITORY = "https://github.com/m4s-ai/snoredex-data";
 const LOCK_SCHEMA = "snoredex-checklist-catalogue-lock";
 const LOCK_VERSION = "1.0.0";
 const TRANSACTION_VERSION = 1;
+const TRANSACTION_LOCK_SCHEMA = "snoredex-checklist-transaction-lock";
+const TRANSACTION_LOCK_MAX_AGE_MS = 60 * 60 * 1000;
 
 export const SYNC_ERROR_CODES = [
   "SYNC_ARGUMENT_INVALID",
@@ -78,6 +80,13 @@ interface TransactionJournal {
 
 interface TransactionLock {
   readonly release: () => Promise<void>;
+}
+
+interface TransactionLockOwner {
+  readonly schema: typeof TRANSACTION_LOCK_SCHEMA;
+  readonly pid: number;
+  readonly startedAt: number;
+  readonly token: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -205,6 +214,63 @@ async function assertSafePaths(rootDirectory: string, paths: readonly string[]):
   }
 }
 
+function parseTransactionLock(value: unknown): TransactionLockOwner | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  if (
+    value.schema !== TRANSACTION_LOCK_SCHEMA ||
+    typeof value.pid !== "number" ||
+    !Number.isSafeInteger(value.pid) ||
+    value.pid <= 0 ||
+    typeof value.startedAt !== "number" ||
+    !Number.isFinite(value.startedAt) ||
+    value.startedAt <= 0 ||
+    typeof value.token !== "string" ||
+    !/^[0-9a-f-]{36}$/.test(value.token)
+  ) {
+    return undefined;
+  }
+  return value as unknown as TransactionLockOwner;
+}
+
+async function readTransactionLockOwner(path: string): Promise<TransactionLockOwner | undefined> {
+  try {
+    return parseTransactionLock(JSON.parse(await readFile(path, "utf8")));
+  } catch {
+    return undefined;
+  }
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !isNodeError(error, "ESRCH");
+  }
+}
+
+async function reclaimStaleTransactionLock(rootDirectory: string, path: string): Promise<boolean> {
+  const owner = await readTransactionLockOwner(path);
+  if (!owner) {
+    return false;
+  }
+  const age = Date.now() - owner.startedAt;
+  if (processIsAlive(owner.pid) && age < TRANSACTION_LOCK_MAX_AGE_MS) {
+    return false;
+  }
+  const quarantinePath = `${path}.stale-${randomUUID()}`;
+  try {
+    await assertSafePaths(rootDirectory, [path, quarantinePath]);
+    await rename(path, quarantinePath);
+  } catch {
+    return false;
+  }
+  await rm(quarantinePath, { force: true }).catch(() => undefined);
+  return true;
+}
+
 async function acquireTransactionLock(rootDirectory: string): Promise<
   | { readonly ok: true; readonly lock: TransactionLock }
   | { readonly ok: false; readonly code: "SYNC_TRANSACTION_BUSY" | "SYNC_TRANSACTION_UNCERTAIN" }
@@ -219,12 +285,34 @@ async function acquireTransactionLock(rootDirectory: string): Promise<
     return { ok: false, code: "SYNC_TRANSACTION_UNCERTAIN" };
   }
   let handle: Awaited<ReturnType<typeof open>>;
-  try {
-    handle = await open(lockPathname, "wx");
-  } catch (error) {
-    if (isNodeError(error, "EEXIST")) {
-      return { ok: false, code: "SYNC_TRANSACTION_BUSY" };
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      handle = await open(lockPathname, "wx");
+      break;
+    } catch (error) {
+      if (isNodeError(error, "EEXIST") && await reclaimStaleTransactionLock(rootDirectory, lockPathname)) {
+        continue;
+      }
+      if (isNodeError(error, "EEXIST")) {
+        return { ok: false, code: "SYNC_TRANSACTION_BUSY" };
+      }
+      return { ok: false, code: "SYNC_TRANSACTION_UNCERTAIN" };
     }
+  }
+  if (!handle!) {
+    return { ok: false, code: "SYNC_TRANSACTION_BUSY" };
+  }
+  const owner: TransactionLockOwner = {
+    schema: TRANSACTION_LOCK_SCHEMA,
+    pid: process.pid,
+    startedAt: Date.now(),
+    token: randomUUID(),
+  };
+  try {
+    await writeFile(lockPathname, `${JSON.stringify(owner)}\n`, "utf8");
+  } catch {
+    await handle.close().catch(() => undefined);
+    await rm(lockPathname, { force: true }).catch(() => undefined);
     return { ok: false, code: "SYNC_TRANSACTION_UNCERTAIN" };
   }
   let released = false;
@@ -235,7 +323,10 @@ async function acquireTransactionLock(rootDirectory: string): Promise<
         if (released) return;
         released = true;
         await handle.close();
-        await rm(lockPathname, { force: true });
+        const currentOwner = await readTransactionLockOwner(lockPathname);
+        if (currentOwner?.token === owner.token) {
+          await rm(lockPathname, { force: true });
+        }
       },
     },
   };

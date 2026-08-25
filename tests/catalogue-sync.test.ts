@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -204,6 +204,28 @@ test("serializes concurrent sync operations", async () => {
     assert.deepEqual(second, { ok: false, code: "SYNC_TRANSACTION_BUSY" });
     releaseResolve();
     assert.equal((await first).ok, true);
+  } finally {
+    await cleanup(rootDirectory);
+  }
+});
+
+test("reclaims a verifiably stale transaction lock", async () => {
+  const rootDirectory = await temporaryRoot();
+  try {
+    const lockDirectory = join(rootDirectory, ".catalogue-sync");
+    await mkdir(lockDirectory, { recursive: true });
+    await writeFile(
+      join(lockDirectory, "transaction.lock"),
+      `${JSON.stringify({
+        schema: "snoredex-checklist-transaction-lock",
+        pid: process.pid,
+        startedAt: Date.now() - 2 * 60 * 60 * 1000,
+        token: randomUUID(),
+      })}\n`,
+      "utf8",
+    );
+    assert.equal((await syncCataloguePair(requestFor(rootDirectory))).ok, true);
+    await assert.rejects(readFile(join(lockDirectory, "transaction.lock")));
   } finally {
     await cleanup(rootDirectory);
   }
