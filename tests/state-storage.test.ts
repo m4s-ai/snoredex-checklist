@@ -4,8 +4,10 @@ import test from "node:test";
 import {
   NOTE_AUTOSAVE_DELAY_MS,
   OrderedStateStore,
+  PRIVATE_STATE_NOTE_DRAFT_KEY,
   PRIVATE_STATE_STORAGE_KEY,
   PRIVATE_STATE_LOCK_NAME,
+  type DraftStorageLike,
   type StorageLockLike,
   type StorageLike,
   type TimerClock,
@@ -43,6 +45,16 @@ function state(quantityOwned: number, note?: string): PrivateState {
 
 class FakeStorage implements StorageLike {
   public values = new Map<string, string>();
+  public draftValues = new Map<string, string>();
+  public draftStorage: DraftStorageLike = {
+    getItem: (key) => this.draftValues.get(key) ?? null,
+    setItem: (key, value) => {
+      this.draftValues.set(key, value);
+    },
+    removeItem: (key) => {
+      this.draftValues.delete(key);
+    },
+  };
   public withLock: StorageLike["withLock"] = undefined;
   public failGet = false;
   public failSet: unknown = undefined;
@@ -146,6 +158,27 @@ test("note autosave uses blur or three seconds of inactivity and resets its time
   const flushed = await store.flushNote();
   assert.equal(flushed.ok, true);
   assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(0, "blurred") });
+});
+
+test("persists a pending note draft before pagehide and restores it after an interrupted flush", async () => {
+  const storage = new FakeStorage();
+  const clock = new FakeClock();
+  const store = new OrderedStateStore(storage, clock);
+  store.scheduleNoteSave(state(0, "before pagehide"));
+
+  assert.equal(storage.draftValues.has(PRIVATE_STATE_NOTE_DRAFT_KEY), true);
+  assert.equal(storage.writes, 0);
+
+  const restored = new OrderedStateStore(storage, clock);
+  assert.deepEqual(restored.read(), { ok: true, value: undefined });
+  assert.deepEqual(restored.unsaved(), state(0, "before pagehide"));
+
+  await store.flushNote();
+  assert.equal(storage.draftValues.has(PRIVATE_STATE_NOTE_DRAFT_KEY), false);
+  assert.deepEqual(new OrderedStateStore(storage).read(), {
+    ok: true,
+    value: state(0, "before pagehide"),
+  });
 });
 
 test("queued saves keep the newest edit authoritative and page-close flush is explicit", async () => {
