@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { semanticFingerprint, validateCatalogue } from "./validate.ts";
 
@@ -249,7 +249,12 @@ function parseCatalogueBytes(
   return { ok: true, catalogue: value as Record<string, unknown> };
 }
 
-function parseJournal(value: unknown): TransactionJournal | undefined {
+function isChildPath(parent: string, child: string): boolean {
+  const childRelative = relative(parent, child);
+  return childRelative !== "" && !childRelative.startsWith("..") && !isAbsolute(childRelative);
+}
+
+function parseJournal(value: unknown, expectedRootDirectory: string): TransactionJournal | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
@@ -266,6 +271,26 @@ function parseJournal(value: unknown): TransactionJournal | undefined {
     typeof value.backupLockPath !== "string" ||
     typeof value.hadVendor !== "boolean" ||
     typeof value.hadLock !== "boolean"
+  ) {
+    return undefined;
+  }
+  const rootDirectory = resolve(expectedRootDirectory);
+  const expectedVendorPath = cataloguePath(rootDirectory);
+  const expectedLockPath = lockPath(rootDirectory);
+  const stageDirectory = resolve(value.stageDirectory);
+  const transactionRoot = transactionDirectory(rootDirectory);
+  if (
+    value.rootDirectory !== rootDirectory ||
+    value.vendorPath !== expectedVendorPath ||
+    value.lockPath !== expectedLockPath ||
+    !isChildPath(transactionRoot, stageDirectory) ||
+    value.stageDirectory !== stageDirectory ||
+    value.stageVendorPath !== join(stageDirectory, "collector_catalogue.json") ||
+    value.stageLockPath !== join(stageDirectory, "catalogue.lock.json") ||
+    dirname(value.backupVendorPath) !== dirname(expectedVendorPath) ||
+    dirname(value.backupLockPath) !== dirname(expectedLockPath) ||
+    !basename(value.backupVendorPath).startsWith(`${basename(expectedVendorPath)}.backup-`) ||
+    !basename(value.backupLockPath).startsWith(`${basename(expectedLockPath)}.backup-`)
   ) {
     return undefined;
   }
@@ -286,7 +311,7 @@ async function readJournal(rootDirectory: string): Promise<JournalReadResult> {
     } catch {
       return { kind: "invalid" };
     }
-    const journal = parseJournal(value);
+    const journal = parseJournal(value, resolve(rootDirectory));
     return journal ? { kind: "valid", journal } : { kind: "invalid" };
   } catch (error) {
     if (isNodeError(error, "ENOENT")) {

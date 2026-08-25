@@ -170,6 +170,38 @@ test("fails closed on a damaged transaction journal", async () => {
   }
 });
 
+test("fails closed on a journal that points outside the repository root", async () => {
+  const rootDirectory = await temporaryRoot();
+  try {
+    const journalDirectory = join(rootDirectory, ".catalogue-sync");
+    await mkdir(journalDirectory, { recursive: true });
+    await writeFile(
+      join(journalDirectory, "journal.json"),
+      JSON.stringify({
+        version: 1,
+        phase: "prepared",
+        rootDirectory,
+        vendorPath: "C:\\outside\\catalogue.json",
+        lockPath: "C:\\outside\\catalogue.lock.json",
+        stageDirectory: "C:\\outside\\stage",
+        stageVendorPath: "C:\\outside\\stage\\collector_catalogue.json",
+        stageLockPath: "C:\\outside\\stage\\catalogue.lock.json",
+        backupVendorPath: "C:\\outside\\catalogue.backup",
+        backupLockPath: "C:\\outside\\catalogue.lock.backup",
+        hadVendor: true,
+        hadLock: true,
+      }),
+      "utf8",
+    );
+    assert.deepEqual(await readCommittedCataloguePair(rootDirectory), {
+      ok: false,
+      code: "SYNC_TRANSACTION_UNCERTAIN",
+    });
+  } finally {
+    await cleanup(rootDirectory);
+  }
+});
+
 test("rolls back an interrupted pair replacement", async () => {
   const rootDirectory = await temporaryRoot();
   try {
