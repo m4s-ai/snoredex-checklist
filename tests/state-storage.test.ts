@@ -295,6 +295,27 @@ test("consumes a foreign source after an edited direct replacement save", async 
   assert.equal(reloaded.unsaved(), undefined);
 });
 
+test("keeps a recovered source for an unrelated read-based immediate edit", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1) });
+  writer.scheduleNoteSave(state(1, "keep my note"));
+
+  const unrelated = new OrderedStateStore(storage);
+  assert.deepEqual(unrelated.read(), { ok: true, value: state(1) });
+  assert.deepEqual(await unrelated.saveImmediate(state(2)), {
+    ok: true,
+    value: { state: state(2) },
+  });
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), false);
+  const reloaded = new OrderedStateStore(storage);
+  assert.deepEqual(reloaded.read(), { ok: true, value: state(2) });
+  assert.deepEqual(reloaded.unsaved(), state(1, "keep my note"));
+});
+
 test("allows an explicit rebase after a recovered draft conflicts", async () => {
   const storage = new FakeStorage();
   const seed = new OrderedStateStore(storage);
@@ -454,6 +475,7 @@ test("rotates a tombstoned source before owner reactivation", async () => {
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
   otherTab.discardUnsavedDraft();
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
+  const sourceKey = [...storage.draftValues.keys()][0];
 
   const recovered = new OrderedStateStore(storage);
   assert.deepEqual(recovered.read(), { ok: true, value: state(2) });
@@ -462,7 +484,6 @@ test("rotates a tombstoned source before owner reactivation", async () => {
     ok: true,
     value: { state: state(1, "rotate me") },
   });
-  const sourceKey = [...storage.draftValues.keys()].find((key) => !key.includes(":tombstone:"));
   assert.equal(typeof sourceKey, "string");
 
   storage.emitInactive();

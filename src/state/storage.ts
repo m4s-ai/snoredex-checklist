@@ -116,11 +116,11 @@ export function getPendingNoteDraftKey(draftId: string): string {
   return `${PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX}${draftId}`;
 }
 
-function getConsumedDraftKey(draftId: string, sourceKey?: string): string {
+function getConsumedDraftKey(draftId: string, sourceKey?: string, sourceRevision?: string): string {
   if (sourceKey === undefined) {
     return `${PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX}${draftId}`;
   }
-  return `${PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX}${encodeURIComponent(draftId)}:${encodeURIComponent(sourceKey)}`;
+  return `${PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX}${encodeURIComponent(draftId)}:${encodeURIComponent(sourceKey)}:${encodeURIComponent(sourceRevision ?? "legacy")}`;
 }
 
 let generatedDraftId = 0;
@@ -288,6 +288,7 @@ export class OrderedStateStore {
   private activeDraftReference: DraftReference | undefined;
   private activeDraftOwned = false;
   private recoveredForeignReference: DraftReference | undefined;
+  private recoveredDraftPresented = false;
   private supersededDraftReference: DraftReference | undefined;
   private observedRaw: string | null | undefined;
   private hasObservedRaw = false;
@@ -338,7 +339,29 @@ export class OrderedStateStore {
   }
 
   public unsaved(): PrivateState | undefined {
+    if (this.recoveredForeignReference !== undefined) {
+      this.recoveredDraftPresented = true;
+    }
     return this.unsavedDraft === undefined ? undefined : cloneState(this.unsavedDraft);
+  }
+
+  private isRecoveredDraftReplacement(state: PrivateState): boolean {
+    if (this.recoveredForeignReference === undefined || this.unsavedDraft === undefined) {
+      return false;
+    }
+    if (this.recoveredDraftPresented) {
+      return true;
+    }
+    // A direct caller that submits an edited recovered note without first
+    // reading unsaved() still demonstrates adoption by retaining a recovered
+    // note field. An unrelated read()-based edit that omits it does not.
+    const submittedItems = new Map(state.items.map((item) => [item.itemId, item]));
+    return this.unsavedDraft.items.some((item) => {
+      if (item.note === undefined) {
+        return false;
+      }
+      return submittedItems.get(item.itemId)?.note !== undefined;
+    });
   }
 
   /** Explicitly rebase a recovered draft onto the currently stored canonical envelope. */
@@ -391,6 +414,7 @@ export class OrderedStateStore {
       }
     }
     this.recoveredForeignReference = undefined;
+    this.recoveredDraftPresented = false;
     this.startDraftHeartbeat();
     return success(draft);
   }
@@ -406,6 +430,7 @@ export class OrderedStateStore {
     this.activeDraftReference = undefined;
     this.activeDraftOwned = false;
     this.recoveredForeignReference = undefined;
+    this.recoveredDraftPresented = false;
     this.supersededDraftReference = undefined;
     this.latestDraftRevision = undefined;
     this.unsavedDraft = undefined;
@@ -415,7 +440,9 @@ export class OrderedStateStore {
   public saveImmediate(state: PrivateState): Promise<SaveResult> {
     const generation = ++this.immediateGeneration;
     const previousDraft = this.activeDraftOwned ? this.activeDraftReference : undefined;
-    const recoveredDraft = this.recoveredForeignReference;
+    const recoveredDraft = this.isRecoveredDraftReplacement(state)
+      ? this.recoveredForeignReference
+      : undefined;
     this.cancelPendingNote(previousDraft !== undefined);
     const draftToken = this.rememberDraft(state);
     const persistedReference = this.persistPendingNoteDraft(state);
@@ -435,7 +462,9 @@ export class OrderedStateStore {
     const generation = ++this.noteGeneration;
     this.cancelPendingNote();
     const previousDraft = this.activeDraftOwned ? this.activeDraftReference : undefined;
-    const recoveredDraft = this.recoveredForeignReference;
+    const recoveredDraft = this.isRecoveredDraftReplacement(state)
+      ? this.recoveredForeignReference
+      : undefined;
     const draftToken = this.rememberDraft(state);
     const supersededDraftReference = this.supersededDraftReference ?? recoveredDraft;
     const draftStorageReference = this.persistPendingNoteDraft(state) ?? previousDraft;
@@ -603,7 +632,7 @@ export class OrderedStateStore {
       // overwrite an owner write that races with this transfer.
       const tombstoneKey = draftStorage.listKeys === undefined
         ? getConsumedDraftKey(reference.draftId)
-        : getConsumedDraftKey(reference.draftId, reference.key);
+        : getConsumedDraftKey(reference.draftId, reference.key, reference.revision);
       draftStorage.setItem(tombstoneKey, JSON.stringify(tombstone));
     } catch {
       // A failed tombstone must not make a verified canonical save fail.
@@ -827,9 +856,11 @@ export class OrderedStateStore {
         this.consumeSupersededDraft(selectedReference);
       }
       this.recoveredForeignReference = undefined;
+      this.recoveredDraftPresented = false;
       return;
     }
     this.unsavedDraft = cloneState(validated.value);
+    this.recoveredDraftPresented = false;
     this.hasObservedRaw = selected.hasObservedRaw;
     this.observedRaw = selected.hasObservedRaw ? selected.observedRaw : undefined;
   }
@@ -867,12 +898,12 @@ export class OrderedStateStore {
         if (tombstone === undefined) {
           // It cannot suppress or safely identify a source; discard only the
           // malformed marker and leave every recovery record untouched.
-          draftStorage.removeItem(tombstoneKey);
+          this.removeTombstoneIfUnchanged(draftStorage, tombstoneKey, tombstoneRaw);
           continue;
         }
         const sourceRaw = draftStorage.getItem(tombstone.sourceKey);
         if (sourceRaw === null) {
-          draftStorage.removeItem(tombstoneKey);
+          this.removeTombstoneIfUnchanged(draftStorage, tombstoneKey, tombstoneRaw);
           continue;
         }
         const source = this.parseDraftReference({
@@ -881,7 +912,7 @@ export class OrderedStateStore {
           draftId: tombstone.sourceDraftId,
         });
         if (source === undefined || source.revision !== tombstone.sourceRevision) {
-          draftStorage.removeItem(tombstoneKey);
+          this.removeTombstoneIfUnchanged(draftStorage, tombstoneKey, tombstoneRaw);
           continue;
         }
         // An explicit inactive lifecycle marker is the only safe reclamation
@@ -893,13 +924,30 @@ export class OrderedStateStore {
         if (confirmedRaw !== sourceRaw) {
           continue;
         }
+        if (draftStorage.getItem(tombstoneKey) !== tombstoneRaw) {
+          continue;
+        }
         // Owners rotate to a new physical key whenever this tombstone exists,
         // so deleting this unchanged key cannot remove a later owner revision.
         draftStorage.removeItem(tombstone.sourceKey);
-        draftStorage.removeItem(tombstoneKey);
+        this.removeTombstoneIfUnchanged(draftStorage, tombstoneKey, tombstoneRaw);
       } catch {
         // Recovery cleanup is best effort and must never block loading state.
       }
+    }
+  }
+
+  private removeTombstoneIfUnchanged(
+    draftStorage: DraftStorageLike,
+    tombstoneKey: string,
+    expectedRaw: string,
+  ): void {
+    try {
+      if (draftStorage.getItem(tombstoneKey) === expectedRaw) {
+        draftStorage.removeItem(tombstoneKey);
+      }
+    } catch {
+      // Recovery cleanup remains best effort.
     }
   }
 
@@ -1032,8 +1080,12 @@ export class OrderedStateStore {
         if (result.ok && operation.draftToken === this.latestDraftToken) {
           this.unsavedDraft = undefined;
           this.clearPendingNoteDraft(operation.draftStorageReference, true);
+          if (this.activeDraftOwned && this.activeDraftReference !== undefined) {
+            this.clearPendingNoteDraft(this.activeDraftReference, true);
+          }
           this.consumeSupersededDraft(operation.supersededDraftReference);
           this.recoveredForeignReference = undefined;
+          this.recoveredDraftPresented = false;
           this.supersededDraftReference = undefined;
         }
         return result;
