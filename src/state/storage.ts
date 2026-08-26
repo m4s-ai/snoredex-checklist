@@ -2049,8 +2049,10 @@ export class OrderedStateStore {
     if (!previousAuthority.ok) return error(previousAuthority.error);
     if (previousAuthority.active !== undefined) this.lastKnownGood = cloneState(previousAuthority.active);
     const nextSerialized = serialized;
-    if (previousAuthority.enveloped && previousAuthority.recovery !== undefined) {
-      const recoverySerialized = serializePrivateState(previousAuthority.recovery);
+    if (previousAuthority.enveloped) {
+      const recoverySerialized = previousAuthority.recovery === undefined
+        ? { ok: true as const, value: "null" }
+        : serializePrivateState(previousAuthority.recovery);
       if (!recoverySerialized.ok) return error("STORAGE_WRITE_FAILED");
       if (previousRecoveryRaw === recoverySerialized.value) {
         // The sidecar already contains the canonical recovery snapshot.

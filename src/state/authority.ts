@@ -100,7 +100,9 @@ export function readStateAuthority(raw: string | null, recoveryRaw: string | nul
       return {
         ok: true,
         active: envelope.active ?? undefined,
-        recovery: envelope.recovery ?? sidecar,
+        // An explicit envelope null means the recovery was consumed. A stale
+        // sidecar must never resurrect that already-consumed snapshot.
+        recovery: envelope.recovery ?? undefined,
         enveloped: true,
       };
     }

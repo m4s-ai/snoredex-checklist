@@ -222,6 +222,25 @@ test("migrates newer envelope recovery over a stale sidecar", async () => {
   assert.equal(storage.values.get(PRIVATE_STATE_RECOVERY_STORAGE_KEY)?.includes("stale recovery"), false);
 });
 
+test("clears a stale sidecar when an earlier envelope explicitly consumed recovery", async () => {
+  const storage = new FakeStorage();
+  const active = state("active");
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify({
+    schema: "snoredex-private-state-authority",
+    schemaVersion: 1,
+    active,
+    recovery: null,
+  }));
+  storage.values.set(PRIVATE_STATE_RECOVERY_STORAGE_KEY, JSON.stringify(state("consumed recovery")));
+  const store = new OrderedStateStore(storage);
+  assert.deepEqual(store.read(), { ok: true, value: active });
+  assert.deepEqual(await store.saveImmediate({ ...active, items: [] }), {
+    ok: true,
+    value: { state: { ...active, items: [] } },
+  });
+  assert.equal(storage.values.get(PRIVATE_STATE_RECOVERY_STORAGE_KEY), "null");
+});
+
 test("writes recovery before active replacement and leaves active state untouched when recovery fails", async () => {
   const storage = new FailRecoveryWriteStorage();
   const original = state("keep me");
