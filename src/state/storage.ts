@@ -723,8 +723,15 @@ export class OrderedStateStore {
     try {
       const expected = this.parseDraftReference(reference);
       const raw = draftStorage.getItem(reference.key);
-      if (expected === undefined || raw === null) {
+      if (expected === undefined) {
         return false;
+      }
+      // The source may have been removed by its owner after tombstoning
+      // failed.  There is no remaining recovery data to suppress, so treat
+      // the already-absent source as successfully retired instead of
+      // rebuilding it from the cached reference on a later save.
+      if (raw === null) {
+        return true;
       }
       const current = this.parseDraftReference({ ...reference, value: raw });
       if (current === undefined || current.ownerState === "consumed" || current.revision !== reference.revision) {

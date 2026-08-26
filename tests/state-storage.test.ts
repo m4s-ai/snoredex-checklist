@@ -918,8 +918,17 @@ test("retains a foreign recovery reference when post-commit tombstoning fails", 
   });
   assert.deepEqual(recovered.unsaved(), state(1, "foreign recovery"));
   assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), false);
+  const foreignKey = [...storage.draftValues.keys()]
+    .find((key) => storage.draftValues.get(key)?.includes("foreign recovery"));
+  assert.equal(typeof foreignKey, "string");
+  storage.draftValues.delete(foreignKey as string);
   storage.failTombstoneSet = undefined;
   assert.deepEqual(recovered.read(), { ok: true, value: state(1, "edited recovery") });
+  assert.equal(recovered.unsaved(), undefined);
+  assert.deepEqual(await recovered.saveImmediate(state(2, "later edit")), {
+    ok: true,
+    value: { state: state(2, "later edit") },
+  });
   assert.equal(recovered.unsaved(), undefined);
 });
 
