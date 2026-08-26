@@ -116,12 +116,16 @@ export function getPendingNoteDraftKey(draftId: string): string {
   return `${PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX}${draftId}`;
 }
 
-function getConsumedDraftKey(draftId: string): string {
-  return `${PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX}${draftId}`;
+function getConsumedDraftKey(draftId: string, sourceKey?: string): string {
+  if (sourceKey === undefined) {
+    return `${PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX}${draftId}`;
+  }
+  return `${PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX}${encodeURIComponent(draftId)}:${encodeURIComponent(sourceKey)}`;
 }
 
 let generatedDraftId = 0;
 let generatedDraftRevision = 0;
+let generatedDraftStorageKey = 0;
 
 function createDraftId(): string {
   generatedDraftId += 1;
@@ -136,6 +140,11 @@ function createDraftId(): string {
 function createDraftRevision(draftId: string): string {
   generatedDraftRevision += 1;
   return `${draftId}:${Date.now().toString(36)}-${generatedDraftRevision.toString(36)}`;
+}
+
+function createRotatedDraftStorageKey(draftId: string): string {
+  generatedDraftStorageKey += 1;
+  return `${PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX}${draftId}:rotated:${Date.now().toString(36)}-${generatedDraftStorageKey.toString(36)}`;
 }
 
 const browserClock: TimerClock = {
@@ -406,11 +415,7 @@ export class OrderedStateStore {
   public saveImmediate(state: PrivateState): Promise<SaveResult> {
     const generation = ++this.immediateGeneration;
     const previousDraft = this.activeDraftOwned ? this.activeDraftReference : undefined;
-    const recoveredDraft = this.recoveredForeignReference !== undefined
-      && this.unsavedDraft !== undefined
-      && sameState(state, this.unsavedDraft)
-      ? this.recoveredForeignReference
-      : undefined;
+    const recoveredDraft = this.recoveredForeignReference;
     this.cancelPendingNote(previousDraft !== undefined);
     const draftToken = this.rememberDraft(state);
     const persistedReference = this.persistPendingNoteDraft(state);
@@ -430,11 +435,7 @@ export class OrderedStateStore {
     const generation = ++this.noteGeneration;
     this.cancelPendingNote();
     const previousDraft = this.activeDraftOwned ? this.activeDraftReference : undefined;
-    const recoveredDraft = this.recoveredForeignReference !== undefined
-      && this.unsavedDraft !== undefined
-      && sameState(state, this.unsavedDraft)
-      ? this.recoveredForeignReference
-      : undefined;
+    const recoveredDraft = this.recoveredForeignReference;
     const draftToken = this.rememberDraft(state);
     const supersededDraftReference = this.supersededDraftReference ?? recoveredDraft;
     const draftStorageReference = this.persistPendingNoteDraft(state) ?? previousDraft;
@@ -513,7 +514,15 @@ export class OrderedStateStore {
     }
     const draftRevision = revision ?? createDraftRevision(this.draftId);
     let ownerState: PendingNoteDraftRecord["ownerState"] = "active";
-    const key = getPendingNoteDraftKey(this.draftId);
+    let key = this.activeDraftOwned && this.activeDraftReference !== undefined
+      ? this.activeDraftReference.key
+      : getPendingNoteDraftKey(this.draftId);
+    if (this.isTombstonedDraftKey(key, this.draftId)) {
+      // A tombstoned source is immutable from this point on. Rotate to a new
+      // physical key before any owner refresh or edit so reclamation can remove
+      // the old key without racing a later write from the original owner.
+      key = createRotatedDraftStorageKey(this.draftId);
+    }
     if (this.activeDraftOwned && this.activeDraftReference?.key === key) {
       try {
         const raw = draftStorage.getItem(key);
@@ -592,7 +601,10 @@ export class OrderedStateStore {
       };
       // Keep the source record untouched. A separate state-scoped marker cannot
       // overwrite an owner write that races with this transfer.
-      draftStorage.setItem(getConsumedDraftKey(reference.draftId), JSON.stringify(tombstone));
+      const tombstoneKey = draftStorage.listKeys === undefined
+        ? getConsumedDraftKey(reference.draftId)
+        : getConsumedDraftKey(reference.draftId, reference.key);
+      draftStorage.setItem(tombstoneKey, JSON.stringify(tombstone));
     } catch {
       // A failed tombstone must not make a verified canonical save fail.
     }
@@ -660,8 +672,14 @@ export class OrderedStateStore {
         updatedAt: Date.now(),
         ownerState: nextOwnerState,
       } satisfies PendingNoteDraftRecord);
-      draftStorage.setItem(reference.key, value);
-      this.activeDraftReference = { ...reference, value };
+      if (ownerState === "active" && this.isTombstonedDraftKey(reference.key, reference.draftId)) {
+        const rotatedKey = createRotatedDraftStorageKey(this.draftId);
+        draftStorage.setItem(rotatedKey, value);
+        this.activeDraftReference = { ...reference, key: rotatedKey, value };
+      } else {
+        draftStorage.setItem(reference.key, value);
+        this.activeDraftReference = { ...reference, value };
+      }
     } catch {
       // Lifecycle hints are best effort; failure must not affect canonical state.
     }
@@ -688,6 +706,27 @@ export class OrderedStateStore {
       return parsed !== undefined && parsed.ownerState === "active";
     } catch {
       // An unreadable owner marker is not evidence that a foreign tab is live.
+      return false;
+    }
+  }
+
+  private isTombstonedDraftKey(key: string, draftId: string): boolean {
+    try {
+      const draftStorage = this.storage.draftStorage;
+      if (draftStorage === undefined) {
+        return false;
+      }
+      return this.tombstoneKeys(draftStorage).some((tombstoneKey) => {
+        const raw = draftStorage.getItem(tombstoneKey);
+        if (raw === null) {
+          return false;
+        }
+        const tombstone = this.parseConsumedDraftRecord(raw);
+        return tombstone !== undefined
+          && tombstone.sourceKey === key
+          && tombstone.sourceDraftId === draftId;
+      });
+    } catch {
       return false;
     }
   }
@@ -736,11 +775,19 @@ export class OrderedStateStore {
       .map((key) => {
         try {
           const raw = draftStorage.getItem(key);
-          return raw === null ? undefined : this.parseDraftReference({
-            key,
-            value: raw,
-            draftId: key.slice(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX.length),
-          });
+          if (raw === null) {
+            return undefined;
+          }
+          let draftId = key.slice(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX.length);
+          try {
+            const parsed = JSON.parse(raw) as { draftId?: unknown };
+            if (typeof parsed.draftId === "string") {
+              draftId = parsed.draftId;
+            }
+          } catch {
+            return undefined;
+          }
+          return this.parseDraftReference({ key, value: raw, draftId });
         } catch {
           return undefined;
         }
@@ -793,17 +840,17 @@ export class OrderedStateStore {
       return false;
     }
     try {
-      const raw = draftStorage.getItem(getConsumedDraftKey(candidate.draftId));
-      if (raw === null) {
-        return false;
-      }
-      const tombstone = this.parseConsumedDraftRecord(raw);
-      if (tombstone === undefined
-        || tombstone.sourceKey !== candidate.key
-        || tombstone.sourceDraftId !== candidate.draftId) {
-        return false;
-      }
-      return tombstone.sourceRevision === candidate.revision;
+      return this.tombstoneKeys(draftStorage).some((tombstoneKey) => {
+        const raw = draftStorage.getItem(tombstoneKey);
+        if (raw === null) {
+          return false;
+        }
+        const tombstone = this.parseConsumedDraftRecord(raw);
+        return tombstone !== undefined
+          && tombstone.sourceKey === candidate.key
+          && tombstone.sourceDraftId === candidate.draftId
+          && tombstone.sourceRevision === candidate.revision;
+      });
     } catch {
       return false;
     }
@@ -818,6 +865,9 @@ export class OrderedStateStore {
         }
         const tombstone = this.parseConsumedDraftRecord(tombstoneRaw);
         if (tombstone === undefined) {
+          // It cannot suppress or safely identify a source; discard only the
+          // malformed marker and leave every recovery record untouched.
+          draftStorage.removeItem(tombstoneKey);
           continue;
         }
         const sourceRaw = draftStorage.getItem(tombstone.sourceKey);
@@ -843,6 +893,8 @@ export class OrderedStateStore {
         if (confirmedRaw !== sourceRaw) {
           continue;
         }
+        // Owners rotate to a new physical key whenever this tombstone exists,
+        // so deleting this unchanged key cannot remove a later owner revision.
         draftStorage.removeItem(tombstone.sourceKey);
         draftStorage.removeItem(tombstoneKey);
       } catch {

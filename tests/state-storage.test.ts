@@ -260,6 +260,7 @@ test("durable recovery restores its original concurrency baseline", async () => 
 
   const otherTab = new OrderedStateStore(storage);
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
+  otherTab.discardUnsavedDraft();
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
 
   const restored = new OrderedStateStore(storage, clock);
@@ -270,6 +271,28 @@ test("durable recovery restores its original concurrency baseline", async () => 
     error: "STORAGE_COMMIT_UNCERTAIN",
   });
   assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(2) });
+});
+
+test("consumes a foreign source after an edited direct replacement save", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1) });
+  writer.scheduleNoteSave(state(1, "recovered draft"));
+
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: state(1) });
+  assert.deepEqual(recovered.unsaved(), state(1, "recovered draft"));
+  assert.deepEqual(await recovered.saveImmediate(state(1, "edited recovered draft")), {
+    ok: true,
+    value: { state: state(1, "edited recovered draft") },
+  });
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), true);
+  const reloaded = new OrderedStateStore(storage);
+  assert.deepEqual(reloaded.read(), { ok: true, value: state(1, "edited recovered draft") });
+  assert.equal(reloaded.unsaved(), undefined);
 });
 
 test("allows an explicit rebase after a recovered draft conflicts", async () => {
@@ -283,6 +306,7 @@ test("allows an explicit rebase after a recovered draft conflicts", async () => 
 
   const otherTab = new OrderedStateStore(storage);
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
+  otherTab.discardUnsavedDraft();
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
 
   storage.emitInactive();
@@ -313,6 +337,7 @@ test("preserves a live foreign recovery draft during rebase", async () => {
 
   const otherTab = new OrderedStateStore(storage);
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
+  otherTab.discardUnsavedDraft();
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
 
   const foreignKey = [...storage.draftValues.keys()][0];
@@ -328,16 +353,21 @@ test("preserves a live foreign recovery draft during rebase", async () => {
     ok: true,
     value: { state: state(1, "live draft") },
   });
-  assert.equal(storage.draftValues.size, 2);
-  const transferred = JSON.parse(storage.draftValues.get(foreignKey) as string) as Record<string, unknown>;
+  storage.emitInactive();
+  storage.emitActive();
+  assert.equal(storage.draftValues.size, 3);
+  const activeForeignKey = [...storage.draftValues.keys()]
+    .find((key) => key !== foreignKey && !key.includes(":tombstone:"));
+  assert.equal(typeof activeForeignKey, "string");
+  const transferred = JSON.parse(storage.draftValues.get(activeForeignKey as string) as string) as Record<string, unknown>;
   assert.equal(transferred.ownerState, "active");
-  const tombstoneKey = [...storage.draftValues.keys()].find((key) => key !== foreignKey);
+  const tombstoneKey = [...storage.draftValues.keys()].find((key) => key.includes(":tombstone:"));
   assert.equal(typeof tombstoneKey, "string");
   const tombstone = JSON.parse(storage.draftValues.get(tombstoneKey as string) as string) as Record<string, unknown>;
   assert.equal(tombstone.sourceKey, foreignKey);
   storage.emitInactive();
   storage.emitActive();
-  const lifecycleRefreshed = JSON.parse(storage.draftValues.get(foreignKey) as string) as Record<string, unknown>;
+  const lifecycleRefreshed = JSON.parse(storage.draftValues.get(activeForeignKey as string) as string) as Record<string, unknown>;
   assert.equal(lifecycleRefreshed.ownerState, "active");
   const reloaded = new OrderedStateStore(storage);
   assert.deepEqual(reloaded.read(), { ok: true, value: state(1, "live draft") });
@@ -360,6 +390,7 @@ test("does not consume a foreign draft that changed during ownership transfer", 
   writer.scheduleNoteSave(state(1, "live draft"));
   const otherTab = new OrderedStateStore(storage);
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
+  otherTab.discardUnsavedDraft();
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
 
   const foreignKey = [...storage.draftValues.keys()][0];
@@ -392,6 +423,7 @@ test("reclaims consumed source records after an explicit inactive lifecycle", as
   writer.scheduleNoteSave(state(1, "reclaim me"));
   const otherTab = new OrderedStateStore(storage);
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
+  otherTab.discardUnsavedDraft();
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
 
   const recovered = new OrderedStateStore(storage);
@@ -410,6 +442,42 @@ test("reclaims consumed source records after an explicit inactive lifecycle", as
   assert.equal(storage.draftValues.size, 0);
 });
 
+test("rotates a tombstoned source before owner reactivation", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1) });
+  writer.scheduleNoteSave(state(1, "rotate me"));
+  const otherTab = new OrderedStateStore(storage);
+  assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
+  otherTab.discardUnsavedDraft();
+  assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
+
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: state(2) });
+  assert.deepEqual(recovered.rebaseUnsavedDraft(), { ok: true, value: state(1, "rotate me") });
+  assert.deepEqual(await recovered.saveImmediate(state(1, "rotate me")), {
+    ok: true,
+    value: { state: state(1, "rotate me") },
+  });
+  const sourceKey = [...storage.draftValues.keys()].find((key) => !key.includes(":tombstone:"));
+  assert.equal(typeof sourceKey, "string");
+
+  storage.emitInactive();
+  storage.emitActive();
+  const rotatedKey = [...storage.draftValues.keys()]
+    .find((key) => key !== sourceKey && !key.includes(":tombstone:"));
+  assert.equal(typeof rotatedKey, "string");
+
+  const reloaded = new OrderedStateStore(storage);
+  assert.deepEqual(reloaded.read(), { ok: true, value: state(1, "rotate me") });
+  assert.equal(reloaded.unsaved(), undefined);
+  assert.equal(storage.draftValues.has(sourceKey as string), false);
+  assert.equal(storage.draftValues.has(rotatedKey as string), true);
+});
+
 test("does not tombstone a later foreign revision that reuses the same state", async () => {
   const storage = new FakeStorage();
   const seed = new OrderedStateStore(storage);
@@ -420,6 +488,7 @@ test("does not tombstone a later foreign revision that reuses the same state", a
   writer.scheduleNoteSave(state(1, "same state revision"));
   const otherTab = new OrderedStateStore(storage);
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
+  otherTab.discardUnsavedDraft();
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
 
   const foreignKey = [...storage.draftValues.keys()][0];
@@ -447,6 +516,7 @@ test("keeps the old baseline when rebasing cannot persist the replacement draft"
   writer.scheduleNoteSave(state(1, "draft with old baseline"));
   const otherTab = new OrderedStateStore(storage);
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
+  otherTab.discardUnsavedDraft();
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
 
   const recovered = new OrderedStateStore(storage);
