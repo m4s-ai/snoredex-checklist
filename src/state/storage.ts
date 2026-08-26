@@ -406,6 +406,11 @@ export class OrderedStateStore {
   public saveImmediate(state: PrivateState): Promise<SaveResult> {
     const generation = ++this.immediateGeneration;
     const previousDraft = this.activeDraftOwned ? this.activeDraftReference : undefined;
+    const recoveredDraft = this.recoveredForeignReference !== undefined
+      && this.unsavedDraft !== undefined
+      && sameState(state, this.unsavedDraft)
+      ? this.recoveredForeignReference
+      : undefined;
     this.cancelPendingNote(previousDraft !== undefined);
     const draftToken = this.rememberDraft(state);
     const persistedReference = this.persistPendingNoteDraft(state);
@@ -417,16 +422,21 @@ export class OrderedStateStore {
       generation,
       draftToken,
       draftStorageReference: persistedReference ?? previousDraft,
-      supersededDraftReference: this.supersededDraftReference,
+      supersededDraftReference: this.supersededDraftReference ?? recoveredDraft,
     });
   }
 
   public scheduleNoteSave(state: PrivateState): void {
     const generation = ++this.noteGeneration;
     this.cancelPendingNote();
-    const draftToken = this.rememberDraft(state);
     const previousDraft = this.activeDraftOwned ? this.activeDraftReference : undefined;
-    const supersededDraftReference = this.supersededDraftReference;
+    const recoveredDraft = this.recoveredForeignReference !== undefined
+      && this.unsavedDraft !== undefined
+      && sameState(state, this.unsavedDraft)
+      ? this.recoveredForeignReference
+      : undefined;
+    const draftToken = this.rememberDraft(state);
+    const supersededDraftReference = this.supersededDraftReference ?? recoveredDraft;
     const draftStorageReference = this.persistPendingNoteDraft(state) ?? previousDraft;
     if (draftStorageReference !== undefined && previousDraft?.key !== draftStorageReference.key) {
       this.clearPendingNoteDraft(previousDraft);
@@ -720,6 +730,7 @@ export class OrderedStateStore {
     if (draftStorage === undefined) {
       return;
     }
+    this.reclaimConsumedDrafts(draftStorage);
     const keys = this.draftKeys(draftStorage);
     const candidates = keys
       .map((key) => {
@@ -786,21 +797,86 @@ export class OrderedStateStore {
       if (raw === null) {
         return false;
       }
-      const tombstone = JSON.parse(raw) as Partial<ConsumedDraftRecord>;
-      if (
-        tombstone.schema !== PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_SCHEMA
-        || tombstone.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION
+      const tombstone = this.parseConsumedDraftRecord(raw);
+      if (tombstone === undefined
         || tombstone.sourceKey !== candidate.key
-        || tombstone.sourceDraftId !== candidate.draftId
-        || typeof tombstone.sourceRevision !== "string"
-        || typeof tombstone.consumedAt !== "number"
-        || !Number.isFinite(tombstone.consumedAt)
-      ) {
+        || tombstone.sourceDraftId !== candidate.draftId) {
         return false;
       }
       return tombstone.sourceRevision === candidate.revision;
     } catch {
       return false;
+    }
+  }
+
+  private reclaimConsumedDrafts(draftStorage: DraftStorageLike): void {
+    for (const tombstoneKey of this.tombstoneKeys(draftStorage)) {
+      try {
+        const tombstoneRaw = draftStorage.getItem(tombstoneKey);
+        if (tombstoneRaw === null) {
+          continue;
+        }
+        const tombstone = this.parseConsumedDraftRecord(tombstoneRaw);
+        if (tombstone === undefined) {
+          continue;
+        }
+        const sourceRaw = draftStorage.getItem(tombstone.sourceKey);
+        if (sourceRaw === null) {
+          draftStorage.removeItem(tombstoneKey);
+          continue;
+        }
+        const source = this.parseDraftReference({
+          key: tombstone.sourceKey,
+          value: sourceRaw,
+          draftId: tombstone.sourceDraftId,
+        });
+        if (source === undefined || source.revision !== tombstone.sourceRevision) {
+          draftStorage.removeItem(tombstoneKey);
+          continue;
+        }
+        // An explicit inactive lifecycle marker is the only safe reclamation
+        // authority; active or uncleanly terminated owners remain recoverable.
+        if (source.ownerState !== "inactive") {
+          continue;
+        }
+        const confirmedRaw = draftStorage.getItem(tombstone.sourceKey);
+        if (confirmedRaw !== sourceRaw) {
+          continue;
+        }
+        draftStorage.removeItem(tombstone.sourceKey);
+        draftStorage.removeItem(tombstoneKey);
+      } catch {
+        // Recovery cleanup is best effort and must never block loading state.
+      }
+    }
+  }
+
+  private parseConsumedDraftRecord(raw: string): ConsumedDraftRecord | undefined {
+    try {
+      const candidate = JSON.parse(raw) as Partial<ConsumedDraftRecord>;
+      if (
+        candidate.schema !== PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_SCHEMA
+        || candidate.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION
+        || typeof candidate.sourceKey !== "string"
+        || !candidate.sourceKey.startsWith(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX)
+        || typeof candidate.sourceDraftId !== "string"
+        || typeof candidate.sourceRevision !== "string"
+        || candidate.sourceRevision.length === 0
+        || typeof candidate.consumedAt !== "number"
+        || !Number.isFinite(candidate.consumedAt)
+      ) {
+        return undefined;
+      }
+      return {
+        schema: PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_SCHEMA,
+        schemaVersion: PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION,
+        sourceKey: candidate.sourceKey,
+        sourceDraftId: candidate.sourceDraftId,
+        sourceRevision: candidate.sourceRevision,
+        consumedAt: candidate.consumedAt,
+      };
+    } catch {
+      return undefined;
     }
   }
 
@@ -810,6 +886,19 @@ export class OrderedStateStore {
       const keys = draftStorage.listKeys?.(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX);
       if (keys !== undefined) {
         return keys.filter((key) => !key.startsWith(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX));
+      }
+    } catch {
+      return [ownKey];
+    }
+    return [ownKey];
+  }
+
+  private tombstoneKeys(draftStorage: DraftStorageLike): readonly string[] {
+    const ownKey = getConsumedDraftKey(this.draftId);
+    try {
+      const keys = draftStorage.listKeys?.(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX);
+      if (keys !== undefined) {
+        return keys.filter((key) => key.startsWith(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX));
       }
     } catch {
       return [ownKey];
@@ -892,6 +981,7 @@ export class OrderedStateStore {
           this.unsavedDraft = undefined;
           this.clearPendingNoteDraft(operation.draftStorageReference, true);
           this.consumeSupersededDraft(operation.supersededDraftReference);
+          this.recoveredForeignReference = undefined;
           this.supersededDraftReference = undefined;
         }
         return result;

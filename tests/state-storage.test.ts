@@ -382,6 +382,34 @@ test("does not consume a foreign draft that changed during ownership transfer", 
   assert.deepEqual(restored.unsaved(), state(1, "edited by owner"));
 });
 
+test("reclaims consumed source records after an explicit inactive lifecycle", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1) });
+  writer.scheduleNoteSave(state(1, "reclaim me"));
+  const otherTab = new OrderedStateStore(storage);
+  assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
+  assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
+
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: state(2) });
+  assert.deepEqual(recovered.rebaseUnsavedDraft(), { ok: true, value: state(1, "reclaim me") });
+  assert.deepEqual(await recovered.saveImmediate(state(1, "reclaim me")), {
+    ok: true,
+    value: { state: state(1, "reclaim me") },
+  });
+  assert.equal(storage.draftValues.size, 2);
+  storage.emitInactive();
+
+  const reloaded = new OrderedStateStore(storage);
+  assert.deepEqual(reloaded.read(), { ok: true, value: state(1, "reclaim me") });
+  assert.equal(reloaded.unsaved(), undefined);
+  assert.equal(storage.draftValues.size, 0);
+});
+
 test("does not tombstone a later foreign revision that reuses the same state", async () => {
   const storage = new FakeStorage();
   const seed = new OrderedStateStore(storage);
