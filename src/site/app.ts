@@ -113,7 +113,12 @@ function renderInvalid(container: HTMLElement, recoverableLocalization?: string)
   section.setAttribute("aria-live", "polite");
   section.append(text("h2", "Invalid checklist link"), text("p", "The complete link could not be validated. No catalogue or private collection state was read."));
   const actions = text("p");
-  actions.append(link(recoverableLocalization ? `./${serializeQuery({ localization: recoverableLocalization })}` : "./", "Clear invalid criteria"), " · ", link("../", "Home"));
+  if (recoverableLocalization || window.location.search) {
+    actions.append(link(recoverableLocalization ? `./${serializeQuery({ localization: recoverableLocalization })}` : "./", "Clear invalid criteria"));
+  }
+  const homeHref = document.body.dataset.page === "collection" ? "../" : "./";
+  if (actions.childElementCount > 0) actions.append(" · ");
+  actions.append(link(homeHref, "Home"));
   section.append(actions); container.replaceChildren(section);
 }
 
