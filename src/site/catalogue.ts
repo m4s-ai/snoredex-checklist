@@ -60,6 +60,10 @@ function isNullableString(value: unknown): value is string | null {
   return value === null || isString(value);
 }
 
+function isNullableText(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
 function allRecords(rows: readonly unknown[]): rows is readonly Record<string, unknown>[] {
   return rows.every(isRecord);
 }
@@ -163,6 +167,8 @@ export async function validateSnapshot(value: unknown): Promise<SnapshotValidati
         !isString(item.localSetId) || !isString(item.cardReleaseId) || !isString(item.itemKind) ||
         !isString(item.progressClass) || !isString(item.workMappingState) ||
         !isString(item.cardName) ||
+        !isNullableText(item.localCardName) || !isNullableText(item.localSetCode) ||
+        !isNullableText(item.localSetName) || !isNullableText(item.collectorNumber) ||
         !isNullableString(item.workId) || !isNullableString(item.physicalPrintingId) ||
         !isNullableString(item.imageAssetId) || !isString(item.imageScope) ||
         !itemKinds.has(item.itemKind) || !progressClasses.has(item.progressClass)) {

@@ -64,6 +64,18 @@ test("fails closed when an item card name is missing or empty", async () => {
   assert.deepEqual(await validateSnapshot(reseal(empty)), { ok: false, reason: "invalid" });
 });
 
+test("fails closed on invalid rendered item presentation fields", async () => {
+  for (const field of ["localSetCode", "collectorNumber", "localCardName"] as const) {
+    const missing = structuredClone(fixture.catalogue);
+    delete (missing.items[0] as Record<string, unknown>)[field];
+    assert.deepEqual(await validateSnapshot(reseal(missing)), { ok: false, reason: "invalid" });
+
+    const invalid = structuredClone(fixture.catalogue);
+    (invalid.items[0] as Record<string, unknown>)[field] = {};
+    assert.deepEqual(await validateSnapshot(reseal(invalid)), { ok: false, reason: "invalid" });
+  }
+});
+
 test("fails closed when content does not match its declared fingerprint", async () => {
   const corrupted = structuredClone(fixture.catalogue);
   corrupted.items[0].cardName = "Corrupted snapshot";
