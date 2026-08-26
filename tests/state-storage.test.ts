@@ -326,13 +326,17 @@ test("preserves a live foreign recovery draft during rebase", async () => {
     ok: true,
     value: { state: state(1, "live draft") },
   });
-  assert.equal(storage.draftValues.size, 1);
+  assert.equal(storage.draftValues.size, 2);
   const transferred = JSON.parse(storage.draftValues.get(foreignKey) as string) as Record<string, unknown>;
-  assert.equal(transferred.ownerState, "consumed");
+  assert.equal(transferred.ownerState, "active");
+  const tombstoneKey = [...storage.draftValues.keys()].find((key) => key !== foreignKey);
+  assert.equal(typeof tombstoneKey, "string");
+  const tombstone = JSON.parse(storage.draftValues.get(tombstoneKey as string) as string) as Record<string, unknown>;
+  assert.equal(tombstone.sourceKey, foreignKey);
   storage.emitInactive();
   storage.emitActive();
   const lifecycleRefreshed = JSON.parse(storage.draftValues.get(foreignKey) as string) as Record<string, unknown>;
-  assert.equal(lifecycleRefreshed.ownerState, "consumed");
+  assert.equal(lifecycleRefreshed.ownerState, "active");
   const reloaded = new OrderedStateStore(storage);
   assert.deepEqual(reloaded.read(), { ok: true, value: state(1, "live draft") });
   assert.equal(reloaded.unsaved(), undefined);

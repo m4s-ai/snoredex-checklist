@@ -14,6 +14,9 @@ const DRAFT_OWNER_HEARTBEAT_MS = 5_000;
 const PRIVATE_STATE_NOTE_DRAFT_SCHEMA = "snoredex-checklist.pending-note";
 const PRIVATE_STATE_NOTE_DRAFT_VERSION = 1;
 const PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:`;
+const PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_SCHEMA = "snoredex-checklist.pending-note-tombstone";
+const PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION = 1;
+const PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:tombstone:`;
 
 export const PERSISTENCE_ERROR_CODES = [
   "LOCAL_STATE_UNSUPPORTED",
@@ -92,6 +95,15 @@ interface PendingNoteDraftRecord {
   readonly ownerState: "active" | "inactive" | "consumed";
 }
 
+interface ConsumedDraftRecord {
+  readonly schema: typeof PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_SCHEMA;
+  readonly schemaVersion: typeof PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION;
+  readonly sourceKey: string;
+  readonly sourceDraftId: string;
+  readonly state: unknown;
+  readonly consumedAt: number;
+}
+
 interface DraftReference {
   readonly key: string;
   readonly value: string;
@@ -100,6 +112,10 @@ interface DraftReference {
 
 export function getPendingNoteDraftKey(draftId: string): string {
   return `${PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX}${draftId}`;
+}
+
+function getConsumedDraftKey(draftId: string): string {
+  return `${PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX}${draftId}`;
 }
 
 let generatedDraftId = 0;
@@ -541,17 +557,17 @@ export class OrderedStateStore {
       if (!expectedState.ok || !currentState.ok || !sameState(expectedState.value, currentState.value)) {
         return;
       }
-      const consumed: PendingNoteDraftRecord = {
-        schema: PRIVATE_STATE_NOTE_DRAFT_SCHEMA,
-        schemaVersion: PRIVATE_STATE_NOTE_DRAFT_VERSION,
-        draftId: current.draftId,
+      const tombstone: ConsumedDraftRecord = {
+        schema: PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_SCHEMA,
+        schemaVersion: PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION,
+        sourceKey: reference.key,
+        sourceDraftId: reference.draftId,
         state: current.state,
-        hasObservedRaw: current.hasObservedRaw,
-        observedRaw: current.observedRaw,
-        updatedAt: Date.now(),
-        ownerState: "consumed",
+        consumedAt: Date.now(),
       };
-      draftStorage.setItem(reference.key, JSON.stringify(consumed));
+      // Keep the source record untouched. A separate state-scoped marker cannot
+      // overwrite an owner write that races with this transfer.
+      draftStorage.setItem(getConsumedDraftKey(reference.draftId), JSON.stringify(tombstone));
     } catch {
       // A failed tombstone must not make a verified canonical save fail.
     }
@@ -703,7 +719,9 @@ export class OrderedStateStore {
         }
       })
       .filter((candidate): candidate is PendingNoteDraftRecord & { readonly key: string; readonly value: string } =>
-        candidate !== undefined && candidate.ownerState !== "consumed");
+        candidate !== undefined
+        && candidate.ownerState !== "consumed"
+        && !this.isDraftTombstoned(candidate));
     const selected = candidates.find((candidate) => candidate.draftId === this.draftId)
       ?? candidates.sort((left, right) => right.updatedAt - left.updatedAt)[0];
     if (selected === undefined) {
@@ -734,12 +752,41 @@ export class OrderedStateStore {
     this.observedRaw = selected.hasObservedRaw ? selected.observedRaw : undefined;
   }
 
+  private isDraftTombstoned(candidate: PendingNoteDraftRecord & { readonly key: string }): boolean {
+    const draftStorage = this.storage.draftStorage;
+    if (draftStorage === undefined) {
+      return false;
+    }
+    try {
+      const raw = draftStorage.getItem(getConsumedDraftKey(candidate.draftId));
+      if (raw === null) {
+        return false;
+      }
+      const tombstone = JSON.parse(raw) as Partial<ConsumedDraftRecord>;
+      if (
+        tombstone.schema !== PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_SCHEMA
+        || tombstone.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION
+        || tombstone.sourceKey !== candidate.key
+        || tombstone.sourceDraftId !== candidate.draftId
+        || typeof tombstone.consumedAt !== "number"
+        || !Number.isFinite(tombstone.consumedAt)
+      ) {
+        return false;
+      }
+      const tombstoneState = validatePrivateState(tombstone.state);
+      const candidateState = validatePrivateState(candidate.state);
+      return tombstoneState.ok && candidateState.ok && sameState(tombstoneState.value, candidateState.value);
+    } catch {
+      return false;
+    }
+  }
+
   private draftKeys(draftStorage: DraftStorageLike): readonly string[] {
     const ownKey = getPendingNoteDraftKey(this.draftId);
     try {
       const keys = draftStorage.listKeys?.(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX);
       if (keys !== undefined) {
-        return keys;
+        return keys.filter((key) => !key.startsWith(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX));
       }
     } catch {
       return [ownKey];
