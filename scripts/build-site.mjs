@@ -50,7 +50,18 @@ try {
   try {
     await rename(staging, output);
   } catch (error) {
-    if (hadPrevious) await rename(previous, output).catch(() => undefined);
+    if (hadPrevious) {
+      try {
+        await rename(previous, output);
+      } catch (restoreError) {
+        const describe = (value) => value instanceof Error ? value.message : String(value);
+        throw new Error(
+          `site output replacement failed (${describe(error)}); restoring the previous output also failed (${describe(restoreError)}). ` +
+          `The last-known-good output is preserved at ${previous}.`,
+          { cause: error },
+        );
+      }
+    }
     throw error;
   }
   if (hadPrevious) await rm(previous, { recursive: true, force: true });
