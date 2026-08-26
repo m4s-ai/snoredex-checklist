@@ -48,7 +48,7 @@ source, build artifacts, URLs, analytics, logs, or public issues.
 | --- | --- | --- |
 | Ingestion | Validate supported contract, digest, fingerprint, uniqueness, and references | Keep the last known-good snapshot |
 | Catalogue projection | Present producer-assigned item and progress classes without inference | Show unsupported/stale state; do not render guessed truth |
-| State | Normalize and atomically persist one versioned local envelope | Preserve readable state and keep export available |
+| State | Normalize and atomically persist one logical local authority with a legacy-readable active key and one recovery sidecar | Preserve rollback readability, reject stale operations and keep private export/recovery available |
 | Reconciliation | Conserve every old item ID across catalogue transitions | Stop on missing, ambiguous, 1:N, or N:1 transitions |
 | UI | Render untrusted producer text safely and expose accessible collection controls | Fail visibly; never leak private values |
 | Publication | Build a static artifact from the committed snapshot only | Do not deploy when provenance or gates disagree |

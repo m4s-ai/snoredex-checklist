@@ -4,8 +4,11 @@ import {
   type PrivateState,
   type StateErrorCode,
 } from "./domain.ts";
+import { readStateAuthority } from "./authority.ts";
 
 export const PRIVATE_STATE_STORAGE_KEY = "snoredex-checklist.private-state";
+/** Optional recovery sidecar; the active state key remains legacy-readable for rollback. */
+export const PRIVATE_STATE_RECOVERY_STORAGE_KEY = "snoredex-checklist.private-state.recovery";
 export const PRIVATE_STATE_LOCK_NAME = "snoredex-checklist.private-state-write";
 export const PRIVATE_STATE_NOTE_DRAFT_KEY = "snoredex-checklist.private-state.note-draft";
 export const NOTE_AUTOSAVE_DELAY_MS = 3_000;
@@ -55,6 +58,7 @@ export interface DraftStorageLike {
 export interface StorageLike {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  readonly removeItem?: (key: string) => void;
   readonly withLock?: <T>(callback: () => Promise<T>) => Promise<T>;
   readonly draftStorage?: DraftStorageLike;
   readonly draftId?: string;
@@ -237,6 +241,7 @@ export function getBrowserStorage(): PersistenceResult<StorageLike> {
     return success({
       getItem: (key) => storage.getItem(key),
       setItem: (key, value) => storage.setItem(key, value),
+      removeItem: (key) => storage.removeItem(key),
       draftId: createDraftId(),
       withLock: (callback) => locks.request(PRIVATE_STATE_LOCK_NAME, callback),
       draftStorage: {
@@ -357,21 +362,14 @@ export class OrderedStateStore {
       this.restorePendingNoteDraft();
       return success(undefined);
     }
-    let candidate: unknown;
-    try {
-      candidate = JSON.parse(raw) as unknown;
-    } catch {
+    const authority = readStateAuthority(raw);
+    if (!authority.ok) {
       this.restorePendingNoteDraft(false);
-      return error("LOCAL_STATE_UNREADABLE");
+      return error(authority.error);
     }
-    const validated = validatePrivateState(candidate);
-    if (!validated.ok) {
-      this.restorePendingNoteDraft(false);
-      return error(classifyStateError(validated.error));
-    }
-    this.lastKnownGood = cloneState(validated.value);
+    this.lastKnownGood = authority.active === undefined ? undefined : cloneState(authority.active);
     this.restorePendingNoteDraft();
-    return success(cloneState(validated.value));
+    return success(authority.active === undefined ? undefined : cloneState(authority.active));
   }
 
   public lastReadable(): PrivateState | undefined {
@@ -417,9 +415,8 @@ export class OrderedStateStore {
       if (typeof record.observedRaw !== "string") {
         return null;
       }
-      const candidate = JSON.parse(record.observedRaw) as unknown;
-      const validated = validatePrivateState(candidate);
-      return validated.ok ? validated.value : null;
+      const authority = readStateAuthority(record.observedRaw);
+      return authority.ok ? authority.active : null;
     } catch {
       // A malformed recovery baseline must never cause us to consume a
       // foreign draft implicitly.
@@ -473,17 +470,9 @@ export class OrderedStateStore {
     }
     let current: PrivateState | undefined;
     if (raw !== null) {
-      let candidate: unknown;
-      try {
-        candidate = JSON.parse(raw) as unknown;
-      } catch {
-        return error("LOCAL_STATE_UNREADABLE");
-      }
-      const validated = validatePrivateState(candidate);
-      if (!validated.ok) {
-        return error(classifyStateError(validated.error));
-      }
-      current = validated.value;
+      const authority = readStateAuthority(raw);
+      if (!authority.ok) return error(authority.error);
+      current = authority.active;
     }
     const draft = cloneState(this.unsavedDraft);
     const previousOwnedReference = this.activeDraftOwned ? this.activeDraftReference : undefined;
@@ -927,7 +916,7 @@ export class OrderedStateStore {
       return true;
     }
     try {
-      return validatePrivateState(JSON.parse(this.observedRaw) as unknown).ok;
+      return readStateAuthority(this.observedRaw).ok;
     } catch {
       return false;
     }
@@ -1906,13 +1895,7 @@ export class OrderedStateStore {
       return undefined;
     }
     if (candidate.hasObservedRaw && typeof candidate.observedRaw === "string") {
-      let baselineCandidate: unknown;
-      try {
-        baselineCandidate = JSON.parse(candidate.observedRaw) as unknown;
-      } catch {
-        return undefined;
-      }
-      if (!validatePrivateState(baselineCandidate).ok) {
+      if (!readStateAuthority(candidate.observedRaw).ok) {
         return undefined;
       }
     }
@@ -2044,23 +2027,17 @@ export class OrderedStateStore {
       return error("STORAGE_WRITE_FAILED");
     }
     let previous: string | null;
+    let previousRecoveryRaw: string | null;
     try {
       previous = this.storage.getItem(PRIVATE_STATE_STORAGE_KEY);
+      previousRecoveryRaw = this.storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY);
     } catch {
       return error("STORAGE_UNAVAILABLE");
     }
     if (!this.hasObservedRaw) {
       if (previous !== null) {
-        let previousCandidate: unknown;
-        try {
-          previousCandidate = JSON.parse(previous) as unknown;
-        } catch {
-          return error("LOCAL_STATE_UNREADABLE");
-        }
-        const previousState = validatePrivateState(previousCandidate);
-        if (!previousState.ok) {
-          return error(classifyStateError(previousState.error));
-        }
+        const previousAuthority = readStateAuthority(previous);
+        if (!previousAuthority.ok) return error(previousAuthority.error);
         return error("STORAGE_COMMIT_UNCERTAIN");
       }
       this.observedRaw = previous;
@@ -2068,21 +2045,36 @@ export class OrderedStateStore {
     } else if (previous !== this.observedRaw) {
       return error("STORAGE_COMMIT_UNCERTAIN");
     }
-    if (previous !== null) {
-      let previousCandidate: unknown;
-      try {
-        previousCandidate = JSON.parse(previous) as unknown;
-      } catch {
-        return error("LOCAL_STATE_UNREADABLE");
+    const previousAuthority = readStateAuthority(previous, previousRecoveryRaw);
+    if (!previousAuthority.ok) return error(previousAuthority.error);
+    if (previousAuthority.active !== undefined) this.lastKnownGood = cloneState(previousAuthority.active);
+    const nextSerialized = serialized;
+    if (previousAuthority.enveloped) {
+      const recoverySerialized = previousAuthority.recovery === undefined
+        ? { ok: true as const, value: "null" }
+        : serializePrivateState(previousAuthority.recovery);
+      if (!recoverySerialized.ok) return error("STORAGE_WRITE_FAILED");
+      if (previousRecoveryRaw === recoverySerialized.value) {
+        // The sidecar already contains the canonical recovery snapshot.
+      } else {
+        try {
+          this.storage.setItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY, recoverySerialized.value);
+        } catch (cause) {
+          let recoveryAfter: string | null;
+          try {
+            recoveryAfter = this.storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY);
+          } catch {
+            return error("STORAGE_COMMIT_UNCERTAIN");
+          }
+          if (recoveryAfter === previousRecoveryRaw) {
+            return error(isQuotaError(cause) ? "STORAGE_QUOTA_EXCEEDED" : "STORAGE_WRITE_FAILED");
+          }
+          return error("STORAGE_COMMIT_UNCERTAIN");
+        }
       }
-      const previousState = validatePrivateState(previousCandidate);
-      if (!previousState.ok) {
-        return error(classifyStateError(previousState.error));
-      }
-      this.lastKnownGood = cloneState(previousState.value);
     }
     try {
-      this.storage.setItem(PRIVATE_STATE_STORAGE_KEY, serialized.value);
+      this.storage.setItem(PRIVATE_STATE_STORAGE_KEY, nextSerialized.value);
     } catch (cause) {
       return this.readAfterFailedWrite(previous, isQuotaError(cause));
     }
@@ -2092,17 +2084,17 @@ export class OrderedStateStore {
     } catch {
       return error("STORAGE_COMMIT_UNCERTAIN");
     }
-    if (readBack !== serialized.value) {
+    if (readBack !== nextSerialized.value) {
       return error("STORAGE_COMMIT_UNCERTAIN");
     }
-    const validated = validatePrivateState(JSON.parse(readBack) as unknown);
-    if (!validated.ok) {
+    const validated = readStateAuthority(readBack);
+    if (!validated.ok || validated.active === undefined) {
       return error("STORAGE_COMMIT_UNCERTAIN");
     }
     this.observedRaw = readBack;
     this.hasObservedRaw = true;
-    this.lastKnownGood = cloneState(validated.value);
-    return success({ state: cloneState(validated.value) });
+    this.lastKnownGood = cloneState(validated.active);
+    return success({ state: cloneState(validated.active) });
   }
 
   private readAfterFailedWrite(previous: string | null, quota: boolean): SaveResult {
