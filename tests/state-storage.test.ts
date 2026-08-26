@@ -93,6 +93,7 @@ class FakeStorage implements StorageLike {
       this.draftValues.delete(key);
     },
     listKeys: (prefix) => [...this.draftValues.keys()].filter((key) => key.startsWith(prefix)),
+    withAtomicUpdate: (callback) => callback(),
   };
   public withLock: StorageLike["withLock"] = undefined;
   public failGet = false;
@@ -1054,6 +1055,7 @@ test("keeps distinct tombstones for unenumerable rotated copies", async () => {
     getItem: fullDraftStorage.getItem,
     setItem: fullDraftStorage.setItem,
     removeItem: fullDraftStorage.removeItem,
+    withAtomicUpdate: fullDraftStorage.withAtomicUpdate,
   };
   const clock = new FakeClock();
   const store = new OrderedStateStore(storage, clock);
@@ -1281,6 +1283,7 @@ test("uses the known owned draft key when draft enumeration is unavailable", asy
     getItem: fullDraftStorage.getItem,
     setItem: fullDraftStorage.setItem,
     removeItem: fullDraftStorage.removeItem,
+    withAtomicUpdate: fullDraftStorage.withAtomicUpdate,
   };
   const store = new OrderedStateStore(storage);
   storage.failDraftRemove = new Error("cleanup unavailable");
@@ -1300,6 +1303,7 @@ test("discovers a rotated draft through its pointer without listKeys", () => {
     getItem: fullDraftStorage.getItem,
     setItem: fullDraftStorage.setItem,
     removeItem: fullDraftStorage.removeItem,
+    withAtomicUpdate: fullDraftStorage.withAtomicUpdate,
   };
   const store = new OrderedStateStore(storage);
   store.scheduleNoteSave(state(0, "first pointed draft"));
@@ -1317,6 +1321,7 @@ test("discovers the first unenumerable draft through its pointer", () => {
     getItem: fullDraftStorage.getItem,
     setItem: fullDraftStorage.setItem,
     removeItem: fullDraftStorage.removeItem,
+    withAtomicUpdate: fullDraftStorage.withAtomicUpdate,
   };
   const writer = new OrderedStateStore(storage);
   writer.scheduleNoteSave(state(0, "first unenumerable draft"));
@@ -1333,6 +1338,7 @@ test("keeps pointer registry entries for concurrent unenumerable owners", () => 
     getItem: fullDraftStorage.getItem,
     setItem: fullDraftStorage.setItem,
     removeItem: fullDraftStorage.removeItem,
+    withAtomicUpdate: fullDraftStorage.withAtomicUpdate,
   };
   const first = new OrderedStateStore(storage);
   const second = new OrderedStateStore(storage);
@@ -1346,7 +1352,7 @@ test("keeps pointer registry entries for concurrent unenumerable owners", () => 
   assert.equal([...storage.draftValues.values()].filter((raw) => raw.includes("unenumerable owner")).length, 2);
 });
 
-test("fails closed while another owner holds the pointer registry lease", () => {
+test("fails closed without an atomic pointer registry primitive", () => {
   const storage = new FakeStorage();
   const fullDraftStorage = storage.draftStorage;
   storage.draftStorage = {
@@ -1354,114 +1360,13 @@ test("fails closed while another owner holds the pointer registry lease", () => 
     setItem: fullDraftStorage.setItem,
     removeItem: fullDraftStorage.removeItem,
   };
-  storage.draftValues.set(`${PRIVATE_STATE_NOTE_DRAFT_KEY}:pointer-lock`, JSON.stringify({
-    token: "foreign-owner:lease",
-    expiresAt: Date.now() + 1_000,
-  }));
   const store = new OrderedStateStore(storage);
 
-  assert.deepEqual(store.scheduleNoteSave(state(0, "lease contention")), {
+  assert.deepEqual(store.scheduleNoteSave(state(0, "atomic primitive unavailable")), {
     ok: false,
     error: "STORAGE_WRITE_FAILED",
   });
-  assert.equal([...storage.draftValues.values()].some((raw) => raw.includes("lease contention")), false);
-});
-
-test("remerges a pointer after the lease changes during publication", () => {
-  const storage = new FakeStorage();
-  const fullDraftStorage = storage.draftStorage;
-  storage.draftStorage = {
-    getItem: fullDraftStorage.getItem,
-    setItem: fullDraftStorage.setItem,
-    removeItem: fullDraftStorage.removeItem,
-  };
-  const pointerKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:current`;
-  const lockKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:pointer-lock`;
-  let registryPublished = false;
-  let injected = false;
-  storage.afterDraftGetItem = (key, value) => {
-    if (key === pointerKey && value !== null) {
-      registryPublished = true;
-    }
-    if (injected || !registryPublished || key !== lockKey || value === null) {
-      return;
-    }
-    injected = true;
-    storage.draftValues.set(pointerKey, JSON.stringify({
-      schema: "snoredex-checklist.pending-note-pointer",
-      schemaVersion: 2,
-      pointers: [{
-        schema: "snoredex-checklist.pending-note-pointer",
-        schemaVersion: 2,
-        draftId: "concurrent-owner",
-        sourceKey: `${PRIVATE_STATE_NOTE_DRAFT_KEY}:concurrent-source`,
-        sourceRevision: "1",
-      }],
-    }));
-    storage.draftValues.delete(lockKey);
-  };
-
-  const store = new OrderedStateStore(storage);
-  assert.equal(store.scheduleNoteSave(state(0, "lease merge recovery")).ok, true);
-  storage.afterDraftGetItem = undefined;
-  const pointerRaw = storage.draftValues.get(pointerKey);
-  assert.equal(typeof pointerRaw, "string");
-  const pointerRecord = JSON.parse(pointerRaw as string) as {
-    pointers?: Array<{ draftId?: string; sourceKey?: string }>;
-  };
-  const ownSourceKey = [...storage.draftValues.keys()]
-    .find((key) => key !== pointerKey && key !== lockKey);
-  assert.equal(pointerRecord.pointers?.length, 2);
-  assert.equal(pointerRecord.pointers?.[0]?.draftId, "concurrent-owner");
-  assert.equal(pointerRecord.pointers?.[1]?.sourceKey, ownSourceKey);
-});
-
-test("remerges a pointer when a stale callback overwrites the registry", () => {
-  const storage = new FakeStorage();
-  const fullDraftStorage = storage.draftStorage;
-  storage.draftStorage = {
-    getItem: fullDraftStorage.getItem,
-    setItem: fullDraftStorage.setItem,
-    removeItem: fullDraftStorage.removeItem,
-  };
-  const pointerKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:current`;
-  const lockKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:pointer-lock`;
-  let registryPublished = false;
-  let injected = false;
-  storage.afterDraftGetItem = (key, value) => {
-    if (key === pointerKey && value !== null) {
-      registryPublished = true;
-    }
-    if (injected || !registryPublished || key !== lockKey || value === null) {
-      return;
-    }
-    injected = true;
-    storage.draftValues.set(pointerKey, JSON.stringify({
-      schema: "snoredex-checklist.pending-note-pointer",
-      schemaVersion: 2,
-      pointers: [{
-        schema: "snoredex-checklist.pending-note-pointer",
-        schemaVersion: 2,
-        draftId: "stale-owner",
-        sourceKey: `${PRIVATE_STATE_NOTE_DRAFT_KEY}:stale-source`,
-        sourceRevision: "1",
-      }],
-    }));
-  };
-
-  const store = new OrderedStateStore(storage);
-  assert.equal(store.scheduleNoteSave(state(0, "stale pointer recovery")).ok, true);
-  storage.afterDraftGetItem = undefined;
-  const pointerRaw = storage.draftValues.get(pointerKey);
-  assert.equal(typeof pointerRaw, "string");
-  const pointerRecord = JSON.parse(pointerRaw as string) as {
-    pointers?: Array<{ draftId?: string; sourceKey?: string }>;
-  };
-  const ownSourceKey = [...storage.draftValues.keys()]
-    .find((key) => key !== pointerKey && key !== lockKey);
-  assert.equal(pointerRecord.pointers?.length, 2);
-  assert.equal(pointerRecord.pointers?.[0]?.draftId, "stale-owner");
-  assert.equal(pointerRecord.pointers?.[1]?.sourceKey, ownSourceKey);
+  assert.equal([...storage.draftValues.values()].some((raw) => raw.includes("atomic primitive unavailable")), false);
 });
 
 test("probes a pointed foreign owner's tombstone without listKeys", () => {
@@ -1471,6 +1376,7 @@ test("probes a pointed foreign owner's tombstone without listKeys", () => {
     getItem: fullDraftStorage.getItem,
     setItem: fullDraftStorage.setItem,
     removeItem: fullDraftStorage.removeItem,
+    withAtomicUpdate: fullDraftStorage.withAtomicUpdate,
   };
   const writer = new OrderedStateStore(storage);
   writer.scheduleNoteSave(state(0, "foreign tombstone"));

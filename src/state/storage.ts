@@ -20,8 +20,6 @@ const PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX = `${PRIVATE_STATE_NOTE_DRAF
 const PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA = "snoredex-checklist.pending-note-pointer";
 const PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION = 2;
 const PRIVATE_STATE_NOTE_DRAFT_POINTER_LEGACY_VERSION = 1;
-const PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_KEY = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:pointer-lock`;
-const PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_TTL_MS = 1_000;
 
 export const PERSISTENCE_ERROR_CODES = [
   "LOCAL_STATE_UNSUPPORTED",
@@ -46,6 +44,12 @@ export interface DraftStorageLike {
   setItem(key: string, value: string): void;
   removeItem(key: string): void;
   readonly listKeys?: (prefix: string) => readonly string[];
+  /**
+   * Run one synchronous read/modify/write transaction across all owners.
+   * Adapters that cannot enumerate draft keys must provide a real cross-tab
+   * atomic primitive here; otherwise pointer persistence fails closed.
+   */
+  readonly withAtomicUpdate?: <T>(callback: () => T) => T;
 }
 
 export interface StorageLike {
@@ -1683,12 +1687,12 @@ export class OrderedStateStore {
     if (draftStorage.listKeys !== undefined) {
       return true;
     }
-    // A lease can be replaced after the publication readback by another tab.
-    // Retry the read/merge/write transaction so that the next attempt folds
-    // the concurrent owner's pointer back into the registry instead of
-    // accepting a silently lost update.
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (this.withDraftPointerLease(draftStorage, () => {
+    const withAtomicUpdate = draftStorage.withAtomicUpdate;
+    if (withAtomicUpdate === undefined) {
+      return false;
+    }
+    try {
+      return withAtomicUpdate(() => {
         const nextPointer: CurrentDraftPointerRecord = {
           schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
           schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
@@ -1705,32 +1709,22 @@ export class OrderedStateStore {
         } satisfies CurrentDraftPointerRegistry);
         draftStorage.setItem(getDraftPointerKey(), serialized);
         return draftStorage.getItem(getDraftPointerKey()) === serialized;
-      })) {
-        // A stale callback can still publish after another owner completed
-        // its own lease checks. Confirm that this transaction's pointer
-        // survived the entire publication, otherwise retry the merge so the
-        // newer registry is not reported as success while this source becomes
-        // undiscoverable.
-        try {
-          const pointers = this.readDraftPointers(draftStorage);
-          if (pointers.some((pointer) => pointer.draftId === this.draftId && pointer.sourceKey === reference.key)) {
-            return true;
-          }
-        } catch {
-          // A failed confirmation is indistinguishable from a lost update;
-          // retry against the last readable registry.
-        }
-      }
+      });
+    } catch {
+      return false;
     }
-    return false;
   }
 
   private clearDraftPointerIfMatches(draftStorage: DraftStorageLike, sourceKey: string): void {
     if (draftStorage.listKeys !== undefined) {
       return;
     }
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (this.withDraftPointerLease(draftStorage, () => {
+    const withAtomicUpdate = draftStorage.withAtomicUpdate;
+    if (withAtomicUpdate === undefined) {
+      return;
+    }
+    try {
+      withAtomicUpdate(() => {
         const pointers = this.readDraftPointers(draftStorage);
         const remaining = pointers.filter((pointer) => pointer.sourceKey !== sourceKey);
         if (remaining.length !== pointers.length) {
@@ -1745,68 +1739,10 @@ export class OrderedStateStore {
           }
         }
         return true;
-      })) {
-        return;
-      }
+      });
+    } catch {
+      // Keep the pointer registry intact; a later recovery/read can retry.
     }
-  }
-
-  /**
-   * Serialize synchronous pointer-registry read/modify/write transactions.
-   * The lease is verified after acquisition and after publication; a stale
-   * lease is recoverable, while an active owner makes the caller retry later.
-   */
-  private withDraftPointerLease(draftStorage: DraftStorageLike, callback: () => boolean): boolean {
-    const now = Date.now();
-    const token = `${this.draftId}:${now.toString(36)}:${Math.random().toString(36).slice(2)}`;
-    const lease = JSON.stringify({ token, expiresAt: now + PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_TTL_MS });
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        const currentRaw = draftStorage.getItem(PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_KEY);
-        if (currentRaw !== null) {
-          try {
-            const current = JSON.parse(currentRaw) as { token?: unknown; expiresAt?: unknown };
-            const ownedByThisStore = typeof current.token === "string"
-              && current.token.startsWith(`${this.draftId}:`);
-            if (!ownedByThisStore
-              && typeof current.expiresAt === "number"
-              && current.expiresAt > Date.now()) {
-              continue;
-            }
-          } catch {
-            // A malformed lease is stale and can be replaced.
-          }
-        }
-        draftStorage.setItem(PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_KEY, lease);
-        if (draftStorage.getItem(PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_KEY) !== lease) {
-          continue;
-        }
-        try {
-          const result = callback();
-          // Treat a lease replacement during the callback as a conflict. The
-          // caller retries against the newer registry, preventing a verified
-          // write from being reported as successful after another owner has
-          // published over it.
-          const leaseAfterPublication = draftStorage.getItem(PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_KEY);
-          return leaseAfterPublication === lease
-            && draftStorage.getItem(PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_KEY) === lease
-            ? result
-            : false;
-        } finally {
-          try {
-            if (draftStorage.getItem(PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_KEY) === lease) {
-              draftStorage.removeItem(PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_KEY);
-            }
-          } catch {
-            // The lease expires shortly; cleanup failure must not discard a
-            // pointer registry write that was already verified.
-          }
-        }
-      } catch {
-        return false;
-      }
-    }
-    return false;
   }
 
   private tombstoneKeys(draftStorage: DraftStorageLike): readonly string[] {
