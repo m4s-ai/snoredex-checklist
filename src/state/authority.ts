@@ -95,8 +95,6 @@ export function readStateAuthority(raw: string | null, recoveryRaw: string | nul
   if (isRecord(value) && value.schema === PRIVATE_STATE_AUTHORITY_SCHEMA) {
     const envelope = validateAuthorityEnvelope(value);
     if (!("ok" in envelope)) {
-      const sidecar = readRecoverySidecar(recoveryRaw);
-      if (isAuthorityError(sidecar)) return sidecar;
       return {
         ok: true,
         active: envelope.active ?? undefined,
