@@ -69,6 +69,17 @@ class FailRecoveryWriteStorage extends FakeStorage {
   }
 }
 
+class FailActiveWriteStorage extends FakeStorage {
+  public failActive = false;
+
+  public override setItem(key: string, value: string): void {
+    if (key === PRIVATE_STATE_STORAGE_KEY && this.failActive) {
+      throw new Error("active write failed");
+    }
+    super.setItem(key, value);
+  }
+}
+
 const appRevision = "c".repeat(40);
 const exportedAt = "2026-08-26T10:00:00.000Z";
 
@@ -268,6 +279,25 @@ test("writes recovery before active replacement and leaves active state untouche
   assert.deepEqual(await lifecycle.clear(true), { ok: false, error: "STORAGE_WRITE_FAILED" });
   assert.equal(storage.activeWrites, 0);
   assert.deepEqual(JSON.parse(storage.values.get(PRIVATE_STATE_STORAGE_KEY) ?? "null"), original);
+});
+
+test("restore keeps the recovery target when active promotion fails", async () => {
+  const storage = new FailActiveWriteStorage();
+  const original = state("keep me");
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(original));
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision, now: () => exportedAt });
+  assert.equal((await lifecycle.clear(true)).ok, true);
+  storage.failActive = true;
+  assert.deepEqual(await lifecycle.restore(true, fingerprint, knownItemIds), {
+    ok: false,
+    error: "STORAGE_WRITE_FAILED",
+  });
+  const current = lifecycle.read();
+  assert.equal(current.ok, true);
+  if (current.ok) {
+    assert.deepEqual(current.value.active?.items, []);
+    assert.equal(current.value.recovery?.items[0]?.note, "keep me");
+  }
 });
 
 test("clear and restore use one recoverable slot and swap without merging", async () => {

@@ -318,6 +318,51 @@ function writeAuthority(
   return ok({ active: after.value.authority.active, recovery: after.value.authority.recovery, changed: true });
 }
 
+/** Promote an existing recovery snapshot without consuming it before active promotion succeeds. */
+function promoteRecovery(
+  storage: StorageLike,
+  expectedRaw: AuthorityRawSnapshot,
+  active: PrivateState,
+): BackupResult<LifecycleSuccess> {
+  const current = readAuthority(storage);
+  if (!current.ok) return current;
+  if (current.value.raw.active !== expectedRaw.active || current.value.raw.recovery !== expectedRaw.recovery) {
+    return fail("STATE_CHANGED_DURING_OPERATION");
+  }
+  const serializedActive = serializePrivateState(active);
+  if (!serializedActive.ok) return fail("STORAGE_WRITE_FAILED");
+  try {
+    storage.setItem(PRIVATE_STATE_STORAGE_KEY, serializedActive.value);
+    if (storage.getItem(PRIVATE_STATE_STORAGE_KEY) !== serializedActive.value) {
+      restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, expectedRaw.active);
+      return fail("STORAGE_COMMIT_UNCERTAIN");
+    }
+  } catch (cause) {
+    const after = readAuthority(storage);
+    if (!after.ok) return fail("STORAGE_COMMIT_UNCERTAIN");
+    if (after.value.raw.active === expectedRaw.active && after.value.raw.recovery === expectedRaw.recovery) {
+      return fail(isQuotaError(cause) ? "STORAGE_QUOTA_EXCEEDED" : "STORAGE_WRITE_FAILED");
+    }
+    return fail("STORAGE_COMMIT_UNCERTAIN");
+  }
+  try {
+    storage.setItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY, "null");
+    if (storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY) !== "null") {
+      restoreRaw(storage, PRIVATE_STATE_RECOVERY_STORAGE_KEY, expectedRaw.recovery);
+      return fail("STORAGE_COMMIT_UNCERTAIN");
+    }
+  } catch (cause) {
+    const restored = restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, expectedRaw.active);
+    if (restored) return fail(isQuotaError(cause) ? "STORAGE_QUOTA_EXCEEDED" : "STORAGE_WRITE_FAILED");
+    return fail("STORAGE_COMMIT_UNCERTAIN");
+  }
+  const after = readAuthority(storage);
+  if (!after.ok || after.value.raw.active !== serializedActive.value || after.value.raw.recovery !== "null") {
+    return fail("STORAGE_COMMIT_UNCERTAIN");
+  }
+  return ok({ active: after.value.authority.active, recovery: undefined, changed: true });
+}
+
 async function exclusive<T>(storage: StorageLike, callback: () => T): Promise<T> {
   if (storage.withLock === undefined) return callback();
   return storage.withLock(async () => callback());
@@ -428,7 +473,7 @@ export class PrivateStateLifecycle {
       }
       const active = current.value.authority.active;
       if (active === undefined || active.items.length === 0) {
-        return writeAuthority(this.storage, current.value.raw, validatedRecovery.value, undefined);
+        return promoteRecovery(this.storage, current.value.raw, validatedRecovery.value);
       }
       return writeAuthority(this.storage, current.value.raw, validatedRecovery.value, active);
     });
