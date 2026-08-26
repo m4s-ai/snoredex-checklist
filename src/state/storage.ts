@@ -708,28 +708,28 @@ export class OrderedStateStore {
     }
   }
 
-  private consumeSupersededDraft(reference: DraftReference | undefined): void {
+  private consumeSupersededDraft(reference: DraftReference | undefined): boolean {
     if (reference === undefined || reference.draftId === this.draftId || reference.revision === undefined) {
-      return;
+      return false;
     }
     const draftStorage = this.storage.draftStorage;
     if (draftStorage === undefined) {
-      return;
+      return false;
     }
     try {
       const expected = this.parseDraftReference(reference);
       const raw = draftStorage.getItem(reference.key);
       if (expected === undefined || raw === null) {
-        return;
+        return false;
       }
       const current = this.parseDraftReference({ ...reference, value: raw });
       if (current === undefined || current.ownerState === "consumed" || current.revision !== reference.revision) {
-        return;
+        return false;
       }
       const expectedState = validatePrivateState(expected.state);
       const currentState = validatePrivateState(current.state);
       if (!expectedState.ok || !currentState.ok || !sameState(expectedState.value, currentState.value)) {
-        return;
+        return false;
       }
       const tombstone: ConsumedDraftRecord = {
         schema: PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_SCHEMA,
@@ -745,8 +745,10 @@ export class OrderedStateStore {
         ? getConsumedDraftKey(reference.draftId)
         : getConsumedDraftKey(reference.draftId, reference.key, reference.revision);
       draftStorage.setItem(tombstoneKey, JSON.stringify(tombstone));
+      return true;
     } catch {
       // A failed tombstone must not make a verified canonical save fail.
+      return false;
     }
   }
 
@@ -887,14 +889,14 @@ export class OrderedStateStore {
   private clearPendingNoteDraft(
     expectedReference: DraftReference | undefined,
     allowRefreshedOwnedReference = false,
-  ): void {
+  ): boolean {
     if (expectedReference === undefined) {
-      return;
+      return false;
     }
     try {
       const draftStorage = this.storage.draftStorage;
       if (draftStorage === undefined) {
-        return;
+        return false;
       }
       const currentValue = draftStorage?.getItem(expectedReference.key);
       const exactMatch = currentValue === expectedReference.value;
@@ -911,10 +913,12 @@ export class OrderedStateStore {
           this.activeDraftOwned = false;
           this.stopDraftHeartbeat();
         }
+        return true;
       }
     } catch {
       // A successful canonical save remains authoritative even if cleanup fails.
     }
+    return false;
   }
 
   private restorePendingNoteDraft(): void {
@@ -982,10 +986,11 @@ export class OrderedStateStore {
         draftId: selected.draftId,
         revision: selected.revision,
       };
-      if (selected.draftId === this.draftId) {
-        this.clearPendingNoteDraft(selectedReference);
-      } else {
-        this.consumeSupersededDraft(selectedReference);
+      const retired = selected.draftId === this.draftId
+        ? this.clearPendingNoteDraft(selectedReference)
+        : this.consumeSupersededDraft(selectedReference);
+      if (!retired) {
+        return;
       }
       this.activeDraftReference = undefined;
       this.activeDraftOwned = false;

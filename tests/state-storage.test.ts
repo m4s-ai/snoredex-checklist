@@ -790,6 +790,10 @@ test("clears an in-memory foreign draft when a later read retires an exact match
   });
   storage.failDraftRemove = undefined;
 
+  storage.failDraftSet = new Error("tombstone unavailable");
+  assert.deepEqual(recovered.read(), { ok: true, value: state(1, "foreign note") });
+  assert.deepEqual(recovered.unsaved(), state(1, "foreign note"));
+  storage.failDraftSet = undefined;
   assert.deepEqual(recovered.read(), { ok: true, value: state(1, "foreign note") });
   assert.equal(recovered.unsaved(), undefined);
 });
