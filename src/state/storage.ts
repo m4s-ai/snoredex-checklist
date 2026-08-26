@@ -360,7 +360,7 @@ export class OrderedStateStore {
       if (item.note === undefined) {
         return false;
       }
-      return submittedItems.get(item.itemId)?.note !== undefined;
+      return submittedItems.get(item.itemId)?.note === item.note;
     });
   }
 

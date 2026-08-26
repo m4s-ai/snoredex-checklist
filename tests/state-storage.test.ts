@@ -316,6 +316,30 @@ test("keeps a recovered source for an unrelated read-based immediate edit", asyn
   assert.deepEqual(reloaded.unsaved(), state(1, "keep my note"));
 });
 
+test("keeps a recovered source when a read-based edit retains a different canonical note", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1, "canonical note")), {
+    ok: true,
+    value: { state: state(1, "canonical note") },
+  });
+
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1, "canonical note") });
+  writer.scheduleNoteSave(state(1, "foreign recovery note"));
+
+  const unrelated = new OrderedStateStore(storage);
+  assert.deepEqual(unrelated.read(), { ok: true, value: state(1, "canonical note") });
+  assert.deepEqual(await unrelated.saveImmediate(state(2, "canonical note")), {
+    ok: true,
+    value: { state: state(2, "canonical note") },
+  });
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), false);
+  const reloaded = new OrderedStateStore(storage);
+  assert.deepEqual(reloaded.read(), { ok: true, value: state(2, "canonical note") });
+  assert.deepEqual(reloaded.unsaved(), state(1, "foreign recovery note"));
+});
+
 test("allows an explicit rebase after a recovered draft conflicts", async () => {
   const storage = new FakeStorage();
   const seed = new OrderedStateStore(storage);
