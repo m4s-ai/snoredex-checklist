@@ -337,7 +337,7 @@ export class OrderedStateStore {
   public saveImmediate(state: PrivateState): Promise<SaveResult> {
     const generation = ++this.immediateGeneration;
     const previousDraft = this.activeDraftOwned ? this.activeDraftReference : undefined;
-    this.cancelPendingNote();
+    this.cancelPendingNote(previousDraft !== undefined);
     const draftToken = this.rememberDraft(state);
     return this.enqueue(state, {
       kind: "immediate",
@@ -479,16 +479,29 @@ export class OrderedStateStore {
     }
   }
 
-  private clearPendingNoteDraft(expectedReference: DraftReference | undefined): void {
+  private clearPendingNoteDraft(
+    expectedReference: DraftReference | undefined,
+    allowRefreshedOwnedReference = false,
+  ): void {
     if (expectedReference === undefined) {
       return;
     }
     try {
       const draftStorage = this.storage.draftStorage;
-      if (draftStorage?.getItem(expectedReference.key) === expectedReference.value) {
+      if (draftStorage === undefined) {
+        return;
+      }
+      const currentValue = draftStorage?.getItem(expectedReference.key);
+      const exactMatch = currentValue === expectedReference.value;
+      const refreshedOwnedMatch = allowRefreshedOwnedReference
+        && expectedReference.draftId === this.draftId
+        && this.activeDraftOwned
+        && this.activeDraftReference?.key === expectedReference.key
+        && currentValue === this.activeDraftReference.value;
+      if (exactMatch || refreshedOwnedMatch) {
         draftStorage.removeItem(expectedReference.key);
         if (this.activeDraftReference?.key === expectedReference.key
-          && this.activeDraftReference.value === expectedReference.value) {
+          && (this.activeDraftReference.value === expectedReference.value || refreshedOwnedMatch)) {
           this.activeDraftReference = undefined;
           this.activeDraftOwned = false;
           this.stopDraftHeartbeat();
@@ -618,7 +631,7 @@ export class OrderedStateStore {
       return this.commit(state, operation).then((result) => {
         if (result.ok && operation.draftToken === this.latestDraftToken) {
           this.unsavedDraft = undefined;
-          this.clearPendingNoteDraft(operation.draftStorageReference);
+          this.clearPendingNoteDraft(operation.draftStorageReference, true);
         }
         return result;
       });

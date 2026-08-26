@@ -377,6 +377,42 @@ test("skips a note flush discarded while waiting for the cross-tab lock", async 
   assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(1) });
 });
 
+test("clears a heartbeat-refreshed draft after a locked note commit", async () => {
+  const storage = new FakeStorage();
+  const clock = new FakeClock();
+  const lock = new BlockingLock();
+  storage.withLock = <T>(callback: () => Promise<T>) => lock.request(PRIVATE_STATE_LOCK_NAME, callback);
+  const store = new OrderedStateStore(storage, clock);
+  assert.deepEqual(store.read(), { ok: true, value: undefined });
+  store.scheduleNoteSave(state(0, "refresh before commit"));
+  const flush = store.flushNote();
+  await Promise.resolve();
+  const writesBeforeHeartbeat = storage.draftWrites;
+  clock.advance(5_000);
+  assert.equal(storage.draftWrites, writesBeforeHeartbeat + 1);
+  lock.release();
+  assert.deepEqual(await flush, { ok: true, value: { state: state(0, "refresh before commit") } });
+  assert.equal(storage.draftValues.size, 0);
+});
+
+test("keeps the draft heartbeat alive while an immediate save waits for the lock", async () => {
+  const storage = new FakeStorage();
+  const clock = new FakeClock();
+  const lock = new BlockingLock();
+  storage.withLock = <T>(callback: () => Promise<T>) => lock.request(PRIVATE_STATE_LOCK_NAME, callback);
+  const store = new OrderedStateStore(storage, clock);
+  assert.deepEqual(store.read(), { ok: true, value: undefined });
+  store.scheduleNoteSave(state(0, "pending before immediate"));
+  const save = store.saveImmediate(state(1));
+  await Promise.resolve();
+  const writesBeforeHeartbeat = storage.draftWrites;
+  clock.advance(5_000);
+  assert.equal(storage.draftWrites, writesBeforeHeartbeat + 1);
+  lock.release();
+  assert.deepEqual(await save, { ok: true, value: { state: state(1) } });
+  assert.equal(storage.draftValues.size, 0);
+});
+
 test("keeps the previous durable draft when replacing it fails", async () => {
   const storage = new FakeStorage();
   const clock = new FakeClock();
