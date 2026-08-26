@@ -18,7 +18,8 @@ const PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_SCHEMA = "snoredex-checklist.pending-no
 const PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION = 1;
 const PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:tombstone:`;
 const PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA = "snoredex-checklist.pending-note-pointer";
-const PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION = 1;
+const PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION = 2;
+const PRIVATE_STATE_NOTE_DRAFT_POINTER_LEGACY_VERSION = 1;
 
 export const PERSISTENCE_ERROR_CODES = [
   "LOCAL_STATE_UNSUPPORTED",
@@ -111,10 +112,16 @@ interface ConsumedDraftRecord {
 
 interface CurrentDraftPointerRecord {
   readonly schema: typeof PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA;
-  readonly schemaVersion: typeof PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION;
+  readonly schemaVersion: number;
   readonly draftId: string;
   readonly sourceKey: string;
   readonly sourceRevision: string;
+}
+
+interface CurrentDraftPointerRegistry {
+  readonly schema: typeof PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA;
+  readonly schemaVersion: typeof PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION;
+  readonly pointers: readonly CurrentDraftPointerRecord[];
 }
 
 interface DraftReference {
@@ -694,7 +701,7 @@ export class OrderedStateStore {
     let editTimestamp = Date.now();
     const previousOwnedReference = this.activeDraftOwned ? this.activeDraftReference : undefined;
     const sourceIsTombstoned = previousOwnedReference !== undefined
-      && this.isTombstonedDraftKey(previousOwnedReference.key, this.draftId);
+      && this.isTombstonedDraftKey(previousOwnedReference.key, this.draftId, previousOwnedReference.revision);
     let key = previousOwnedReference !== undefined
       ? createRotatedDraftStorageKey(this.draftId)
       : getPendingNoteDraftKey(this.draftId);
@@ -740,7 +747,7 @@ export class OrderedStateStore {
       if (!consumedSourceDetected
         && previousOwnedReference !== undefined
         && ownerState === "active"
-        && this.isTombstonedDraftKey(previousOwnedReference.key, this.draftId)) {
+        && this.isTombstonedDraftKey(previousOwnedReference.key, this.draftId, previousOwnedReference.revision)) {
         // Re-read the source after the initial snapshot. Another tab may have
         // consumed it between the first check and publication. Only treat a
         // matching revision/state as a heartbeat transfer; a new edit stays
@@ -775,7 +782,7 @@ export class OrderedStateStore {
           return undefined;
         }
         if (!this.writeConsumedDraftTombstone(draftStorage, rotatedKey, this.draftId, draftRevision)
-          || !this.isTombstonedDraftKey(rotatedKey, this.draftId)) {
+          || !this.isTombstonedDraftKey(rotatedKey, this.draftId, draftRevision)) {
           try {
             if (draftStorage.getItem(rotatedKey) === rotatedValue) {
               draftStorage.removeItem(rotatedKey);
@@ -821,7 +828,7 @@ export class OrderedStateStore {
       let persistedValue = value;
       if (previousOwnedReference !== undefined
         && ownerState === "active"
-        && this.isTombstonedDraftKey(previousOwnedReference.key, this.draftId)) {
+        && this.isTombstonedDraftKey(previousOwnedReference.key, this.draftId, previousOwnedReference.revision)) {
         let sourceStillMatches = false;
         try {
           const raw = draftStorage.getItem(previousOwnedReference.key);
@@ -853,7 +860,7 @@ export class OrderedStateStore {
           } catch {
             return undefined;
           }
-          if (!this.isTombstonedDraftKey(key, this.draftId)) {
+          if (!this.isTombstonedDraftKey(key, this.draftId, draftRevision)) {
             return undefined;
           }
           persistedValue = consumedValue;
@@ -909,7 +916,7 @@ export class OrderedStateStore {
       return false;
     }
     try {
-      if (this.isTombstonedDraftKey(reference.key, this.draftId)) {
+      if (this.isTombstonedDraftKey(reference.key, this.draftId, reference.revision)) {
         return false;
       }
       const raw = draftStorage.getItem(reference.key);
@@ -922,7 +929,7 @@ export class OrderedStateStore {
         draftId: this.draftId,
       });
       return current !== undefined && current.ownerState === "active"
-        && !this.isTombstonedDraftKey(reference.key, this.draftId);
+        && !this.isTombstonedDraftKey(reference.key, this.draftId, current.revision);
     } catch {
       return false;
     }
@@ -1041,7 +1048,7 @@ export class OrderedStateStore {
       }
       const previousReference = this.activeDraftReference;
       const sourceIsTombstoned = previousReference !== undefined
-        && this.isTombstonedDraftKey(previousReference.key, this.draftId);
+        && this.isTombstonedDraftKey(previousReference.key, this.draftId, previousReference.revision);
       if (previousReference !== undefined && !sourceIsTombstoned) {
         // Refresh an uncontended owner in place. Keeping the heartbeat on the
         // same physical key means a concurrent tombstone suppresses exactly
@@ -1097,12 +1104,12 @@ export class OrderedStateStore {
         }
       }
       if (ownerState === "inactive" && parsed.ownerState === "consumed"
-        && !this.isTombstonedDraftKey(reference.key, reference.draftId)) {
+        && !this.isTombstonedDraftKey(reference.key, reference.draftId, parsed.revision)) {
         nextOwnerState = "consumed";
       }
       if (nextOwnerState === "active"
         && this.unsavedDraft !== undefined
-        && this.isTombstonedDraftKey(reference.key, reference.draftId)) {
+        && this.isTombstonedDraftKey(reference.key, reference.draftId, parsed.revision)) {
         const validated = validatePrivateState(parsed.state);
         if (validated.ok && sameState(validated.value, this.unsavedDraft)) {
           nextOwnerState = "consumed";
@@ -1119,7 +1126,7 @@ export class OrderedStateStore {
         updatedAt: parsed.updatedAt,
         ownerState: nextOwnerState,
       } satisfies PendingNoteDraftRecord);
-      if (ownerState === "active" && this.isTombstonedDraftKey(reference.key, reference.draftId)) {
+      if (ownerState === "active" && this.isTombstonedDraftKey(reference.key, reference.draftId, parsed.revision)) {
         const rotatedKey = createRotatedDraftStorageKey(this.draftId);
         // Install a marker before publishing the rotated record. The source
         // is written as consumed, then the marker is refreshed with a newer
@@ -1158,7 +1165,7 @@ export class OrderedStateStore {
         // write and adoption of the rotated reference.  Do not switch to an
         // unsuppressed source; leave the original consumed reference intact
         // and discard only the value written by this transfer.
-        if (!this.isTombstonedDraftKey(rotatedKey, this.draftId)) {
+        if (!this.isTombstonedDraftKey(rotatedKey, this.draftId, parsed.revision)) {
           try {
             if (draftStorage.getItem(rotatedKey) === rotatedValue) {
               draftStorage.removeItem(rotatedKey);
@@ -1220,13 +1227,14 @@ export class OrderedStateStore {
     }
   }
 
-  private isTombstonedDraftKey(key: string, draftId: string): boolean {
+  private isTombstonedDraftKey(key: string, draftId: string, revision: string | undefined): boolean {
+    const expectedRevision = revision ?? "legacy";
     try {
       const draftStorage = this.storage.draftStorage;
       if (draftStorage === undefined) {
         return false;
       }
-      return this.tombstoneKeys(draftStorage).some((tombstoneKey) => {
+      return this.tombstoneKeysForDraft(draftStorage, draftId).some((tombstoneKey) => {
         const raw = draftStorage.getItem(tombstoneKey);
         if (raw === null) {
           return false;
@@ -1234,7 +1242,8 @@ export class OrderedStateStore {
         const tombstone = this.parseConsumedDraftRecord(raw);
         return tombstone !== undefined
           && tombstone.sourceKey === key
-          && tombstone.sourceDraftId === draftId;
+          && tombstone.sourceDraftId === draftId
+          && tombstone.sourceRevision === expectedRevision;
       });
     } catch {
       return false;
@@ -1485,7 +1494,7 @@ export class OrderedStateStore {
       return false;
     }
     try {
-      return this.tombstoneKeys(draftStorage).some((tombstoneKey) => {
+      return this.tombstoneKeysForDraft(draftStorage, candidate.draftId).some((tombstoneKey) => {
         const raw = draftStorage.getItem(tombstoneKey);
         if (raw === null) {
           return false;
@@ -1602,9 +1611,10 @@ export class OrderedStateStore {
         return keys.filter((key) => !key.startsWith(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX)
           && key !== getDraftPointerKey());
       }
-      const pointer = this.readDraftPointer(draftStorage);
-      if (pointer !== undefined) {
-        return [pointer.sourceKey, ownKey].filter((key, index, all) => all.indexOf(key) === index);
+      const pointers = this.readDraftPointers(draftStorage);
+      if (pointers.length > 0) {
+        return [...pointers.map((pointer) => pointer.sourceKey), ownKey]
+          .filter((key, index, all) => all.indexOf(key) === index);
       }
     } catch {
       return [ownKey];
@@ -1612,48 +1622,77 @@ export class OrderedStateStore {
     return [ownKey];
   }
 
-  private readDraftPointer(draftStorage: DraftStorageLike): CurrentDraftPointerRecord | undefined {
+  private parseDraftPointerRecord(candidate: unknown): CurrentDraftPointerRecord | undefined {
+    if (typeof candidate !== "object" || candidate === null) {
+      return undefined;
+    }
+    const pointer = candidate as Partial<CurrentDraftPointerRecord>;
+    if (pointer.schema !== PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA
+      || (pointer.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_POINTER_LEGACY_VERSION
+        && pointer.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION)
+      || typeof pointer.draftId !== "string"
+      || pointer.draftId.length === 0
+      || typeof pointer.sourceKey !== "string"
+      || !pointer.sourceKey.startsWith(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX)
+      || pointer.sourceKey.startsWith(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX)
+      || pointer.sourceKey === getDraftPointerKey()
+      || typeof pointer.sourceRevision !== "string"
+      || pointer.sourceRevision.length === 0) {
+      return undefined;
+    }
+    return {
+      schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
+      schemaVersion: pointer.schemaVersion,
+      draftId: pointer.draftId,
+      sourceKey: pointer.sourceKey,
+      sourceRevision: pointer.sourceRevision,
+    };
+  }
+
+  private readDraftPointers(draftStorage: DraftStorageLike): readonly CurrentDraftPointerRecord[] {
     try {
       const raw = draftStorage.getItem(getDraftPointerKey());
       if (raw === null) {
-        return undefined;
+        return [];
       }
-      const candidate = JSON.parse(raw) as Partial<CurrentDraftPointerRecord>;
-      if (candidate.schema !== PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA
-        || candidate.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION
-        || typeof candidate.draftId !== "string"
-        || candidate.draftId.length === 0
-        || typeof candidate.sourceKey !== "string"
-        || !candidate.sourceKey.startsWith(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX)
-        || candidate.sourceKey === getDraftPointerKey()
-        || typeof candidate.sourceRevision !== "string"
-        || candidate.sourceRevision.length === 0) {
-        return undefined;
+      const candidate = JSON.parse(raw) as unknown;
+      if (typeof candidate !== "object" || candidate === null) {
+        return [];
       }
-      return {
-        schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
-        schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
-        draftId: candidate.draftId,
-        sourceKey: candidate.sourceKey,
-        sourceRevision: candidate.sourceRevision,
-      };
+      const registry = candidate as Partial<CurrentDraftPointerRegistry>;
+      if (registry.schema === PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA
+        && registry.schemaVersion === PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION
+        && Array.isArray(registry.pointers)) {
+        return registry.pointers
+          .map((pointer) => this.parseDraftPointerRecord(pointer))
+          .filter((pointer): pointer is CurrentDraftPointerRecord => pointer !== undefined);
+      }
+      const legacy = this.parseDraftPointerRecord(candidate);
+      return legacy === undefined ? [] : [legacy];
     } catch {
-      return undefined;
+      return [];
     }
   }
 
   private writeDraftPointer(draftStorage: DraftStorageLike, reference: DraftReference): boolean {
-    if (draftStorage.listKeys !== undefined || reference.key === getPendingNoteDraftKey(this.draftId)) {
+    if (draftStorage.listKeys !== undefined) {
       return true;
     }
     try {
-      draftStorage.setItem(getDraftPointerKey(), JSON.stringify({
+      const nextPointer: CurrentDraftPointerRecord = {
         schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
         schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
         draftId: this.draftId,
         sourceKey: reference.key,
         sourceRevision: reference.revision ?? "legacy",
-      } satisfies CurrentDraftPointerRecord));
+      };
+      const pointers = this.readDraftPointers(draftStorage)
+        .filter((pointer) => !(pointer.draftId === nextPointer.draftId && pointer.sourceKey === nextPointer.sourceKey));
+      draftStorage.setItem(getDraftPointerKey(), JSON.stringify({
+        schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
+        schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
+        pointers: [...pointers, nextPointer],
+      } satisfies CurrentDraftPointerRegistry));
       return true;
     } catch {
       return false;
@@ -1665,9 +1704,18 @@ export class OrderedStateStore {
       return;
     }
     try {
-      const pointer = this.readDraftPointer(draftStorage);
-      if (pointer?.sourceKey === sourceKey) {
-        draftStorage.removeItem(getDraftPointerKey());
+      const pointers = this.readDraftPointers(draftStorage);
+      const remaining = pointers.filter((pointer) => pointer.sourceKey !== sourceKey);
+      if (remaining.length !== pointers.length) {
+        if (remaining.length === 0) {
+          draftStorage.removeItem(getDraftPointerKey());
+        } else {
+          draftStorage.setItem(getDraftPointerKey(), JSON.stringify({
+            schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
+            schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
+            pointers: remaining,
+          } satisfies CurrentDraftPointerRegistry));
+        }
       }
     } catch {
       // A stale pointer is harmless when its source is already absent.
@@ -1685,6 +1733,15 @@ export class OrderedStateStore {
       return [ownKey];
     }
     return [ownKey];
+  }
+
+  private tombstoneKeysForDraft(draftStorage: DraftStorageLike, draftId: string): readonly string[] {
+    const ownKeys = this.tombstoneKeys(draftStorage);
+    if (draftStorage.listKeys !== undefined) {
+      return ownKeys;
+    }
+    const foreignKey = getConsumedDraftKey(draftId);
+    return ownKeys.includes(foreignKey) ? ownKeys : [...ownKeys, foreignKey];
   }
 
   private parseDraftReference(reference: DraftReference): (PendingNoteDraftRecord & {

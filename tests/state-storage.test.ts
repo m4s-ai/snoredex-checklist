@@ -1164,6 +1164,38 @@ test("keeps an in-place heartbeat refresh suppressed if consumption races its wr
     .some(([, value]) => (JSON.parse(value) as Record<string, unknown>).sourceKey === sourceKey), true);
 });
 
+test("matches heartbeat tombstones to the current source revision", () => {
+  const storage = new FakeStorage();
+  const store = new OrderedStateStore(storage);
+  store.scheduleNoteSave(state(1, "revision-aware heartbeat"));
+  const sourceKey = [...storage.draftValues.keys()][0];
+  const sourceRecord = JSON.parse(storage.draftValues.get(sourceKey) as string) as Record<string, unknown>;
+  const oldRevision = String(sourceRecord.revision);
+  const tombstoneKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:tombstone:${encodeURIComponent(String(sourceRecord.draftId))}:${encodeURIComponent(sourceKey)}:${encodeURIComponent(oldRevision)}`;
+  storage.draftValues.set(tombstoneKey, JSON.stringify({
+    schema: "snoredex-checklist.pending-note-tombstone",
+    schemaVersion: 1,
+    sourceKey,
+    sourceDraftId: sourceRecord.draftId,
+    sourceRevision: oldRevision,
+    consumedAt: Date.now(),
+  }));
+  const currentRevision = `${oldRevision}:later`;
+  storage.draftValues.set(sourceKey, JSON.stringify({
+    ...sourceRecord,
+    revision: currentRevision,
+    ownerState: "active",
+  }));
+
+  storage.emitActive();
+
+  assert.equal([...storage.draftValues.keys()]
+    .some((key) => key.includes(":rotated:") && !key.includes(":tombstone:")), false);
+  const current = JSON.parse(storage.draftValues.get(sourceKey) as string) as Record<string, unknown>;
+  assert.equal(current.revision, currentRevision);
+  assert.equal(current.ownerState, "active");
+});
+
 test("retains an owned recovery reference when post-commit cleanup fails", async () => {
   const storage = new FakeStorage();
   const store = new OrderedStateStore(storage);
@@ -1237,6 +1269,62 @@ test("discovers a rotated draft through its pointer without listKeys", () => {
   const recovered = new OrderedStateStore(storage);
   assert.deepEqual(recovered.read(), { ok: true, value: undefined });
   assert.deepEqual(recovered.unsaved(), state(0, "second pointed draft"));
+});
+
+test("discovers the first unenumerable draft through its pointer", () => {
+  const storage = new FakeStorage();
+  const fullDraftStorage = storage.draftStorage;
+  storage.draftStorage = {
+    getItem: fullDraftStorage.getItem,
+    setItem: fullDraftStorage.setItem,
+    removeItem: fullDraftStorage.removeItem,
+  };
+  const writer = new OrderedStateStore(storage);
+  writer.scheduleNoteSave(state(0, "first unenumerable draft"));
+
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: undefined });
+  assert.deepEqual(recovered.unsaved(), state(0, "first unenumerable draft"));
+});
+
+test("keeps pointer registry entries for concurrent unenumerable owners", () => {
+  const storage = new FakeStorage();
+  const fullDraftStorage = storage.draftStorage;
+  storage.draftStorage = {
+    getItem: fullDraftStorage.getItem,
+    setItem: fullDraftStorage.setItem,
+    removeItem: fullDraftStorage.removeItem,
+  };
+  const first = new OrderedStateStore(storage);
+  const second = new OrderedStateStore(storage);
+  first.scheduleNoteSave(state(0, "first unenumerable owner"));
+  second.scheduleNoteSave(state(0, "second unenumerable owner"));
+
+  const pointerRaw = storage.draftValues.get(`${PRIVATE_STATE_NOTE_DRAFT_KEY}:current`);
+  assert.equal(typeof pointerRaw, "string");
+  const pointerRecord = JSON.parse(pointerRaw as string) as { pointers?: unknown[] };
+  assert.equal(pointerRecord.pointers?.length, 2);
+  assert.equal([...storage.draftValues.values()].filter((raw) => raw.includes("unenumerable owner")).length, 2);
+});
+
+test("probes a pointed foreign owner's tombstone without listKeys", () => {
+  const storage = new FakeStorage();
+  const fullDraftStorage = storage.draftStorage;
+  storage.draftStorage = {
+    getItem: fullDraftStorage.getItem,
+    setItem: fullDraftStorage.setItem,
+    removeItem: fullDraftStorage.removeItem,
+  };
+  const writer = new OrderedStateStore(storage);
+  writer.scheduleNoteSave(state(0, "foreign tombstone"));
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: undefined });
+  assert.deepEqual(recovered.unsaved(), state(0, "foreign tombstone"));
+  recovered.discardUnsavedDraft();
+
+  const reloaded = new OrderedStateStore(storage);
+  assert.deepEqual(reloaded.read(), { ok: true, value: undefined });
+  assert.equal(reloaded.unsaved(), undefined);
 });
 
 test("preserves a matching draft when the current canonical envelope is unreadable", async () => {
