@@ -374,6 +374,34 @@ test("does not consume a foreign draft that changed during ownership transfer", 
   assert.deepEqual(restored.unsaved(), state(1, "edited by owner"));
 });
 
+test("does not tombstone a later foreign revision that reuses the same state", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1) });
+  writer.scheduleNoteSave(state(1, "same state revision"));
+  const otherTab = new OrderedStateStore(storage);
+  assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
+  assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
+
+  const foreignKey = [...storage.draftValues.keys()][0];
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: state(2) });
+  assert.deepEqual(recovered.rebaseUnsavedDraft(), { ok: true, value: state(1, "same state revision") });
+  const laterRevision = JSON.parse(storage.draftValues.get(foreignKey) as string) as Record<string, unknown>;
+  laterRevision.updatedAt = 0;
+  storage.draftValues.set(foreignKey, JSON.stringify(laterRevision));
+
+  assert.deepEqual(await recovered.saveImmediate(state(1, "same state revision")), {
+    ok: true,
+    value: { state: state(1, "same state revision") },
+  });
+  assert.equal(storage.draftValues.size, 1);
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), false);
+});
+
 test("keeps the old baseline when rebasing cannot persist the replacement draft", async () => {
   const storage = new FakeStorage();
   const seed = new OrderedStateStore(storage);
@@ -421,7 +449,7 @@ test("clears its superseded recovery draft only after an immediate save succeeds
   assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(2) });
 });
 
-test("ignores and retires a recovery draft that already matches canonical state", async () => {
+test("ignores a recovery draft that already matches canonical state without deleting it", async () => {
   const storage = new FakeStorage();
   const seed = new OrderedStateStore(storage);
   assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
@@ -433,7 +461,10 @@ test("ignores and retires a recovery draft that already matches canonical state"
   const restored = new OrderedStateStore(storage);
   assert.deepEqual(restored.read(), { ok: true, value: state(1) });
   assert.equal(restored.unsaved(), undefined);
-  assert.equal(storage.draftValues.size, 0);
+  assert.equal(storage.draftValues.size, 2);
+  const sourceKey = [...storage.draftValues.keys()].find((key) => !key.includes(":tombstone:"));
+  assert.equal(typeof sourceKey, "string");
+  assert.equal(storage.draftValues.has(sourceKey as string), true);
 });
 
 test("skips a note flush discarded while waiting for the cross-tab lock", async () => {

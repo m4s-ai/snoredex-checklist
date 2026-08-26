@@ -100,7 +100,7 @@ interface ConsumedDraftRecord {
   readonly schemaVersion: typeof PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION;
   readonly sourceKey: string;
   readonly sourceDraftId: string;
-  readonly state: unknown;
+  readonly sourceValue: string;
   readonly consumedAt: number;
 }
 
@@ -545,7 +545,7 @@ export class OrderedStateStore {
     try {
       const expected = this.parseDraftReference(reference);
       const raw = draftStorage.getItem(reference.key);
-      if (expected === undefined || raw === null) {
+      if (expected === undefined || raw === null || raw !== reference.value) {
         return;
       }
       const current = this.parseDraftReference({ ...reference, value: raw });
@@ -562,7 +562,7 @@ export class OrderedStateStore {
         schemaVersion: PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION,
         sourceKey: reference.key,
         sourceDraftId: reference.draftId,
-        state: current.state,
+        sourceValue: reference.value,
         consumedAt: Date.now(),
       };
       // Keep the source record untouched. A separate state-scoped marker cannot
@@ -739,11 +739,16 @@ export class OrderedStateStore {
       return;
     }
     if (this.lastKnownGood !== undefined && sameState(this.lastKnownGood, validated.value)) {
-      this.clearPendingNoteDraft({
+      const selectedReference = {
         key: selected.key,
         value: selected.value,
         draftId: selected.draftId,
-      });
+      };
+      if (selected.draftId === this.draftId) {
+        this.clearPendingNoteDraft(selectedReference);
+      } else {
+        this.consumeSupersededDraft(selectedReference);
+      }
       this.recoveredForeignReference = undefined;
       return;
     }
@@ -752,7 +757,7 @@ export class OrderedStateStore {
     this.observedRaw = selected.hasObservedRaw ? selected.observedRaw : undefined;
   }
 
-  private isDraftTombstoned(candidate: PendingNoteDraftRecord & { readonly key: string }): boolean {
+  private isDraftTombstoned(candidate: PendingNoteDraftRecord & { readonly key: string; readonly value: string }): boolean {
     const draftStorage = this.storage.draftStorage;
     if (draftStorage === undefined) {
       return false;
@@ -768,14 +773,13 @@ export class OrderedStateStore {
         || tombstone.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION
         || tombstone.sourceKey !== candidate.key
         || tombstone.sourceDraftId !== candidate.draftId
+        || typeof tombstone.sourceValue !== "string"
         || typeof tombstone.consumedAt !== "number"
         || !Number.isFinite(tombstone.consumedAt)
       ) {
         return false;
       }
-      const tombstoneState = validatePrivateState(tombstone.state);
-      const candidateState = validatePrivateState(candidate.state);
-      return tombstoneState.ok && candidateState.ok && sameState(tombstoneState.value, candidateState.value);
+      return tombstone.sourceValue === candidate.value;
     } catch {
       return false;
     }
