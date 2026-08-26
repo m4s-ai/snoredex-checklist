@@ -44,6 +44,16 @@ test("fails closed on duplicate locality-language projections", async () => {
   assert.deepEqual(await validateSnapshot(reseal(duplicateProjection)), { ok: false, reason: "invalid" });
 });
 
+test("fails closed on invalid localization presentation fields", async () => {
+  const invalidName = structuredClone(fixture.catalogue);
+  (invalidName.localizations[0] as Record<string, unknown>).displayName = {};
+  assert.deepEqual(await validateSnapshot(reseal(invalidName)), { ok: false, reason: "invalid" });
+
+  const invalidOrder = structuredClone(fixture.catalogue);
+  (invalidOrder.localizations[0] as Record<string, unknown>).displayOrder = 1.5;
+  assert.deepEqual(await validateSnapshot(reseal(invalidOrder)), { ok: false, reason: "invalid" });
+});
+
 test("fails closed when an item card name is missing or empty", async () => {
   const missing = structuredClone(fixture.catalogue);
   delete (missing.items[0] as Record<string, unknown>).cardName;

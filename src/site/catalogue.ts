@@ -125,7 +125,8 @@ export async function validateSnapshot(value: unknown): Promise<SnapshotValidati
     return { ok: false, reason: "invalid" };
   }
 
-  if (localizations.some((row) => !isString(row.locality) || !isString(row.languageTag)) ||
+  if (localizations.some((row) => !isString(row.locality) || !isString(row.languageTag) ||
+      typeof row.displayName !== "string" || typeof row.displayOrder !== "number" || !Number.isInteger(row.displayOrder)) ||
       localSets.some((row) => !isString(row.locality)) ||
       setEditions.some((row) => !isString(row.localSetId) || !isString(row.localizationId)) ||
       assets.some((row) => !isString(row.imageScope))) {
