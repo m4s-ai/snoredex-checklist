@@ -1,4 +1,5 @@
 import {
+  serializePrivateState,
   serializePortableState,
   validatePrivateState,
   validatePortableState,
@@ -8,10 +9,9 @@ import {
 } from "./domain.ts";
 import {
   readStateAuthority,
-  serializeStateAuthority,
   type AuthorityReadResult,
 } from "./authority.ts";
-import { PRIVATE_STATE_STORAGE_KEY, type StorageLike } from "./storage.ts";
+import { PRIVATE_STATE_RECOVERY_STORAGE_KEY, PRIVATE_STATE_STORAGE_KEY, type StorageLike } from "./storage.ts";
 
 export const MAX_PORTABLE_BYTES = 16 * 1024 * 1024;
 export const PRIVATE_BACKUP_SUFFIX = ".snoredex-private.json";
@@ -75,7 +75,12 @@ export interface ImportPreview {
 export interface ImportPlan {
   readonly candidate: PrivateState;
   readonly preview: ImportPreview;
-  readonly expectedRaw: string | null;
+  readonly expectedRaw: AuthorityRawSnapshot;
+}
+
+interface AuthorityRawSnapshot {
+  readonly active: string | null;
+  readonly recovery: string | null;
 }
 
 export interface LifecycleSuccess {
@@ -229,45 +234,72 @@ export function buildImportPreview(
   });
 }
 
-function readRaw(storage: StorageLike): BackupResult<string | null> {
+function readRaw(storage: StorageLike, key: string): BackupResult<string | null> {
   try {
-    return ok(storage.getItem(PRIVATE_STATE_STORAGE_KEY));
+    return ok(storage.getItem(key));
   } catch {
     return fail("STORAGE_UNAVAILABLE");
   }
 }
 
-function readAuthority(storage: StorageLike): BackupResult<{ readonly raw: string | null; readonly authority: Extract<AuthorityReadResult, { ok: true }> }> {
-  const raw = readRaw(storage);
-  if (!raw.ok) return raw;
-  const authority = readStateAuthority(raw.value);
-  return authority.ok ? ok({ raw: raw.value, authority }) : fail(authority.error);
+function readAuthority(storage: StorageLike): BackupResult<{ readonly raw: AuthorityRawSnapshot; readonly authority: Extract<AuthorityReadResult, { ok: true }> }> {
+  const active = readRaw(storage, PRIVATE_STATE_STORAGE_KEY);
+  if (!active.ok) return active;
+  const recovery = readRaw(storage, PRIVATE_STATE_RECOVERY_STORAGE_KEY);
+  if (!recovery.ok) return recovery;
+  const authority = readStateAuthority(active.value, recovery.value);
+  return authority.ok ? ok({ raw: { active: active.value, recovery: recovery.value }, authority }) : fail(authority.error);
+}
+
+function restoreRaw(storage: StorageLike, key: string, raw: string | null): boolean {
+  try {
+    if (raw === null) {
+      if (storage.removeItem === undefined) return false;
+      storage.removeItem(key);
+    } else {
+      storage.setItem(key, raw);
+    }
+    return storage.getItem(key) === raw;
+  } catch {
+    return false;
+  }
 }
 
 function writeAuthority(
   storage: StorageLike,
-  expectedRaw: string | null,
+  expectedRaw: AuthorityRawSnapshot,
   active: PrivateState | undefined,
   recovery: PrivateState | undefined,
 ): BackupResult<LifecycleSuccess> {
-  const current = readRaw(storage);
+  const current = readAuthority(storage);
   if (!current.ok) return current;
-  if (current.value !== expectedRaw) return fail("STATE_CHANGED_DURING_OPERATION");
-  const serialized = serializeStateAuthority(active, recovery);
-  if (!serialized.ok) return fail("STORAGE_WRITE_FAILED");
+  if (current.value.raw.active !== expectedRaw.active || current.value.raw.recovery !== expectedRaw.recovery) {
+    return fail("STATE_CHANGED_DURING_OPERATION");
+  }
+  const serializedActive = active === undefined ? ok("null") : serializePrivateState(active);
+  if (!serializedActive.ok) return fail("STORAGE_WRITE_FAILED");
+  const serializedRecovery = recovery === undefined ? "null" : serializePrivateState(recovery);
+  if (typeof serializedRecovery !== "string" && !serializedRecovery.ok) return fail("STORAGE_WRITE_FAILED");
+  const recoveryText = typeof serializedRecovery === "string" ? serializedRecovery : serializedRecovery.value;
   try {
-    storage.setItem(PRIVATE_STATE_STORAGE_KEY, serialized.value);
+    storage.setItem(PRIVATE_STATE_STORAGE_KEY, serializedActive.value);
+    storage.setItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY, recoveryText);
   } catch (cause) {
-    const after = readRaw(storage);
+    const after = readAuthority(storage);
     if (!after.ok) return fail("STORAGE_COMMIT_UNCERTAIN");
-    if (after.value === expectedRaw) return fail(isQuotaError(cause) ? "STORAGE_QUOTA_EXCEEDED" : "STORAGE_WRITE_FAILED");
+    if (after.value.raw.active === expectedRaw.active && after.value.raw.recovery === expectedRaw.recovery) {
+      return fail(isQuotaError(cause) ? "STORAGE_QUOTA_EXCEEDED" : "STORAGE_WRITE_FAILED");
+    }
+    const restored = restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, expectedRaw.active)
+      && restoreRaw(storage, PRIVATE_STATE_RECOVERY_STORAGE_KEY, expectedRaw.recovery);
+    if (restored) return fail(isQuotaError(cause) ? "STORAGE_QUOTA_EXCEEDED" : "STORAGE_WRITE_FAILED");
     return fail("STORAGE_COMMIT_UNCERTAIN");
   }
-  const after = readRaw(storage);
-  if (!after.ok || after.value !== serialized.value) return fail("STORAGE_COMMIT_UNCERTAIN");
-  const authority = readStateAuthority(after.value);
-  if (!authority.ok) return fail("STORAGE_COMMIT_UNCERTAIN");
-  return ok({ active: authority.active, recovery: authority.recovery, changed: true });
+  const after = readAuthority(storage);
+  if (!after.ok || after.value.raw.active !== serializedActive.value || after.value.raw.recovery !== recoveryText) {
+    return fail("STORAGE_COMMIT_UNCERTAIN");
+  }
+  return ok({ active: after.value.authority.active, recovery: after.value.authority.recovery, changed: true });
 }
 
 async function exclusive<T>(storage: StorageLike, callback: () => T): Promise<T> {
@@ -276,7 +308,10 @@ async function exclusive<T>(storage: StorageLike, callback: () => T): Promise<T>
 }
 
 /**
- * Import, clear and recovery operations sharing the OrderedStateStore key.
+ * Import, clear and recovery operations sharing the logical local authority.
+ * The active payload stays in the legacy-readable state key; the single
+ * recovery slot is kept in its private sidecar so older builds can roll back
+ * and still read the active collection.
  * All mutating methods require an explicit confirmation flag and re-check the
  * raw value captured by preview, so a stale preview cannot replace newer data.
  */

@@ -24,6 +24,26 @@ export type AuthorityReadResult =
   | { readonly ok: true; readonly active: PrivateState | undefined; readonly recovery: PrivateState | undefined; readonly enveloped: boolean }
   | { readonly ok: false; readonly error: "LOCAL_STATE_UNSUPPORTED" | "LOCAL_STATE_UNREADABLE" };
 
+type AuthorityError = Extract<AuthorityReadResult, { ok: false }>;
+
+function readRecoverySidecar(raw: string | null): PrivateState | undefined | AuthorityError {
+  if (raw === null || raw.trim() === "" || raw.trim() === "null") {
+    return undefined;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(raw) as unknown;
+  } catch {
+    return { ok: false, error: "LOCAL_STATE_UNREADABLE" };
+  }
+  const recovery = validatePrivateState(value);
+  return recovery.ok ? recovery.value : { ok: false, error: "LOCAL_STATE_UNREADABLE" };
+}
+
+function isAuthorityError(value: PrivateState | undefined | AuthorityError): value is AuthorityError {
+  return typeof value === "object" && value !== null && "ok" in value && value.ok === false;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -59,9 +79,12 @@ function validateAuthorityEnvelope(value: unknown): StateAuthorityEnvelope | Aut
 }
 
 /** Read either the legacy state-only value or the recovery-capable envelope. */
-export function readStateAuthority(raw: string | null): AuthorityReadResult {
+export function readStateAuthority(raw: string | null, recoveryRaw: string | null = null): AuthorityReadResult {
   if (raw === null) {
-    return { ok: true, active: undefined, recovery: undefined, enveloped: false };
+    const recovery = readRecoverySidecar(recoveryRaw);
+    return isAuthorityError(recovery)
+      ? recovery
+      : { ok: true, active: undefined, recovery, enveloped: false };
   }
   let value: unknown;
   try {
@@ -72,7 +95,14 @@ export function readStateAuthority(raw: string | null): AuthorityReadResult {
   if (isRecord(value) && value.schema === PRIVATE_STATE_AUTHORITY_SCHEMA) {
     const envelope = validateAuthorityEnvelope(value);
     if (!("ok" in envelope)) {
-      return { ok: true, active: envelope.active ?? undefined, recovery: envelope.recovery ?? undefined, enveloped: true };
+      const sidecar = readRecoverySidecar(recoveryRaw);
+      if (isAuthorityError(sidecar)) return sidecar;
+      return {
+        ok: true,
+        active: envelope.active ?? undefined,
+        recovery: envelope.recovery ?? sidecar,
+        enveloped: true,
+      };
     }
     return envelope;
   }
@@ -82,7 +112,9 @@ export function readStateAuthority(raw: string | null): AuthorityReadResult {
       ? { ok: false, error: "LOCAL_STATE_UNSUPPORTED" }
       : { ok: false, error: "LOCAL_STATE_UNREADABLE" };
   }
-  return { ok: true, active: active.value, recovery: undefined, enveloped: false };
+  const recovery = readRecoverySidecar(recoveryRaw);
+  if (isAuthorityError(recovery)) return recovery;
+  return { ok: true, active: active.value, recovery, enveloped: false };
 }
 
 /** Build a canonical recovery-capable value for the sole local authority key. */

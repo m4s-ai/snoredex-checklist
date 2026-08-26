@@ -36,7 +36,9 @@ to those issues instead of copying changing decisions into a second source of tr
 
 - Static same-origin site; no backend, login, analytics, cloud sync, or catalogue write-back.
 - One committed, validated producer snapshot is the sole catalogue input to normal builds.
-- One versioned browser-local state envelope is the sole private-state authority.
+- One logical versioned browser-local state authority owns the active state and its single recovery
+  slot. The active payload remains in the legacy-readable state key; recovery is kept in a dedicated
+  private sidecar so older deployed revisions can still read the active collection during rollback.
 - Research remains read-only and outside Owned/Secured progress.
 - Unknown, retired, split, merged, or re-keyed identities never cause silent state loss.
 - Production integration fails closed until the contract, migrations, artifact, and lock agree.

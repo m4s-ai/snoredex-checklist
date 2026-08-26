@@ -4,9 +4,11 @@ import {
   type PrivateState,
   type StateErrorCode,
 } from "./domain.ts";
-import { readStateAuthority, serializeStateAuthority } from "./authority.ts";
+import { readStateAuthority } from "./authority.ts";
 
 export const PRIVATE_STATE_STORAGE_KEY = "snoredex-checklist.private-state";
+/** Optional recovery sidecar; the active state key remains legacy-readable for rollback. */
+export const PRIVATE_STATE_RECOVERY_STORAGE_KEY = "snoredex-checklist.private-state.recovery";
 export const PRIVATE_STATE_LOCK_NAME = "snoredex-checklist.private-state-write";
 export const PRIVATE_STATE_NOTE_DRAFT_KEY = "snoredex-checklist.private-state.note-draft";
 export const NOTE_AUTOSAVE_DELAY_MS = 3_000;
@@ -56,6 +58,7 @@ export interface DraftStorageLike {
 export interface StorageLike {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  readonly removeItem?: (key: string) => void;
   readonly withLock?: <T>(callback: () => Promise<T>) => Promise<T>;
   readonly draftStorage?: DraftStorageLike;
   readonly draftId?: string;
@@ -238,6 +241,7 @@ export function getBrowserStorage(): PersistenceResult<StorageLike> {
     return success({
       getItem: (key) => storage.getItem(key),
       setItem: (key, value) => storage.setItem(key, value),
+      removeItem: (key) => storage.removeItem(key),
       draftId: createDraftId(),
       withLock: (callback) => locks.request(PRIVATE_STATE_LOCK_NAME, callback),
       draftStorage: {
@@ -2023,8 +2027,10 @@ export class OrderedStateStore {
       return error("STORAGE_WRITE_FAILED");
     }
     let previous: string | null;
+    let previousRecoveryRaw: string | null;
     try {
       previous = this.storage.getItem(PRIVATE_STATE_STORAGE_KEY);
+      previousRecoveryRaw = this.storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY);
     } catch {
       return error("STORAGE_UNAVAILABLE");
     }
@@ -2039,13 +2045,30 @@ export class OrderedStateStore {
     } else if (previous !== this.observedRaw) {
       return error("STORAGE_COMMIT_UNCERTAIN");
     }
-    const previousAuthority = readStateAuthority(previous);
+    const previousAuthority = readStateAuthority(previous, previousRecoveryRaw);
     if (!previousAuthority.ok) return error(previousAuthority.error);
     if (previousAuthority.active !== undefined) this.lastKnownGood = cloneState(previousAuthority.active);
-    const nextSerialized = previousAuthority.enveloped
-      ? serializeStateAuthority(state, previousAuthority.recovery)
-      : serialized;
-    if (!nextSerialized.ok) return error("STORAGE_WRITE_FAILED");
+    const nextSerialized = serialized;
+    if (previousAuthority.enveloped
+      && previousAuthority.recovery !== undefined
+      && (previousRecoveryRaw === null || previousRecoveryRaw.trim() === "" || previousRecoveryRaw.trim() === "null")) {
+      const recoverySerialized = serializePrivateState(previousAuthority.recovery);
+      if (!recoverySerialized.ok) return error("STORAGE_WRITE_FAILED");
+      try {
+        this.storage.setItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY, recoverySerialized.value);
+      } catch (cause) {
+        let recoveryAfter: string | null;
+        try {
+          recoveryAfter = this.storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY);
+        } catch {
+          return error("STORAGE_COMMIT_UNCERTAIN");
+        }
+        if (recoveryAfter === previousRecoveryRaw) {
+          return error(isQuotaError(cause) ? "STORAGE_QUOTA_EXCEEDED" : "STORAGE_WRITE_FAILED");
+        }
+        return error("STORAGE_COMMIT_UNCERTAIN");
+      }
+    }
     try {
       this.storage.setItem(PRIVATE_STATE_STORAGE_KEY, nextSerialized.value);
     } catch (cause) {
