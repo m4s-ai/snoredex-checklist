@@ -97,6 +97,12 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
   const input = document.createElement("input");
   input.type = "search"; input.name = "q"; input.maxLength = 120; input.value = criteria.q ?? "";
   query.append(input);
+  for (const [name, value] of [["status", criteria.status], ["kind", criteria.kind], ["research", criteria.research]] as const) {
+    if (!value) continue;
+    const hidden = document.createElement("input");
+    hidden.type = "hidden"; hidden.name = name; hidden.value = value;
+    form.append(hidden);
+  }
   const submit = text("button", "Apply criteria") as HTMLButtonElement; submit.type = "submit";
   form.addEventListener("submit", () => {
     // Empty optional controls are omitted; explicit empty URL values remain invalid.
@@ -142,7 +148,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
     (!query || publicSearchText(item).includes(query)) && (!criteria.kind || item.itemKind === criteria.kind) &&
     (!criteria.research || (criteria.research === "true") === (item.progressClass === "research")));
   const list = text("ul", undefined, "item-list");
-  for (const item of items.slice(0, 50)) {
+  for (const item of items) {
     const row = text("li", undefined, "item-row");
     row.append(text("strong", item.cardName ?? "Unnamed item"), text("span", ` · ${item.localSetCode ?? "Unknown set"} ${item.collectorNumber ?? ""}`));
     if (item.localCardName) row.append(text("span", ` · ${item.localCardName}`));
