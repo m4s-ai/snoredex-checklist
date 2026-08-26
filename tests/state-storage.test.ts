@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   NOTE_AUTOSAVE_DELAY_MS,
   OrderedStateStore,
+  PRIVATE_STATE_NOTE_DRAFT_KEY,
   PRIVATE_STATE_STORAGE_KEY,
   PRIVATE_STATE_LOCK_NAME,
   type DraftStorageLike,
@@ -70,6 +71,7 @@ class FakeStorage implements StorageLike {
     setItem: (key, value) => {
       if (this.failDraftSet !== undefined) throw this.failDraftSet;
       if (this.failRotatedDraftSet !== undefined && key.includes(":rotated:")) {
+        this.beforeRotatedDraftQuota?.(key);
         throw this.failRotatedDraftSet;
       }
       this.draftWrites += 1;
@@ -85,6 +87,7 @@ class FakeStorage implements StorageLike {
   public failSet: unknown = undefined;
   public failDraftSet: unknown = undefined;
   public failRotatedDraftSet: unknown = undefined;
+  public beforeRotatedDraftQuota: ((key: string) => void) | undefined;
   public rewriteOnRead: string | undefined;
   public rewriteAfterWrite: string | undefined;
   public writes = 0;
@@ -873,6 +876,40 @@ test("falls back to an in-place active draft overwrite when rotation exceeds quo
   storage.failRotatedDraftSet = undefined;
   assert.deepEqual(await store.flushNote(), { ok: true, value: { state: state(0, "second draft") } });
   assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(0, "second draft") });
+});
+
+test("does not use the quota fallback after a tombstone appears", () => {
+  const storage = new FakeStorage();
+  const store = new OrderedStateStore(storage);
+  store.scheduleNoteSave(state(0, "first draft"));
+  const firstDraftKey = [...storage.draftValues.keys()][0];
+  assert.equal(typeof firstDraftKey, "string");
+
+  const quotaError = Object.assign(new Error("quota"), { name: "QuotaExceededError" });
+  storage.failRotatedDraftSet = quotaError;
+  storage.beforeRotatedDraftQuota = () => {
+    const raw = storage.draftValues.get(firstDraftKey as string);
+    assert.equal(typeof raw, "string");
+    const record = JSON.parse(raw as string) as Record<string, unknown>;
+    record.ownerState = "inactive";
+    storage.draftValues.set(firstDraftKey as string, JSON.stringify(record));
+    const tombstoneKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:tombstone:${encodeURIComponent(String(record.draftId))}:${encodeURIComponent(firstDraftKey as string)}:${encodeURIComponent(String(record.revision))}`;
+    storage.draftValues.set(tombstoneKey, JSON.stringify({
+      schema: "snoredex-checklist.pending-note-tombstone",
+      schemaVersion: 1,
+      sourceKey: firstDraftKey,
+      sourceDraftId: record.draftId,
+      sourceRevision: record.revision,
+      consumedAt: Date.now(),
+    }));
+  };
+
+  assert.deepEqual(store.scheduleNoteSave(state(0, "second draft")), {
+    ok: false,
+    error: "STORAGE_QUOTA_EXCEEDED",
+  });
+  assert.equal(storage.draftValues.get(firstDraftKey as string)?.includes("second draft"), false);
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":rotated:")), false);
 });
 
 test("queued saves keep the newest edit authoritative and page-close flush is explicit", async () => {

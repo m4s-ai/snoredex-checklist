@@ -653,7 +653,12 @@ export class OrderedStateStore {
         // envelope would exceed quota.  Never fall back for a tombstoned
         // source: that record is concurrently reclaimable and must remain
         // immutable until the rotated replacement is durable.
-        if (!isQuotaError(cause) || previousOwnedReference === undefined || sourceIsTombstoned) {
+        if (
+          !isQuotaError(cause)
+          || previousOwnedReference === undefined
+          || sourceIsTombstoned
+          || !this.canFallbackToActiveDraftOverwrite(previousOwnedReference)
+        ) {
           throw cause;
         }
         key = previousOwnedReference.key;
@@ -670,6 +675,36 @@ export class OrderedStateStore {
       // Keep the in-memory draft so the caller can retry after surfacing the
       // failure; do not silently present the previous durable record as new.
       return undefined;
+    }
+  }
+
+  /**
+   * Quota fallback is allowed only for the current active owner record. A
+   * fresh read prevents an earlier tombstone snapshot from authorizing an
+   * overwrite of a source that is already eligible for reclamation.
+   */
+  private canFallbackToActiveDraftOverwrite(reference: DraftReference): boolean {
+    const draftStorage = this.storage.draftStorage;
+    if (draftStorage === undefined) {
+      return false;
+    }
+    try {
+      if (this.isTombstonedDraftKey(reference.key, this.draftId)) {
+        return false;
+      }
+      const raw = draftStorage.getItem(reference.key);
+      if (raw === null) {
+        return false;
+      }
+      const current = this.parseDraftReference({
+        ...reference,
+        value: raw,
+        draftId: this.draftId,
+      });
+      return current !== undefined && current.ownerState === "active"
+        && !this.isTombstonedDraftKey(reference.key, this.draftId);
+    } catch {
+      return false;
     }
   }
 
