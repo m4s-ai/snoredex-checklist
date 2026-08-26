@@ -352,8 +352,14 @@ function promoteRecovery(
       return fail("STORAGE_COMMIT_UNCERTAIN");
     }
   } catch (cause) {
-    const restored = restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, expectedRaw.active);
-    if (restored) return fail(isQuotaError(cause) ? "STORAGE_QUOTA_EXCEEDED" : "STORAGE_WRITE_FAILED");
+    // The sidecar may already contain `null` when its verification read fails.
+    // Restore and verify it before rolling the promoted active state back; if
+    // that proof is unavailable, retain the promoted active copy rather than
+    // risking an empty active key with the sole recovery snapshot consumed.
+    const restoredRecovery = restoreRaw(storage, PRIVATE_STATE_RECOVERY_STORAGE_KEY, expectedRaw.recovery);
+    if (!restoredRecovery) return fail("STORAGE_COMMIT_UNCERTAIN");
+    const restoredActive = restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, expectedRaw.active);
+    if (restoredActive) return fail(isQuotaError(cause) ? "STORAGE_QUOTA_EXCEEDED" : "STORAGE_WRITE_FAILED");
     return fail("STORAGE_COMMIT_UNCERTAIN");
   }
   const after = readAuthority(storage);

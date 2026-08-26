@@ -80,6 +80,19 @@ class FailActiveWriteStorage extends FakeStorage {
   }
 }
 
+class FailRecoveryReadbackStorage extends FakeStorage {
+  public failRecoveryReadback = false;
+
+  public override getItem(key: string): string | null {
+    if (key === PRIVATE_STATE_RECOVERY_STORAGE_KEY
+      && this.failRecoveryReadback
+      && this.values.get(key) === "null") {
+      throw new Error("recovery readback failed");
+    }
+    return super.getItem(key);
+  }
+}
+
 const appRevision = "c".repeat(40);
 const exportedAt = "2026-08-26T10:00:00.000Z";
 
@@ -296,6 +309,26 @@ test("restore keeps the recovery target when active promotion fails", async () =
   assert.equal(current.ok, true);
   if (current.ok) {
     assert.deepEqual(current.value.active?.items, []);
+    assert.equal(current.value.recovery?.items[0]?.note, "keep me");
+  }
+});
+
+test("restore rolls back the sidecar before the active key when recovery consumption readback fails", async () => {
+  const storage = new FailRecoveryReadbackStorage();
+  const original = state("keep me");
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(original));
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision, now: () => exportedAt });
+  assert.equal((await lifecycle.clear(true)).ok, true);
+  storage.failRecoveryReadback = true;
+  assert.deepEqual(await lifecycle.restore(true, fingerprint, knownItemIds), {
+    ok: false,
+    error: "STORAGE_WRITE_FAILED",
+  });
+  storage.failRecoveryReadback = false;
+  const current = lifecycle.read();
+  assert.equal(current.ok, true);
+  if (current.ok) {
+    assert.equal(current.value.active?.items.length, 0);
     assert.equal(current.value.recovery?.items[0]?.note, "keep me");
   }
 });
