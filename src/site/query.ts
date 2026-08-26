@@ -18,6 +18,8 @@ const STATUS = new Set(["need", "ordered", "have", "skip"]);
 const KIND = new Set(["verified-printing", "finish-candidate", "research-placeholder"]);
 const RESEARCH = new Set(["true", "false"]);
 const MAX_QUERY_TEXT = 120;
+// Keep a bounded raw URL while applying the user-facing limit to decoded text below.
+const MAX_QUERY_RAW = 4096;
 
 function recoverableLocalization(params: URLSearchParams, ids: ReadonlySet<string>): string | undefined {
   const values = params.getAll("localization");
@@ -31,7 +33,7 @@ export function parseQuery(search: string, localizationIds: ReadonlySet<string>)
   };
   let params: URLSearchParams;
   const raw = search.startsWith("?") ? search.slice(1) : search;
-  if (raw.length > 512 || /%(?![0-9a-fA-F]{2})/.test(raw)) return { ok: false };
+  if (raw.length > MAX_QUERY_RAW || /%(?![0-9a-fA-F]{2})/.test(raw)) return { ok: false };
   try {
     params = new URLSearchParams(raw);
   } catch {

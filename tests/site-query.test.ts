@@ -27,3 +27,10 @@ test("keeps a status filter as a criterion without serializing collection record
   });
   assert.equal(serializeQuery({ localization: "west-es", status: "have" }), "?localization=west-es&status=have");
 });
+
+test("allows non-ASCII search text within the decoded length limit", () => {
+  const query = `?q=${encodeURIComponent("界".repeat(57))}`;
+  const parsed = parseQuery(query, ids);
+  assert.equal(parsed.ok, true);
+  if (parsed.ok) assert.equal(parsed.criteria.q, "界".repeat(57));
+});

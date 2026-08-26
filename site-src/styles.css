@@ -1,11 +1,11 @@
 :root {
   color-scheme: light;
   --page: #fbf8ee; --surface: #fff; --soft: #f1edda; --ink: #23343a; --muted: #637176;
-  --primary: #456f78; --primary-soft: #dcebed; --accent: #a7c8b8; --highlight: #e8d69b;
+  --primary: #456f78; --primary-ink: #fff; --primary-soft: #dcebed; --accent: #a7c8b8; --highlight: #e8d69b;
   --danger: #ad5752; --border: #d8ddd3; --control: #7c8b8a; --focus: #7a5c00;
   --shadow: 0 12px 32px rgb(35 52 58 / 9%);
 }
-:root[data-theme="dark"] { color-scheme: dark; --page: #172326; --surface: #213136; --soft: #2a3c40; --ink: #f4f0dd; --muted: #b7c2bd; --primary: #79aeb8; --primary-soft: #29464c; --accent: #9cc2af; --highlight: #d8c78e; --danger: #e28f87; --border: #405257; --control: #7b8d8f; --focus: #f0d276; --shadow: 0 12px 32px rgb(0 0 0 / 20%); }
+:root[data-theme="dark"] { color-scheme: dark; --page: #172326; --surface: #213136; --soft: #2a3c40; --ink: #f4f0dd; --muted: #b7c2bd; --primary: #79aeb8; --primary-ink: #172326; --primary-soft: #29464c; --accent: #9cc2af; --highlight: #d8c78e; --danger: #e28f87; --border: #405257; --control: #7b8d8f; --focus: #f0d276; --shadow: 0 12px 32px rgb(0 0 0 / 20%); }
 * { box-sizing: border-box; }
 html { min-width: 320px; background: var(--page); }
 body { margin: 0; min-width: 320px; background: var(--page); color: var(--ink); font: 400 1rem/1.55 system-ui, sans-serif; }
@@ -16,7 +16,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .site-header, .site-footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; max-width: 1180px; margin: auto; padding: 1.25rem clamp(1rem, 4vw, 3rem); }
 .site-footer { color: var(--muted); font-size: .9rem; flex-wrap: wrap; padding-block: 2rem; }
 .brand { color: var(--ink); font-weight: 700; text-decoration: none; letter-spacing: .01em; }
-button, .button { min-height: 44px; border: 1px solid var(--control); border-radius: 12px; padding: .6rem 1rem; background: var(--primary); color: #fff; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+button, .button { min-height: 44px; border: 1px solid var(--control); border-radius: 12px; padding: .6rem 1rem; background: var(--primary); color: var(--primary-ink); font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
 button[data-theme-toggle] { background: var(--surface); color: var(--ink); font-size: .9rem; }
 .page-shell { max-width: 1180px; margin: auto; padding: clamp(1rem, 4vw, 3rem); }
 .hero { padding: clamp(2rem, 8vw, 7rem) 0 clamp(2rem, 6vw, 5rem); max-width: 760px; }
