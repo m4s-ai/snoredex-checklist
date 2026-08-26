@@ -2049,24 +2049,26 @@ export class OrderedStateStore {
     if (!previousAuthority.ok) return error(previousAuthority.error);
     if (previousAuthority.active !== undefined) this.lastKnownGood = cloneState(previousAuthority.active);
     const nextSerialized = serialized;
-    if (previousAuthority.enveloped
-      && previousAuthority.recovery !== undefined
-      && (previousRecoveryRaw === null || previousRecoveryRaw.trim() === "" || previousRecoveryRaw.trim() === "null")) {
+    if (previousAuthority.enveloped && previousAuthority.recovery !== undefined) {
       const recoverySerialized = serializePrivateState(previousAuthority.recovery);
       if (!recoverySerialized.ok) return error("STORAGE_WRITE_FAILED");
-      try {
-        this.storage.setItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY, recoverySerialized.value);
-      } catch (cause) {
-        let recoveryAfter: string | null;
+      if (previousRecoveryRaw === recoverySerialized.value) {
+        // The sidecar already contains the canonical recovery snapshot.
+      } else {
         try {
-          recoveryAfter = this.storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY);
-        } catch {
+          this.storage.setItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY, recoverySerialized.value);
+        } catch (cause) {
+          let recoveryAfter: string | null;
+          try {
+            recoveryAfter = this.storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY);
+          } catch {
+            return error("STORAGE_COMMIT_UNCERTAIN");
+          }
+          if (recoveryAfter === previousRecoveryRaw) {
+            return error(isQuotaError(cause) ? "STORAGE_QUOTA_EXCEEDED" : "STORAGE_WRITE_FAILED");
+          }
           return error("STORAGE_COMMIT_UNCERTAIN");
         }
-        if (recoveryAfter === previousRecoveryRaw) {
-          return error(isQuotaError(cause) ? "STORAGE_QUOTA_EXCEEDED" : "STORAGE_WRITE_FAILED");
-        }
-        return error("STORAGE_COMMIT_UNCERTAIN");
       }
     }
     try {

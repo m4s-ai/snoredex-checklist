@@ -51,6 +51,22 @@ class FakeStorage implements StorageLike {
   public setItem(key: string, value: string): void {
     this.values.set(key, value);
   }
+
+  public removeItem(key: string): void {
+    this.values.delete(key);
+  }
+}
+
+class FailRecoveryWriteStorage extends FakeStorage {
+  public activeWrites = 0;
+
+  public override setItem(key: string, value: string): void {
+    if (key === PRIVATE_STATE_RECOVERY_STORAGE_KEY && value !== "null") {
+      throw new Error("recovery write failed");
+    }
+    if (key === PRIVATE_STATE_STORAGE_KEY) this.activeWrites += 1;
+    super.setItem(key, value);
+  }
 }
 
 const appRevision = "c".repeat(40);
@@ -183,6 +199,37 @@ test("migrates an earlier authority envelope recovery slot before an ordinary sa
   });
   assert.equal(validatePrivateState(JSON.parse(storage.values.get(PRIVATE_STATE_STORAGE_KEY) ?? "null")).ok, true);
   assert.equal(storage.values.get(PRIVATE_STATE_RECOVERY_STORAGE_KEY)?.includes("recovery"), true);
+});
+
+test("migrates newer envelope recovery over a stale sidecar", async () => {
+  const storage = new FakeStorage();
+  const active = state("active");
+  const recovery = state("new recovery");
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify({
+    schema: "snoredex-private-state-authority",
+    schemaVersion: 1,
+    active,
+    recovery,
+  }));
+  storage.values.set(PRIVATE_STATE_RECOVERY_STORAGE_KEY, JSON.stringify(state("stale recovery")));
+  const store = new OrderedStateStore(storage);
+  assert.deepEqual(store.read(), { ok: true, value: active });
+  assert.deepEqual(await store.saveImmediate({ ...active, items: [] }), {
+    ok: true,
+    value: { state: { ...active, items: [] } },
+  });
+  assert.equal(storage.values.get(PRIVATE_STATE_RECOVERY_STORAGE_KEY)?.includes("new recovery"), true);
+  assert.equal(storage.values.get(PRIVATE_STATE_RECOVERY_STORAGE_KEY)?.includes("stale recovery"), false);
+});
+
+test("writes recovery before active replacement and leaves active state untouched when recovery fails", async () => {
+  const storage = new FailRecoveryWriteStorage();
+  const original = state("keep me");
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(original));
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision, now: () => exportedAt });
+  assert.deepEqual(await lifecycle.clear(true), { ok: false, error: "STORAGE_WRITE_FAILED" });
+  assert.equal(storage.activeWrites, 0);
+  assert.deepEqual(JSON.parse(storage.values.get(PRIVATE_STATE_STORAGE_KEY) ?? "null"), original);
 });
 
 test("clear and restore use one recoverable slot and swap without merging", async () => {

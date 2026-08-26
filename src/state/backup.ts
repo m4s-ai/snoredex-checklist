@@ -281,9 +281,15 @@ function writeAuthority(
   const serializedRecovery = recovery === undefined ? "null" : serializePrivateState(recovery);
   if (typeof serializedRecovery !== "string" && !serializedRecovery.ok) return fail("STORAGE_WRITE_FAILED");
   const recoveryText = typeof serializedRecovery === "string" ? serializedRecovery : serializedRecovery.value;
+  const recoveryChanged = current.value.raw.recovery !== recoveryText;
   try {
-    storage.setItem(PRIVATE_STATE_STORAGE_KEY, serializedActive.value);
-    storage.setItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY, recoveryText);
+    if (recoveryChanged) {
+      storage.setItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY, recoveryText);
+      if (storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY) !== recoveryText) {
+        restoreRaw(storage, PRIVATE_STATE_RECOVERY_STORAGE_KEY, expectedRaw.recovery);
+        return fail("STORAGE_COMMIT_UNCERTAIN");
+      }
+    }
   } catch (cause) {
     const after = readAuthority(storage);
     if (!after.ok) return fail("STORAGE_COMMIT_UNCERTAIN");
@@ -293,6 +299,16 @@ function writeAuthority(
     const restored = restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, expectedRaw.active)
       && restoreRaw(storage, PRIVATE_STATE_RECOVERY_STORAGE_KEY, expectedRaw.recovery);
     if (restored) return fail(isQuotaError(cause) ? "STORAGE_QUOTA_EXCEEDED" : "STORAGE_WRITE_FAILED");
+    return fail("STORAGE_COMMIT_UNCERTAIN");
+  }
+  try {
+    storage.setItem(PRIVATE_STATE_STORAGE_KEY, serializedActive.value);
+  } catch (cause) {
+    const restoredRecovery = !recoveryChanged || restoreRaw(storage, PRIVATE_STATE_RECOVERY_STORAGE_KEY, expectedRaw.recovery);
+    const after = readAuthority(storage);
+    if (restoredRecovery && after.ok && after.value.raw.active === expectedRaw.active && after.value.raw.recovery === expectedRaw.recovery) {
+      return fail(isQuotaError(cause) ? "STORAGE_QUOTA_EXCEEDED" : "STORAGE_WRITE_FAILED");
+    }
     return fail("STORAGE_COMMIT_UNCERTAIN");
   }
   const after = readAuthority(storage);
