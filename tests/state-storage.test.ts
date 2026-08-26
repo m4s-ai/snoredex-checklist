@@ -867,6 +867,32 @@ test("restores retained foreign recovery after partial discard", () => {
   });
 });
 
+test("keeps visible recovery aligned when both discard retirements fail", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1) });
+  writer.scheduleNoteSave(state(1, "foreign recovery"));
+
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: state(1) });
+  recovered.scheduleNoteSave(state(1, "owned draft"));
+  storage.failTombstoneSet = new Error("tombstone unavailable");
+  storage.failDraftRemove = new Error("cleanup unavailable");
+
+  recovered.discardUnsavedDraft();
+  assert.deepEqual(recovered.unsaved(), state(1, "foreign recovery"));
+  assert.deepEqual(recovered.adoptUnsavedDraft(), { ok: true, value: state(1, "foreign recovery") });
+
+  storage.failTombstoneSet = undefined;
+  storage.failDraftRemove = undefined;
+  recovered.discardUnsavedDraft();
+  assert.equal(recovered.unsaved(), undefined);
+  assert.equal(storage.draftValues.size, 2);
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), true);
+});
+
 test("clears its superseded recovery draft only after an immediate save succeeds", async () => {
   const storage = new FakeStorage();
   const seed = new OrderedStateStore(storage);
