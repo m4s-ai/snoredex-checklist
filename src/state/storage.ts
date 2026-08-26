@@ -490,17 +490,41 @@ export class OrderedStateStore {
     this.nextDraftToken += 1;
     this.latestDraftToken = this.nextDraftToken;
     const reference = this.activeDraftOwned ? this.activeDraftReference : undefined;
-    const foreignReference = this.recoveredForeignReference
-      ?? (this.supersededDraftReference?.draftId === this.draftId ? undefined : this.supersededDraftReference);
+    const recoveredReference = this.recoveredForeignReference;
+    const supersededReference = this.supersededDraftReference?.draftId === this.draftId
+      ? undefined
+      : this.supersededDraftReference;
+    const foreignReference = recoveredReference ?? supersededReference;
     const foreignRetired = foreignReference === undefined || this.consumeSupersededDraft(foreignReference);
-    this.activeDraftReference = undefined;
-    this.activeDraftOwned = false;
-    this.recoveredForeignReference = undefined;
+    const ownedRetired = reference === undefined || this.clearPendingNoteDraft(reference, true);
+    if (ownedRetired) {
+      this.activeDraftReference = undefined;
+      this.activeDraftOwned = false;
+      this.latestDraftRevision = undefined;
+    } else {
+      // A failed removal remains a live owned recovery and must be retried.
+      this.activeDraftOwned = true;
+      this.latestDraftRevision = this.activeDraftReference?.revision ?? reference?.revision;
+    }
+    if (foreignRetired) {
+      this.recoveredForeignReference = undefined;
+      if (this.supersededDraftReference?.key === foreignReference?.key) {
+        this.supersededDraftReference = undefined;
+      }
+    } else if (recoveredReference !== undefined) {
+      // Keep a non-adopted foreign recovery distinct from a superseded source.
+      this.recoveredForeignReference = foreignReference;
+    } else {
+      this.supersededDraftReference = foreignReference;
+    }
     this.recoveredDraftPresented = false;
-    this.supersededDraftReference = foreignRetired ? undefined : foreignReference;
-    this.latestDraftRevision = undefined;
-    this.unsavedDraft = undefined;
-    this.clearPendingNoteDraft(reference);
+    if (ownedRetired && foreignRetired) {
+      this.unsavedDraft = undefined;
+      this.supersededDraftReference = undefined;
+      this.stopDraftHeartbeat();
+    } else if (!ownedRetired) {
+      this.startDraftHeartbeat();
+    }
   }
 
   public saveImmediate(state: PrivateState): Promise<SaveResult> {
@@ -1497,7 +1521,10 @@ export class OrderedStateStore {
               && (foreignReference === undefined || foreignReference.key !== operation.recoveryDraftReference.key);
             if (retainRecovery) {
               this.retainForeignRecovery(operation.recoveryDraftReference);
-              this.supersededDraftReference = operation.recoveryDraftReference;
+              // This source was only retained because the submitted state did
+              // not adopt it. Keep it as recovery, never as a retirement
+              // candidate for a later unrelated save.
+              this.supersededDraftReference = undefined;
             } else {
               this.unsavedDraft = undefined;
               this.recoveredForeignReference = undefined;
@@ -1528,7 +1555,9 @@ export class OrderedStateStore {
             if (foreignRetired && operation.recoveryDraftReference !== undefined
               && (foreignReference === undefined || foreignReference.key !== operation.recoveryDraftReference.key)) {
               this.retainForeignRecovery(operation.recoveryDraftReference);
-              this.supersededDraftReference = operation.recoveryDraftReference;
+              // A retained, non-adopted recovery must not become superseded;
+              // a later ordinary save must leave it recoverable.
+              this.supersededDraftReference = undefined;
             }
             this.recoveredDraftPresented = false;
           }

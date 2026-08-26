@@ -377,8 +377,13 @@ test("keeps a recovered source for an unrelated read-based immediate edit", asyn
     value: { state: state(2) },
   });
   assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), false);
+  assert.deepEqual(await unrelated.saveImmediate(state(3)), {
+    ok: true,
+    value: { state: state(3) },
+  });
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), false);
   const reloaded = new OrderedStateStore(storage);
-  assert.deepEqual(reloaded.read(), { ok: true, value: state(2) });
+  assert.deepEqual(reloaded.read(), { ok: true, value: state(3) });
   assert.deepEqual(reloaded.unsaved(), state(1, "keep my note"));
 });
 
@@ -816,6 +821,24 @@ test("allows an explicit discard of a recovered draft", () => {
   assert.equal(storage.draftValues.size, 0);
   assert.equal(store.unsaved(), undefined);
   assert.equal(store.hasPendingNote(), false);
+});
+
+test("retains an owned recovery when discard removal fails", () => {
+  const storage = new FakeStorage();
+  const store = new OrderedStateStore(storage);
+  store.scheduleNoteSave(state(0, "retry discard"));
+  assert.equal(storage.draftValues.size, 1);
+
+  storage.failDraftRemove = new Error("cleanup unavailable");
+  store.discardUnsavedDraft();
+  assert.deepEqual(store.unsaved(), state(0, "retry discard"));
+  assert.equal(store.hasPendingNote(), false);
+  assert.equal(storage.draftValues.size, 1);
+
+  storage.failDraftRemove = undefined;
+  store.discardUnsavedDraft();
+  assert.equal(store.unsaved(), undefined);
+  assert.equal(storage.draftValues.size, 0);
 });
 
 test("clears its superseded recovery draft only after an immediate save succeeds", async () => {
