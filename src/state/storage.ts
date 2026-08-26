@@ -514,6 +514,12 @@ export class OrderedStateStore {
     } else if (recoveredReference !== undefined) {
       // Keep a non-adopted foreign recovery distinct from a superseded source.
       this.recoveredForeignReference = foreignReference;
+      // If the owned draft was removed but the foreign source could not be
+      // tombstoned, present that retained source again rather than the
+      // already-removed owned state.
+      if (ownedRetired) {
+        this.retainForeignRecovery(foreignReference as DraftReference);
+      }
     } else {
       this.supersededDraftReference = foreignReference;
     }
