@@ -79,6 +79,9 @@ class FakeStorage implements StorageLike {
       }
       this.draftWrites += 1;
       this.draftValues.set(key, value);
+      if (key.includes(":rotated:")) {
+        this.afterRotatedDraftWrite?.(key);
+      }
     },
     removeItem: (key) => {
       if (this.failDraftRemove !== undefined) throw this.failDraftRemove;
@@ -94,6 +97,7 @@ class FakeStorage implements StorageLike {
   public failDraftRemove: unknown = undefined;
   public failRotatedDraftSet: unknown = undefined;
   public beforeRotatedDraftQuota: ((key: string) => void) | undefined;
+  public afterRotatedDraftWrite: ((key: string) => void) | undefined;
   public rewriteOnRead: string | undefined;
   public rewriteAfterWrite: string | undefined;
   public writes = 0;
@@ -717,6 +721,46 @@ test("rotates a tombstoned source before owner reactivation", async () => {
   assert.equal(storage.draftValues.has(rotatedKey as string), true);
 });
 
+test("does not adopt a rotated source when its tombstone disappears", async () => {
+  const storage = new FakeStorage();
+  const store = new OrderedStateStore(storage);
+  storage.failDraftRemove = new Error("cleanup unavailable");
+  assert.deepEqual(await store.saveImmediate(state(1, "consumed source")), {
+    ok: true,
+    value: { state: state(1, "consumed source") },
+  });
+  storage.failDraftRemove = undefined;
+  const sourceKey = [...storage.draftValues.keys()][0];
+  const sourceRecord = JSON.parse(storage.draftValues.get(sourceKey) as string) as Record<string, unknown>;
+  const tombstoneKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:tombstone:${encodeURIComponent(String(sourceRecord.draftId))}:${encodeURIComponent(sourceKey)}:${encodeURIComponent(String(sourceRecord.revision))}`;
+  storage.draftValues.set(tombstoneKey, JSON.stringify({
+    schema: "snoredex-checklist.pending-note-tombstone",
+    schemaVersion: 1,
+    sourceKey,
+    sourceDraftId: sourceRecord.draftId,
+    sourceRevision: sourceRecord.revision,
+    consumedAt: Date.now(),
+  }));
+  let raced = true;
+  storage.afterRotatedDraftWrite = (rotatedKey) => {
+    if (!raced) return;
+    raced = false;
+    for (const [key, value] of storage.draftValues) {
+      if (!key.includes(":tombstone:")) continue;
+      const tombstone = JSON.parse(value) as Record<string, unknown>;
+      if (tombstone.sourceKey === rotatedKey) storage.draftValues.delete(key);
+    }
+  };
+
+  storage.emitActive();
+  assert.equal(storage.draftValues.has(sourceKey), true);
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":rotated:") && !key.includes(":tombstone:")), false);
+
+  storage.afterRotatedDraftWrite = undefined;
+  storage.emitActive();
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":rotated:") && !key.includes(":tombstone:")), true);
+});
+
 test("does not tombstone a later foreign revision that reuses the same state", async () => {
   const storage = new FakeStorage();
   const seed = new OrderedStateStore(storage);
@@ -991,6 +1035,34 @@ test("does not retire a pending foreign source while the canonical envelope is u
   assert.deepEqual(recovered.unsaved(), state(1, "pending foreign"));
   assert.equal(storage.draftValues.has(foreignKey as string), true);
   assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), false);
+});
+
+test("does not reclaim an inactive consumed source while the canonical envelope is unreadable", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1) });
+  writer.scheduleNoteSave(state(1, "retain on malformed canonical"));
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: state(1) });
+  assert.deepEqual(recovered.unsaved(), state(1, "retain on malformed canonical"));
+  assert.deepEqual(await recovered.saveImmediate(state(1, "retain on malformed canonical")), {
+    ok: true,
+    value: { state: state(1, "retain on malformed canonical") },
+  });
+  storage.emitInactive();
+  const sourceKey = [...storage.draftValues.keys()].find((key) => !key.includes(":tombstone:"));
+  const tombstoneKey = [...storage.draftValues.keys()].find((key) => key.includes(":tombstone:"));
+  assert.equal(typeof sourceKey, "string");
+  assert.equal(typeof tombstoneKey, "string");
+
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, "{malformed");
+  const reloaded = new OrderedStateStore(storage);
+  assert.deepEqual(reloaded.read(), { ok: false, error: "LOCAL_STATE_UNREADABLE" });
+  assert.equal(storage.draftValues.has(sourceKey as string), true);
+  assert.equal(storage.draftValues.has(tombstoneKey as string), true);
 });
 
 test("keeps the original consumed source when rotated tombstone persistence fails", async () => {

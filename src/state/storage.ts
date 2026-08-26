@@ -894,6 +894,20 @@ export class OrderedStateStore {
         } catch {
           return;
         }
+        // A concurrent reclamation may remove the marker between the source
+        // write and adoption of the rotated reference.  Do not switch to an
+        // unsuppressed source; leave the original consumed reference intact
+        // and discard only the value written by this transfer.
+        if (!this.isTombstonedDraftKey(rotatedKey, this.draftId)) {
+          try {
+            if (draftStorage.getItem(rotatedKey) === value) {
+              draftStorage.removeItem(rotatedKey);
+            }
+          } catch {
+            // Best-effort cleanup; the reference is deliberately not adopted.
+          }
+          return;
+        }
         this.activeDraftReference = { ...reference, key: rotatedKey, value };
         this.clearPendingNoteDraft(reference);
       } else {
@@ -1101,7 +1115,9 @@ export class OrderedStateStore {
       this.unsavedDraft = undefined;
       this.stopDraftHeartbeat();
     }
-    this.reclaimConsumedDrafts(draftStorage);
+    if (retireExactMatch) {
+      this.reclaimConsumedDrafts(draftStorage);
+    }
     const keys = this.draftKeys(draftStorage);
     const candidates = keys
       .map((key) => {
