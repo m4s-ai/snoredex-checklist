@@ -1717,7 +1717,30 @@ export class OrderedStateStore {
   }
 
   private readDraftPointers(draftStorage: DraftStorageLike): readonly CurrentDraftPointerRecord[] {
-    return this.readDraftPointersStrict(draftStorage) ?? [];
+    try {
+      const raw = draftStorage.getItem(getDraftPointerKey());
+      if (raw === null) {
+        return [];
+      }
+      const candidate = JSON.parse(raw) as unknown;
+      if (typeof candidate !== "object" || candidate === null) {
+        return [];
+      }
+      const registry = candidate as Partial<CurrentDraftPointerRegistry>;
+      if (registry.schema === PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA
+        && registry.schemaVersion === PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION
+        && Array.isArray(registry.pointers)) {
+        // Discovery is read-only: keep every individually valid pointer so a
+        // malformed sibling cannot hide an otherwise recoverable foreign draft.
+        return registry.pointers
+          .map((pointer) => this.parseDraftPointerRecord(pointer))
+          .filter((pointer): pointer is CurrentDraftPointerRecord => pointer !== undefined);
+      }
+      const legacy = this.parseDraftPointerRecord(candidate);
+      return legacy === undefined ? [] : [legacy];
+    } catch {
+      return [];
+    }
   }
 
   private writeDraftPointer(draftStorage: DraftStorageLike, reference: DraftReference): boolean {

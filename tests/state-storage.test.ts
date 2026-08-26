@@ -1362,6 +1362,52 @@ test("keeps pointer registry entries for concurrent unenumerable owners", () => 
   assert.equal([...storage.draftValues.values()].filter((raw) => raw.includes("unenumerable owner")).length, 2);
 });
 
+test("recovers valid pointers beside a malformed registry entry", () => {
+  const storage = new FakeStorage();
+  const fullDraftStorage = storage.draftStorage;
+  storage.draftStorage = {
+    getItem: fullDraftStorage.getItem,
+    setItem: fullDraftStorage.setItem,
+    removeItem: fullDraftStorage.removeItem,
+    withAtomicUpdate: fullDraftStorage.withAtomicUpdate,
+  };
+  storage.draftId = "reader-owner";
+  const pointerKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:current`;
+  const sourceKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:foreign-valid`;
+  storage.draftValues.set(pointerKey, JSON.stringify({
+    schema: "snoredex-checklist.pending-note-pointer",
+    schemaVersion: 2,
+    pointers: [{
+      schema: "snoredex-checklist.pending-note-pointer",
+      schemaVersion: 2,
+      draftId: "foreign-owner",
+      sourceKey,
+      sourceRevision: "valid-revision",
+    }, {
+      schema: "snoredex-checklist.pending-note-pointer",
+      schemaVersion: 2,
+      draftId: "foreign-owner",
+      sourceKey: "not-a-draft-key",
+      sourceRevision: "malformed-entry",
+    }],
+  }));
+  storage.draftValues.set(sourceKey, JSON.stringify({
+    schema: "snoredex-checklist.pending-note",
+    schemaVersion: 1,
+    draftId: "foreign-owner",
+    state: state(0, "valid pointer survives malformed sibling"),
+    revision: "valid-revision",
+    hasObservedRaw: true,
+    observedRaw: null,
+    updatedAt: Date.now(),
+    ownerState: "active",
+  }));
+
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: undefined });
+  assert.deepEqual(recovered.unsaved(), state(0, "valid pointer survives malformed sibling"));
+});
+
 test("fails closed without an atomic pointer registry primitive", () => {
   const storage = new FakeStorage();
   const fullDraftStorage = storage.draftStorage;
