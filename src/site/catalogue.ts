@@ -100,10 +100,11 @@ export async function validateSnapshot(value: unknown): Promise<SnapshotValidati
   if (value.meta.schema !== "snoredex-collector-catalogue" || value.meta.schemaVersion !== "1.0.0") {
     return { ok: false, reason: "unsupported" };
   }
-  if (!/^sha256:[0-9a-f]{64}$/.test(String(value.meta.catalogueFingerprint ?? ""))) {
+  const fingerprint = value.meta.catalogueFingerprint;
+  if (typeof fingerprint !== "string" || !/^sha256:[0-9a-f]{64}$/.test(fingerprint)) {
     return { ok: false, reason: "invalid" };
   }
-  if (!(await hasMatchingFingerprint(value, value.meta.catalogueFingerprint))) {
+  if (!(await hasMatchingFingerprint(value, fingerprint))) {
     return { ok: false, reason: "invalid" };
   }
   const arrayKeys = ["localizations", "localSets", "setEditions", "works", "items", "assets"] as const;

@@ -1,7 +1,8 @@
-import { cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { replaceOutput } from "./site-output.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const output = resolve(root, process.argv[2] === "--out-dir" ? process.argv[3] : "dist/site");
@@ -40,31 +41,7 @@ try {
   await cp(resolve(root, "THIRD_PARTY_NOTICES.md"), resolve(staging, "THIRD_PARTY_NOTICES.md"));
   await cp(resolve(root, "LICENSES"), resolve(staging, "LICENSES"), { recursive: true });
 
-  let hadPrevious = false;
-  try {
-    await rename(output, previous);
-    hadPrevious = true;
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-  }
-  try {
-    await rename(staging, output);
-  } catch (error) {
-    if (hadPrevious) {
-      try {
-        await rename(previous, output);
-      } catch (restoreError) {
-        const describe = (value) => value instanceof Error ? value.message : String(value);
-        throw new Error(
-          `site output replacement failed (${describe(error)}); restoring the previous output also failed (${describe(restoreError)}). ` +
-          `The last-known-good output is preserved at ${previous}.`,
-          { cause: error },
-        );
-      }
-    }
-    throw error;
-  }
-  if (hadPrevious) await rm(previous, { recursive: true, force: true });
+  await replaceOutput({ output, previous, staging });
 } catch (error) {
   await rm(staging, { recursive: true, force: true });
   throw error;

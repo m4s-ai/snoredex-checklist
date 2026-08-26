@@ -155,7 +155,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
   const query = criteria.q?.toLowerCase();
   const items = catalogue.items.filter((item) => (!localizationIds || localizationIds.has(item.localizationId)) &&
     (!query || publicSearchText(item).includes(query)) && (!criteria.kind || item.itemKind === criteria.kind) &&
-    matchesResearch(item.progressClass, criteria.research));
+    matchesResearch(item.progressClass ?? "", criteria.research));
   const list = text("ul", undefined, "item-list");
   for (const item of items) {
     const row = text("li", undefined, "item-row");
