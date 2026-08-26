@@ -74,6 +74,9 @@ class FakeStorage implements StorageLike {
     },
     setItem: (key, value) => {
       if (this.failDraftSet !== undefined) throw this.failDraftSet;
+      if (this.failDraftRestoreSet !== undefined && key === this.failDraftRestoreKey) {
+        throw this.failDraftRestoreSet;
+      }
       if (this.failTombstoneSet !== undefined && key.includes(":tombstone:")) {
         throw this.failTombstoneSet;
       }
@@ -102,6 +105,8 @@ class FakeStorage implements StorageLike {
   public failGet = false;
   public failSet: unknown = undefined;
   public failDraftSet: unknown = undefined;
+  public failDraftRestoreSet: unknown = undefined;
+  public failDraftRestoreKey: string | undefined;
   public failTombstoneSet: unknown = undefined;
   public failDraftRemove: unknown = undefined;
   public failAtomicUpdate: unknown = undefined;
@@ -1389,7 +1394,7 @@ test("restores the previous draft when fallback pointer publication fails", () =
       && value.includes("old durable draft"));
   assert.equal(typeof oldEntry, "object");
 
-  storage.failRotatedDraftSet = new Error("quota");
+  storage.failRotatedDraftSet = { name: "QuotaExceededError" };
   storage.failAtomicUpdate = new Error("atomic registry unavailable");
   assert.deepEqual(store.scheduleNoteSave(state(0, "new edit")), {
     ok: false,
@@ -1399,6 +1404,39 @@ test("restores the previous draft when fallback pointer publication fails", () =
   storage.failAtomicUpdate = undefined;
   assert.equal(storage.draftValues.get(oldEntry?.[0] as string), oldEntry?.[1]);
   assert.equal([...storage.draftValues.values()].some((raw) => raw.includes("new edit")), false);
+});
+
+test("retains the new fallback draft when rollback also fails", () => {
+  const storage = new FakeStorage();
+  const fullDraftStorage = storage.draftStorage;
+  storage.draftStorage = {
+    getItem: fullDraftStorage.getItem,
+    setItem: fullDraftStorage.setItem,
+    removeItem: fullDraftStorage.removeItem,
+    withAtomicUpdate: fullDraftStorage.withAtomicUpdate,
+  };
+  const store = new OrderedStateStore(storage);
+  assert.equal(store.scheduleNoteSave(state(0, "old fallback" as string)).ok, true);
+  const oldEntry = [...storage.draftValues.entries()]
+    .find(([key, value]) => key !== `${PRIVATE_STATE_NOTE_DRAFT_KEY}:current`
+      && value.includes("old fallback"));
+  assert.equal(typeof oldEntry, "object");
+
+  storage.failRotatedDraftSet = { name: "QuotaExceededError" };
+  storage.failAtomicUpdate = new Error("atomic registry unavailable");
+  storage.failDraftRestoreKey = oldEntry?.[0];
+  storage.afterDraftSetItem = (key, value) => {
+    if (key === oldEntry?.[0] && value.includes("new fallback")) {
+      storage.failDraftRestoreSet = new Error("restore unavailable");
+    }
+  };
+  assert.equal(store.scheduleNoteSave(state(0, "new fallback" as string)).ok, false);
+  storage.failRotatedDraftSet = undefined;
+  storage.failAtomicUpdate = undefined;
+  storage.failDraftRestoreKey = undefined;
+  storage.failDraftRestoreSet = undefined;
+  storage.afterDraftSetItem = undefined;
+  assert.equal(storage.draftValues.get(oldEntry?.[0] as string)?.includes("new fallback"), true);
 });
 
 test("retains pointer cleanup for a retry after an atomic removal failure", () => {
@@ -1422,6 +1460,48 @@ test("retains pointer cleanup for a retry after an atomic removal failure", () =
   storage.failAtomicUpdate = undefined;
   store.discardUnsavedDraft();
   assert.equal(storage.draftValues.has(pointerKey), false);
+});
+
+test("retains a tombstone until a missing-source pointer can be removed", () => {
+  const storage = new FakeStorage();
+  const fullDraftStorage = storage.draftStorage;
+  storage.draftStorage = {
+    getItem: fullDraftStorage.getItem,
+    setItem: fullDraftStorage.setItem,
+    removeItem: fullDraftStorage.removeItem,
+    withAtomicUpdate: fullDraftStorage.withAtomicUpdate,
+  };
+  const sourceKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:missing-source`;
+  const pointerKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:current`;
+  const tombstoneKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:tombstone:${encodeURIComponent("foreign-owner")}:${encodeURIComponent(sourceKey)}:1`;
+  storage.draftValues.set(pointerKey, JSON.stringify({
+    schema: "snoredex-checklist.pending-note-pointer",
+    schemaVersion: 2,
+    pointers: [{
+      schema: "snoredex-checklist.pending-note-pointer",
+      schemaVersion: 2,
+      draftId: "foreign-owner",
+      sourceKey,
+      sourceRevision: "1",
+    }],
+  }));
+  storage.draftValues.set(tombstoneKey, JSON.stringify({
+    schema: "snoredex-checklist.pending-note-tombstone",
+    schemaVersion: 1,
+    sourceKey,
+    sourceDraftId: "foreign-owner",
+    sourceRevision: "1",
+    consumedAt: Date.now(),
+  }));
+
+  storage.failAtomicUpdate = new Error("atomic registry unavailable");
+  new OrderedStateStore(storage).read();
+  assert.equal(storage.draftValues.has(pointerKey), true);
+  assert.equal(storage.draftValues.has(tombstoneKey), true);
+  storage.failAtomicUpdate = undefined;
+  new OrderedStateStore(storage).read();
+  assert.equal(storage.draftValues.has(pointerKey), false);
+  assert.equal(storage.draftValues.has(tombstoneKey), false);
 });
 
 test("probes a pointed foreign owner's tombstone without listKeys", () => {

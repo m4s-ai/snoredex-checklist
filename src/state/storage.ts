@@ -883,14 +883,18 @@ export class OrderedStateStore {
       if (!this.writeDraftPointer(draftStorage, reference)) {
         this.draftPersistenceError = "STORAGE_WRITE_FAILED";
         if (previousInPlaceValue !== undefined) {
+          let restored = false;
           try {
             draftStorage.setItem(previousOwnedReference?.key ?? key, previousInPlaceValue);
-            if (draftStorage.getItem(previousOwnedReference?.key ?? key) === previousInPlaceValue) {
-              return undefined;
-            }
+            restored = draftStorage.getItem(previousOwnedReference?.key ?? key) === previousInPlaceValue;
           } catch {
-            // Fall through to best-effort cleanup when restoration is unavailable.
+            // Keep the newly written value below when rollback is unavailable;
+            // it is still reachable through the existing source pointer.
           }
+          if (restored) {
+            return undefined;
+          }
+          return undefined;
         }
         try {
           if (draftStorage.getItem(key) === persistedValue) {
@@ -1551,6 +1555,9 @@ export class OrderedStateStore {
         }
         const sourceRaw = draftStorage.getItem(tombstone.sourceKey);
         if (sourceRaw === null) {
+          if (!this.clearDraftPointerIfMatches(draftStorage, tombstone.sourceKey)) {
+            continue;
+          }
           this.removeTombstoneIfUnchanged(draftStorage, tombstoneKey, tombstoneRaw);
           continue;
         }
