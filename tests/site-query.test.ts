@@ -1,0 +1,21 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { parseQuery, serializeQuery } from "../src/site/query.ts";
+
+const ids = new Set(["west-es", "latam-es"]);
+
+test("round-trips canonical public criteria", () => {
+  const criteria = { localization: "west-es", q: "Snorlax & friends", kind: "verified-printing" as const, research: "false" as const };
+  const encoded = serializeQuery(criteria);
+  assert.equal(encoded, "?localization=west-es&q=Snorlax+%26+friends&kind=verified-printing&research=false");
+  assert.deepEqual(parseQuery(encoded, ids), { ok: true, criteria });
+});
+
+test("rejects the whole query when one criterion is invalid", () => {
+  assert.deepEqual(parseQuery("?localization=west-es&q=ok&unknown=x", ids), { ok: false, recoverableLocalization: "west-es" });
+  assert.deepEqual(parseQuery("?localization=west-es&status=maybe", ids), { ok: false, recoverableLocalization: "west-es" });
+  assert.deepEqual(parseQuery("?localization=west-es&localization=latam-es", ids), { ok: false });
+  assert.deepEqual(parseQuery("?localization=west-es&q=", ids), { ok: false, recoverableLocalization: "west-es" });
+  assert.deepEqual(parseQuery("?localization=west-es&bad=%", ids), { ok: false });
+});

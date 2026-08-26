@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A private, local Snoredex collection checklist.">
+  <title>Collection · Snoredex Checklist</title>
+  <link rel="stylesheet" href="../styles.css">
+  <script>try{const s=localStorage.getItem("snoredex-theme");document.documentElement.dataset.theme=s==="light"||s==="dark"?s:(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")}catch{}</script>
+</head>
+<body data-page="collection">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="site-header"><a class="brand" href="../">Snoredex Checklist</a><button type="button" data-theme-toggle aria-pressed="false">Use dark theme</button></header>
+  <main id="main-content" class="page-shell collection-shell">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="../">Home</a><span aria-hidden="true">/</span><span>Collection</span></nav>
+    <div class="collection-grid">
+      <aside class="surface sidebar" aria-labelledby="browse-title"><h2 id="browse-title">Browse localizations</h2><nav aria-label="Localizations"><div data-localizations><p>Loading localizations…</p></div></nav></aside>
+      <section class="content-column" aria-labelledby="collection-title"><div class="surface"><p class="eyebrow">Private browser-local view</p><h1 id="collection-title">Collection</h1><p>Public catalogue text is rendered from the validated snapshot. Collection state is deliberately independent and is not serialized into this URL.</p><div data-query></div><div data-view aria-live="polite"><p>Loading collection…</p></div></div><section class="surface" aria-labelledby="provenance-title"><h2 id="provenance-title">Source and version</h2><div data-provenance></div></section></section>
+    </div>
+  </main>
+  <footer class="site-footer"><span>Private data stays in this browser</span><a href="https://m4s-ai.github.io/snoredex-data/" rel="noopener noreferrer">Snoredex Data <span aria-hidden="true">↗</span><span class="sr-only">External site</span></a></footer>
+  <script type="module" src="../assets/app.js"></script>
+</body>
+</html>
