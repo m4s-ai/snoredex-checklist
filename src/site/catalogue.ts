@@ -114,6 +114,12 @@ export function validateSnapshot(value: unknown): SnapshotValidation {
   const editionById = new Map(setEditions.map((row) => [row.setEditionId as string, row] as const));
   const workIds = new Set(works.map((row) => row.workId as string));
   const assetById = new Map(assets.map((row) => [row.assetId as string, row] as const));
+  const localizationKeys = new Set<string>();
+  for (const localization of localizations) {
+    const key = `${localization.locality}\u0000${localization.languageTag}`;
+    if (localizationKeys.has(key)) return { ok: false, reason: "invalid" };
+    localizationKeys.add(key);
+  }
   const releaseMappings = new Map<string, string>();
   const itemKinds = new Set(["verified-printing", "finish-candidate", "research-placeholder"]);
   const progressClasses = new Set(["current-known", "research"]);

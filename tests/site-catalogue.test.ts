@@ -30,3 +30,10 @@ test("fails closed on orphan editions and duplicate physical printings", () => {
   });
   assert.deepEqual(validateSnapshot(duplicatePrinting), { ok: false, reason: "invalid" });
 });
+
+test("fails closed on duplicate locality-language projections", () => {
+  const duplicateProjection = structuredClone(fixture.catalogue);
+  duplicateProjection.localizations[1].locality = duplicateProjection.localizations[0].locality;
+  duplicateProjection.localizations[1].languageTag = duplicateProjection.localizations[0].languageTag;
+  assert.deepEqual(validateSnapshot(duplicateProjection), { ok: false, reason: "invalid" });
+});
