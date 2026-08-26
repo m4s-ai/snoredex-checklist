@@ -204,6 +204,24 @@ test("note autosave uses blur or three seconds of inactivity and resets its time
   assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(0, "blurred") });
 });
 
+test("reports scheduled draft persistence failures instead of hiding them", async () => {
+  const storage = new FakeStorage();
+  const store = new OrderedStateStore(storage);
+  storage.failDraftSet = new Error("draft storage unavailable");
+  assert.deepEqual(store.scheduleNoteSave(state(0, "report this failure")), {
+    ok: false,
+    error: "STORAGE_WRITE_FAILED",
+  });
+  assert.equal(storage.draftValues.size, 0);
+
+  storage.failDraftSet = undefined;
+  assert.deepEqual(await store.flushNote(), {
+    ok: true,
+    value: { state: state(0, "report this failure") },
+  });
+  assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(0, "report this failure") });
+});
+
 test("persists a pending note draft before pagehide and restores it after an interrupted flush", async () => {
   const storage = new FakeStorage();
   const clock = new FakeClock();
@@ -378,6 +396,56 @@ test("keeps a recovered source when a multi-item edit omits a recovered note", a
   assert.deepEqual(reloaded.unsaved(), recoveredState);
 });
 
+test("keeps a recovered source when a read-based edit retains a note deleted by the draft", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(0, "canonical note")), {
+    ok: true,
+    value: { state: state(0, "canonical note") },
+  });
+
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(0, "canonical note") });
+  writer.scheduleNoteSave(state(0));
+
+  const unrelated = new OrderedStateStore(storage);
+  assert.deepEqual(unrelated.read(), { ok: true, value: state(0, "canonical note") });
+  assert.deepEqual(await unrelated.saveImmediate(state(1, "canonical note")), {
+    ok: true,
+    value: { state: state(1, "canonical note") },
+  });
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), false);
+  const reloaded = new OrderedStateStore(storage);
+  assert.deepEqual(reloaded.read(), { ok: true, value: state(1, "canonical note") });
+  assert.deepEqual(reloaded.unsaved(), state(0));
+});
+
+test("clears an in-memory foreign recovery when its source disappears", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1) });
+  writer.scheduleNoteSave(state(1, "source disappears"));
+
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: state(1) });
+  assert.deepEqual(recovered.unsaved(), state(1, "source disappears"));
+  for (const key of [...storage.draftValues.keys()]) {
+    if (!key.includes(":tombstone:")) {
+      storage.draftValues.delete(key);
+    }
+  }
+
+  assert.deepEqual(recovered.read(), { ok: true, value: state(1) });
+  assert.equal(recovered.unsaved(), undefined);
+  assert.deepEqual(await recovered.saveImmediate(state(2)), {
+    ok: true,
+    value: { state: state(2) },
+  });
+});
+
 test("allows an explicit rebase after a recovered draft conflicts", async () => {
   const storage = new FakeStorage();
   const seed = new OrderedStateStore(storage);
@@ -438,12 +506,12 @@ test("preserves a live foreign recovery draft during rebase", async () => {
   });
   storage.emitInactive();
   storage.emitActive();
-  assert.equal(storage.draftValues.size, 3);
+  assert.equal(storage.draftValues.size, 2);
   const activeForeignKey = [...storage.draftValues.keys()]
     .find((key) => key !== foreignKey && !key.includes(":tombstone:"));
   assert.equal(typeof activeForeignKey, "string");
   const transferred = JSON.parse(storage.draftValues.get(activeForeignKey as string) as string) as Record<string, unknown>;
-  assert.equal(transferred.ownerState, "active");
+  assert.equal(transferred.ownerState, "consumed");
   const tombstoneKey = [...storage.draftValues.keys()].find((key) => key.includes(":tombstone:"));
   assert.equal(typeof tombstoneKey, "string");
   const tombstone = JSON.parse(storage.draftValues.get(tombstoneKey as string) as string) as Record<string, unknown>;
@@ -451,7 +519,7 @@ test("preserves a live foreign recovery draft during rebase", async () => {
   storage.emitInactive();
   storage.emitActive();
   const lifecycleRefreshed = JSON.parse(storage.draftValues.get(activeForeignKey as string) as string) as Record<string, unknown>;
-  assert.equal(lifecycleRefreshed.ownerState, "active");
+  assert.equal(lifecycleRefreshed.ownerState, "consumed");
   const reloaded = new OrderedStateStore(storage);
   assert.deepEqual(reloaded.read(), { ok: true, value: state(1, "live draft") });
   assert.equal(reloaded.unsaved(), undefined);
