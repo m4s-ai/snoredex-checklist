@@ -20,6 +20,7 @@ import {
 
 const fingerprint = "sha256:" + "c".repeat(64);
 const itemId = "item-00000000-0000-0000-0000-00000000000a";
+const secondItemId = "item-00000000-0000-0000-0000-00000000000b";
 
 function state(quantityOwned: number, note?: string): PrivateState {
   const items = quantityOwned === 0 && note === undefined
@@ -338,6 +339,43 @@ test("keeps a recovered source when a read-based edit retains a different canoni
   const reloaded = new OrderedStateStore(storage);
   assert.deepEqual(reloaded.read(), { ok: true, value: state(2, "canonical note") });
   assert.deepEqual(reloaded.unsaved(), state(1, "foreign recovery note"));
+});
+
+test("keeps a recovered source when a multi-item edit omits a recovered note", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1, "canonical note")), {
+    ok: true,
+    value: { state: state(1, "canonical note") },
+  });
+
+  const recoveredState: PrivateState = {
+    ...state(1, "canonical note"),
+    items: [
+      ...state(1, "canonical note").items,
+      {
+        itemId: secondItemId,
+        status: "need",
+        quantityOwned: 0,
+        quantityOrdered: 0,
+        note: "foreign recovery note",
+      },
+    ],
+  };
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1, "canonical note") });
+  writer.scheduleNoteSave(recoveredState);
+
+  const unrelated = new OrderedStateStore(storage);
+  assert.deepEqual(unrelated.read(), { ok: true, value: state(1, "canonical note") });
+  assert.deepEqual(await unrelated.saveImmediate(state(2, "canonical note")), {
+    ok: true,
+    value: { state: state(2, "canonical note") },
+  });
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), false);
+  const reloaded = new OrderedStateStore(storage);
+  assert.deepEqual(reloaded.read(), { ok: true, value: state(2, "canonical note") });
+  assert.deepEqual(reloaded.unsaved(), recoveredState);
 });
 
 test("allows an explicit rebase after a recovered draft conflicts", async () => {

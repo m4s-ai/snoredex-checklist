@@ -356,10 +356,7 @@ export class OrderedStateStore {
     // reading unsaved() still demonstrates adoption by retaining a recovered
     // note field. An unrelated read()-based edit that omits it does not.
     const submittedItems = new Map(state.items.map((item) => [item.itemId, item]));
-    return this.unsavedDraft.items.some((item) => {
-      if (item.note === undefined) {
-        return false;
-      }
+    return this.unsavedDraft.items.every((item) => {
       return submittedItems.get(item.itemId)?.note === item.note;
     });
   }
