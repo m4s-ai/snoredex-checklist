@@ -150,7 +150,10 @@ export function createPortableBackup(
   });
 }
 
-export function parsePortableBackup(input: Uint8Array): BackupResult<{
+export function parsePortableBackup(
+  input: Uint8Array,
+  knownItemIds?: ReadonlySet<string>,
+): BackupResult<{
   readonly state: PortablePrivateState;
   readonly text: string;
   readonly byteLength: number;
@@ -169,13 +172,14 @@ export function parsePortableBackup(input: Uint8Array): BackupResult<{
   } catch {
     return fail("IMPORT_INVALID_JSON");
   }
-  const state = validatePortableState(candidate);
+  const state = validatePortableState(candidate, knownItemIds);
   if (!state.ok) return fail(mapStateError(state.error));
   return ok({ state: state.value, text, byteLength: input.byteLength });
 }
 
 export async function parsePortableBackupFrom(
   read: () => Promise<Uint8Array>,
+  knownItemIds?: ReadonlySet<string>,
 ): Promise<BackupResult<{ readonly state: PortablePrivateState; readonly text: string; readonly byteLength: number }>> {
   let bytes: Uint8Array;
   try {
@@ -183,7 +187,7 @@ export async function parsePortableBackupFrom(
   } catch {
     return fail("IMPORT_FILE_READ_FAILED");
   }
-  return parsePortableBackup(bytes);
+  return parsePortableBackup(bytes, knownItemIds);
 }
 
 function aggregate(state: PrivateState): Omit<ImportPreview, "mode" | "sourceFingerprint" | "targetFingerprint" | "schemaVersion" | "recordsToReplace"> {
@@ -209,15 +213,16 @@ function aggregate(state: PrivateState): Omit<ImportPreview, "mode" | "sourceFin
 export function buildImportPreview(
   state: PrivateState,
   current: PrivateState | undefined,
-  targetFingerprint?: string,
+  targetFingerprint: string | undefined,
 ): BackupResult<ImportPreview> {
-  const target = targetFingerprint ?? current?.catalogueFingerprint ?? state.catalogueFingerprint;
-  if (state.catalogueFingerprint !== target) return fail("STATE_FINGERPRINT_UNSUPPORTED");
+  if (typeof targetFingerprint !== "string" || state.catalogueFingerprint !== targetFingerprint) {
+    return fail("STATE_FINGERPRINT_UNSUPPORTED");
+  }
   const totals = aggregate(state);
   return ok({
     mode: current === undefined || current.items.length === 0 ? "create" : "replace",
     sourceFingerprint: state.catalogueFingerprint,
-    targetFingerprint: target,
+    targetFingerprint,
     schemaVersion: state.schemaVersion,
     ...totals,
     recordsToReplace: current?.items.length ?? 0,
@@ -305,10 +310,14 @@ export class PrivateStateLifecycle {
     return createPortableBackup(current.value.recovery, { appRevision: this.appRevision, exportedAt: this.now() });
   }
 
-  public prepareImport(bytes: Uint8Array, targetFingerprint?: string): BackupResult<ImportPlan> {
+  public prepareImport(
+    bytes: Uint8Array,
+    targetFingerprint: string,
+    knownItemIds: ReadonlySet<string>,
+  ): BackupResult<ImportPlan> {
     const current = readAuthority(this.storage);
     if (!current.ok) return current;
-    const parsed = parsePortableBackup(bytes);
+    const parsed = parsePortableBackup(bytes, knownItemIds);
     if (!parsed.ok) return parsed;
     // Imported diagnostic metadata is intentionally not persisted as local
     // collection state. The next export gets fresh appRevision/exportedAt.

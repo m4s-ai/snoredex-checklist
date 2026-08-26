@@ -20,6 +20,7 @@ import {
 const fingerprint = "sha256:" + "a".repeat(64);
 const otherFingerprint = "sha256:" + "b".repeat(64);
 const itemA = "item-00000000-0000-0000-0000-00000000000a";
+const knownItemIds = new Set([itemA]);
 
 function state(note?: string, catalogueFingerprint = fingerprint): PrivateState {
   return {
@@ -108,6 +109,10 @@ test("preview exposes only safe aggregates and blocks unknown fingerprints", () 
     ok: false,
     error: "STATE_FINGERPRINT_UNSUPPORTED",
   });
+  assert.deepEqual(buildImportPreview(candidate, undefined, undefined), {
+    ok: false,
+    error: "STATE_FINGERPRINT_UNSUPPORTED",
+  });
 });
 
 test("replacement keeps a validated recovery copy and ordinary saves preserve it", async () => {
@@ -118,7 +123,7 @@ test("replacement keeps a validated recovery copy and ordinary saves preserve it
   const imported = createPortableBackup(state("new private note"), { appRevision, exportedAt });
   assert.equal(imported.ok, true);
   if (!imported.ok) return;
-  const plan = lifecycle.prepareImport(imported.value.bytes, fingerprint);
+  const plan = lifecycle.prepareImport(imported.value.bytes, fingerprint, knownItemIds);
   assert.equal(plan.ok, true);
   if (!plan.ok) return;
   assert.equal(plan.value.preview.mode, "replace");
@@ -162,7 +167,7 @@ test("a stale preview cannot replace a newer local collection", async () => {
   const imported = createPortableBackup(state("candidate"), { appRevision, exportedAt });
   assert.equal(imported.ok, true);
   if (!imported.ok) return;
-  const plan = lifecycle.prepareImport(imported.value.bytes, fingerprint);
+  const plan = lifecycle.prepareImport(imported.value.bytes, fingerprint, knownItemIds);
   assert.equal(plan.ok, true);
   if (!plan.ok) return;
   storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state("newer")));
@@ -171,4 +176,22 @@ test("a stale preview cannot replace a newer local collection", async () => {
     error: "STATE_CHANGED_DURING_OPERATION",
   });
   assert.equal(JSON.parse(storage.values.get(PRIVATE_STATE_STORAGE_KEY) ?? "{}").items[0].note, "newer");
+});
+
+test("import rejects a validly shaped item that is absent from the trusted catalogue set", () => {
+  const exported = createPortableBackup(state("private"), { appRevision, exportedAt });
+  assert.equal(exported.ok, true);
+  if (!exported.ok) return;
+  const candidate = JSON.parse(exported.value.text) as { items: Array<Record<string, unknown>> };
+  candidate.items[0].itemId = "item-00000000-0000-0000-0000-00000000000b";
+  const storage = new FakeStorage();
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision, now: () => exportedAt });
+  assert.deepEqual(lifecycle.prepareImport(
+    new TextEncoder().encode(JSON.stringify(candidate)),
+    fingerprint,
+    knownItemIds,
+  ), {
+    ok: false,
+    error: "IMPORT_INVALID_STATE_DATA",
+  });
 });
