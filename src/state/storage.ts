@@ -253,10 +253,12 @@ export class OrderedStateStore {
     try {
       candidate = JSON.parse(raw) as unknown;
     } catch {
+      this.restorePendingNoteDraft();
       return error("LOCAL_STATE_UNREADABLE");
     }
     const validated = validatePrivateState(candidate);
     if (!validated.ok) {
+      this.restorePendingNoteDraft();
       return error(classifyStateError(validated.error));
     }
     this.lastKnownGood = cloneState(validated.value);

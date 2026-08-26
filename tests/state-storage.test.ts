@@ -539,6 +539,18 @@ test("corrupt or unsupported stored bytes fail closed without becoming an empty 
   assert.deepEqual(new OrderedStateStore(storage).read(), { ok: false, error: "LOCAL_STATE_UNSUPPORTED" });
 });
 
+test("restores a valid recovery draft while rejecting a malformed canonical envelope", () => {
+  const storage = new FakeStorage();
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: undefined });
+  writer.scheduleNoteSave(state(0, "recover despite malformed canonical state"));
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, "not-json");
+
+  const restored = new OrderedStateStore(storage);
+  assert.deepEqual(restored.read(), { ok: false, error: "LOCAL_STATE_UNREADABLE" });
+  assert.deepEqual(restored.unsaved(), state(0, "recover despite malformed canonical state"));
+});
+
 test("never overwrites an unreadable existing value", async () => {
   const storage = new FakeStorage();
   storage.values.set(PRIVATE_STATE_STORAGE_KEY, "corrupt");
