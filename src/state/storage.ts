@@ -722,65 +722,67 @@ export class OrderedStateStore {
     }
     try {
       const expected = this.parseDraftReference(reference);
-      const raw = draftStorage.getItem(reference.key);
       if (expected === undefined) {
         return false;
       }
-      let sourceKey = reference.key;
-      let sourceRaw = raw ?? "";
-      if (raw === null) {
-        // A heartbeat can rotate the logical revision before a failed
-        // tombstone retry. Locate that equivalent copy before treating the
-        // original physical key as retired.
-        if (draftStorage.listKeys === undefined) {
+      const expectedState = validatePrivateState(expected.state);
+      if (!expectedState.ok) {
+        return false;
+      }
+      const candidates: Array<PendingNoteDraftRecord & { readonly key: string; readonly value: string }> = [];
+      const keys = draftStorage.listKeys?.(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX)
+        .filter((key) => !key.startsWith(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX));
+      if (keys === undefined) {
+        const raw = draftStorage.getItem(reference.key);
+        if (raw !== null) {
+          const current = this.parseDraftReference({ ...reference, value: raw });
+          if (current !== undefined && current.revision === reference.revision) {
+            candidates.push(current);
+          }
+        }
+      } else {
+        for (const key of keys) {
+          const raw = draftStorage.getItem(key);
+          if (raw === null) {
+            continue;
+          }
+          const current = this.parseDraftReference({ ...reference, key, value: raw });
+          if (current !== undefined && current.revision === reference.revision) {
+            candidates.push(current);
+          }
+        }
+      }
+      if (candidates.length === 0) {
+        // With key enumeration, absence of every matching physical copy is
+        // proof that the logical recovery source has already been retired.
+        return keys !== undefined && draftStorage.getItem(reference.key) === null;
+      }
+      for (const current of candidates) {
+        if (this.isDraftTombstoned(current)) {
+          continue;
+        }
+        if (current.ownerState === "consumed") {
           return false;
         }
-        const rotated = draftStorage.listKeys(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX)
-          .filter((key) => key !== reference.key
-            && !key.startsWith(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX))
-          .map((key) => {
-            const candidateRaw = draftStorage.getItem(key);
-            if (candidateRaw === null) {
-              return undefined;
-            }
-            return this.parseDraftReference({
-              ...reference,
-              key,
-              value: candidateRaw,
-            });
-          })
-          .find((candidate) => candidate !== undefined && candidate.revision === reference.revision);
-        if (rotated === undefined) {
-          // Enumeration confirmed that the owner removed the source and no
-          // equivalent copy remains, so the retry is safely retired.
-          return true;
+        const currentState = validatePrivateState(current.state);
+        if (!currentState.ok || !sameState(expectedState.value, currentState.value)) {
+          return false;
         }
-        sourceKey = rotated.key;
-        sourceRaw = rotated.value;
+        const tombstone: ConsumedDraftRecord = {
+          schema: PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_SCHEMA,
+          schemaVersion: PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION,
+          sourceKey: current.key,
+          sourceDraftId: reference.draftId,
+          sourceRevision: reference.revision,
+          consumedAt: Date.now(),
+        };
+        // Keep every source record untouched. Separate state-scoped markers
+        // cannot overwrite owner writes that race with this transfer.
+        const tombstoneKey = keys === undefined
+          ? getConsumedDraftKey(reference.draftId)
+          : getConsumedDraftKey(reference.draftId, current.key, reference.revision);
+        draftStorage.setItem(tombstoneKey, JSON.stringify(tombstone));
       }
-      const current = this.parseDraftReference({ ...reference, key: sourceKey, value: sourceRaw });
-      if (current === undefined || current.ownerState === "consumed" || current.revision !== reference.revision) {
-        return false;
-      }
-      const expectedState = validatePrivateState(expected.state);
-      const currentState = validatePrivateState(current.state);
-      if (!expectedState.ok || !currentState.ok || !sameState(expectedState.value, currentState.value)) {
-        return false;
-      }
-      const tombstone: ConsumedDraftRecord = {
-        schema: PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_SCHEMA,
-        schemaVersion: PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION,
-        sourceKey,
-        sourceDraftId: reference.draftId,
-        sourceRevision: reference.revision,
-        consumedAt: Date.now(),
-      };
-      // Keep the source record untouched. A separate state-scoped marker cannot
-      // overwrite an owner write that races with this transfer.
-      const tombstoneKey = draftStorage.listKeys === undefined
-        ? getConsumedDraftKey(reference.draftId)
-        : getConsumedDraftKey(reference.draftId, sourceKey, reference.revision);
-      draftStorage.setItem(tombstoneKey, JSON.stringify(tombstone));
       return true;
     } catch {
       // A failed tombstone must not make a verified canonical save fail.

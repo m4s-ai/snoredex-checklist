@@ -957,14 +957,17 @@ test("retains a retry when a foreign source rotates before tombstoning", async (
   storage.failTombstoneSet = undefined;
 
   const rotatedKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:${String(sourceRecord.draftId)}:rotated:test`;
+  const secondRotatedKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:${String(sourceRecord.draftId)}:rotated:test-2`;
   storage.draftValues.delete(sourceKey as string);
   storage.draftValues.set(rotatedKey, JSON.stringify(sourceRecord));
+  storage.draftValues.set(secondRotatedKey, JSON.stringify(sourceRecord));
   assert.deepEqual(recovered.read(), { ok: true, value: state(1, "edited recovery") });
   assert.equal(recovered.unsaved(), undefined);
-  const tombstoneKey = [...storage.draftValues.keys()].find((key) => key.includes(":tombstone:"));
-  assert.equal(typeof tombstoneKey, "string");
-  const tombstone = JSON.parse(storage.draftValues.get(tombstoneKey as string) as string) as Record<string, unknown>;
-  assert.equal(tombstone.sourceKey, rotatedKey);
+  const tombstones = [...storage.draftValues.entries()]
+    .filter(([key]) => key.includes(":tombstone:"))
+    .map(([, value]) => JSON.parse(value) as Record<string, unknown>);
+  assert.equal(tombstones.length, 2);
+  assert.deepEqual(new Set(tombstones.map((tombstone) => tombstone.sourceKey)), new Set([rotatedKey, secondRotatedKey]));
   assert.deepEqual(await recovered.saveImmediate(state(2, "later edit")), {
     ok: true,
     value: { state: state(2, "later edit") },
