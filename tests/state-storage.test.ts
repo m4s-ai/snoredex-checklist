@@ -78,6 +78,7 @@ class FakeStorage implements StorageLike {
       this.draftValues.set(key, value);
     },
     removeItem: (key) => {
+      if (this.failDraftRemove !== undefined) throw this.failDraftRemove;
       this.draftValues.delete(key);
     },
     listKeys: (prefix) => [...this.draftValues.keys()].filter((key) => key.startsWith(prefix)),
@@ -86,6 +87,7 @@ class FakeStorage implements StorageLike {
   public failGet = false;
   public failSet: unknown = undefined;
   public failDraftSet: unknown = undefined;
+  public failDraftRemove: unknown = undefined;
   public failRotatedDraftSet: unknown = undefined;
   public beforeRotatedDraftQuota: ((key: string) => void) | undefined;
   public rewriteOnRead: string | undefined;
@@ -716,8 +718,8 @@ test("keeps the old baseline when rebasing cannot persist the replacement draft"
 
   const recovered = new OrderedStateStore(storage);
   assert.deepEqual(recovered.read(), { ok: true, value: state(2) });
-  storage.failDraftSet = new Error("quota");
-  assert.deepEqual(recovered.rebaseUnsavedDraft(), { ok: false, error: "STORAGE_WRITE_FAILED" });
+  storage.failDraftSet = Object.assign(new Error("quota"), { name: "QuotaExceededError" });
+  assert.deepEqual(recovered.rebaseUnsavedDraft(), { ok: false, error: "STORAGE_QUOTA_EXCEEDED" });
   storage.failDraftSet = undefined;
   assert.deepEqual(await recovered.saveImmediate(state(1, "draft with old baseline")), {
     ok: false,
@@ -766,6 +768,30 @@ test("ignores a recovery draft that already matches canonical state without dele
   const sourceKey = [...storage.draftValues.keys()].find((key) => !key.includes(":tombstone:"));
   assert.equal(typeof sourceKey, "string");
   assert.equal(storage.draftValues.has(sourceKey as string), true);
+});
+
+test("clears an in-memory foreign draft when a later read retires an exact match", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1) });
+  writer.scheduleNoteSave(state(1, "foreign note"));
+
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: state(1) });
+  assert.deepEqual(recovered.unsaved(), state(1, "foreign note"));
+
+  storage.failDraftRemove = new Error("cleanup unavailable");
+  assert.deepEqual(await writer.flushNote(), {
+    ok: true,
+    value: { state: state(1, "foreign note") },
+  });
+  storage.failDraftRemove = undefined;
+
+  assert.deepEqual(recovered.read(), { ok: true, value: state(1, "foreign note") });
+  assert.equal(recovered.unsaved(), undefined);
 });
 
 test("skips a note flush discarded while waiting for the cross-tab lock", async () => {

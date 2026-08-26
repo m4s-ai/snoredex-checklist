@@ -456,7 +456,7 @@ export class OrderedStateStore {
       this.observedRaw = previousObservedRaw;
       this.hasObservedRaw = previousHasObservedRaw;
       this.lastKnownGood = previousLastKnownGood;
-      return error("STORAGE_WRITE_FAILED");
+      return error(this.draftPersistenceError ?? "STORAGE_WRITE_FAILED");
     }
     if (persistedReference !== undefined && previousOwnedReference?.key !== persistedReference.key) {
       this.clearPendingNoteDraft(previousOwnedReference);
@@ -987,8 +987,13 @@ export class OrderedStateStore {
       } else {
         this.consumeSupersededDraft(selectedReference);
       }
+      this.activeDraftReference = undefined;
+      this.activeDraftOwned = false;
+      this.latestDraftRevision = undefined;
       this.recoveredForeignReference = undefined;
       this.recoveredDraftPresented = false;
+      this.unsavedDraft = undefined;
+      this.stopDraftHeartbeat();
       return;
     }
     this.unsavedDraft = cloneState(validated.value);
