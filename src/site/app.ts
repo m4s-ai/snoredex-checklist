@@ -82,7 +82,7 @@ function publicSearchText(item: SnapshotItem): string {
 function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalogue: CatalogueSnapshot): void {
   const form = text("form", undefined, "query-form") as HTMLFormElement;
   form.method = "get";
-  form.action = "../";
+  form.action = "./";
   const localization = text("label", "Localization") as HTMLLabelElement;
   const select = document.createElement("select");
   select.name = "localization";
@@ -98,6 +98,11 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
   input.type = "search"; input.name = "q"; input.maxLength = 120; input.value = criteria.q ?? "";
   query.append(input);
   const submit = text("button", "Apply criteria") as HTMLButtonElement; submit.type = "submit";
+  form.addEventListener("submit", () => {
+    // Empty optional controls are omitted; explicit empty URL values remain invalid.
+    select.disabled = select.value === "";
+    input.disabled = input.value === "";
+  });
   form.append(localization, query, submit);
   container.replaceChildren(form);
 }
@@ -107,7 +112,7 @@ function renderInvalid(container: HTMLElement, recoverableLocalization?: string)
   section.setAttribute("aria-live", "polite");
   section.append(text("h2", "Invalid checklist link"), text("p", "The complete link could not be validated. No catalogue or private collection state was read."));
   const actions = text("p");
-  actions.append(link(recoverableLocalization ? `../${serializeQuery({ localization: recoverableLocalization })}` : "../", "Clear invalid criteria"), " · ", link("../", "Home"));
+  actions.append(link(recoverableLocalization ? `./${serializeQuery({ localization: recoverableLocalization })}` : "./", "Clear invalid criteria"), " · ", link("../", "Home"));
   section.append(actions); container.replaceChildren(section);
 }
 

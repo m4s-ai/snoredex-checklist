@@ -19,3 +19,11 @@ test("rejects the whole query when one criterion is invalid", () => {
   assert.deepEqual(parseQuery("?localization=west-es&q=", ids), { ok: false, recoverableLocalization: "west-es" });
   assert.deepEqual(parseQuery("?localization=west-es&bad=%", ids), { ok: false });
 });
+
+test("keeps a status filter as a criterion without serializing collection records", () => {
+  assert.deepEqual(parseQuery("?localization=west-es&status=have", ids), {
+    ok: true,
+    criteria: { localization: "west-es", status: "have" },
+  });
+  assert.equal(serializeQuery({ localization: "west-es", status: "have" }), "?localization=west-es&status=have");
+});

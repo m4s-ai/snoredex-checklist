@@ -1,3 +1,4 @@
+// `status` is a shareable criterion only; no private status values or records are serialized.
 export const QUERY_KEYS = ["localization", "q", "status", "kind", "research"] as const;
 export type QueryKey = (typeof QUERY_KEYS)[number];
 
