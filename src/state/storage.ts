@@ -20,6 +20,8 @@ const PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX = `${PRIVATE_STATE_NOTE_DRAF
 const PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA = "snoredex-checklist.pending-note-pointer";
 const PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION = 2;
 const PRIVATE_STATE_NOTE_DRAFT_POINTER_LEGACY_VERSION = 1;
+const PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_KEY = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:pointer-lock`;
+const PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_TTL_MS = 1_000;
 
 export const PERSISTENCE_ERROR_CODES = [
   "LOCAL_STATE_UNSUPPORTED",
@@ -794,6 +796,7 @@ export class OrderedStateStore {
         }
         const reference = { key: rotatedKey, value: rotatedValue, draftId: this.draftId, revision: draftRevision };
         if (!this.writeDraftPointer(draftStorage, reference)) {
+          this.draftPersistenceError = "STORAGE_WRITE_FAILED";
           try {
             if (draftStorage.getItem(rotatedKey) === rotatedValue) {
               draftStorage.removeItem(rotatedKey);
@@ -868,6 +871,7 @@ export class OrderedStateStore {
       }
       const reference = { key, value: persistedValue, draftId: this.draftId, revision: draftRevision };
       if (!this.writeDraftPointer(draftStorage, reference)) {
+        this.draftPersistenceError = "STORAGE_WRITE_FAILED";
         try {
           if (draftStorage.getItem(key) === persistedValue) {
             draftStorage.removeItem(key);
@@ -1019,9 +1023,9 @@ export class OrderedStateStore {
         sourceRevision,
         consumedAt: Date.now(),
       };
-      const tombstoneKey = draftStorage.listKeys === undefined
-        ? getConsumedDraftKey(sourceDraftId)
-        : getConsumedDraftKey(sourceDraftId, sourceKey, sourceRevision);
+      // Every physical source gets its own marker. A single owner-wide key is
+      // insufficient when an unenumerable store retains multiple rotations.
+      const tombstoneKey = getConsumedDraftKey(sourceDraftId, sourceKey, sourceRevision);
       let consumedAt = tombstone.consumedAt;
       const previousRaw = draftStorage.getItem(tombstoneKey);
       if (previousRaw !== null) {
@@ -1554,6 +1558,7 @@ export class OrderedStateStore {
         // so deleting this unchanged key cannot remove a later owner revision.
         draftStorage.removeItem(tombstone.sourceKey);
         this.removeTombstoneIfUnchanged(draftStorage, tombstoneKey, tombstoneRaw);
+        this.clearDraftPointerIfMatches(draftStorage, tombstone.sourceKey);
       } catch {
         // Recovery cleanup is best effort and must never block loading state.
       }
@@ -1678,7 +1683,7 @@ export class OrderedStateStore {
     if (draftStorage.listKeys !== undefined) {
       return true;
     }
-    try {
+    return this.withDraftPointerLease(draftStorage, () => {
       const nextPointer: CurrentDraftPointerRecord = {
         schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
         schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
@@ -1688,22 +1693,21 @@ export class OrderedStateStore {
       };
       const pointers = this.readDraftPointers(draftStorage)
         .filter((pointer) => !(pointer.draftId === nextPointer.draftId && pointer.sourceKey === nextPointer.sourceKey));
-      draftStorage.setItem(getDraftPointerKey(), JSON.stringify({
+      const serialized = JSON.stringify({
         schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
         schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
         pointers: [...pointers, nextPointer],
-      } satisfies CurrentDraftPointerRegistry));
-      return true;
-    } catch {
-      return false;
-    }
+      } satisfies CurrentDraftPointerRegistry);
+      draftStorage.setItem(getDraftPointerKey(), serialized);
+      return draftStorage.getItem(getDraftPointerKey()) === serialized;
+    });
   }
 
   private clearDraftPointerIfMatches(draftStorage: DraftStorageLike, sourceKey: string): void {
     if (draftStorage.listKeys !== undefined) {
       return;
     }
-    try {
+    this.withDraftPointerLease(draftStorage, () => {
       const pointers = this.readDraftPointers(draftStorage);
       const remaining = pointers.filter((pointer) => pointer.sourceKey !== sourceKey);
       if (remaining.length !== pointers.length) {
@@ -1717,9 +1721,57 @@ export class OrderedStateStore {
           } satisfies CurrentDraftPointerRegistry));
         }
       }
-    } catch {
-      // A stale pointer is harmless when its source is already absent.
+      return true;
+    });
+  }
+
+  /**
+   * Serialize synchronous pointer-registry read/modify/write transactions.
+   * The lease is verified after acquisition and after publication; a stale
+   * lease is recoverable, while an active owner makes the caller retry later.
+   */
+  private withDraftPointerLease(draftStorage: DraftStorageLike, callback: () => boolean): boolean {
+    const now = Date.now();
+    const token = `${this.draftId}:${now.toString(36)}:${Math.random().toString(36).slice(2)}`;
+    const lease = JSON.stringify({ token, expiresAt: now + PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_TTL_MS });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const currentRaw = draftStorage.getItem(PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_KEY);
+        if (currentRaw !== null) {
+          try {
+            const current = JSON.parse(currentRaw) as { token?: unknown; expiresAt?: unknown };
+            const ownedByThisStore = typeof current.token === "string"
+              && current.token.startsWith(`${this.draftId}:`);
+            if (!ownedByThisStore
+              && typeof current.expiresAt === "number"
+              && current.expiresAt > Date.now()) {
+              continue;
+            }
+          } catch {
+            // A malformed lease is stale and can be replaced.
+          }
+        }
+        draftStorage.setItem(PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_KEY, lease);
+        if (draftStorage.getItem(PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_KEY) !== lease) {
+          continue;
+        }
+        try {
+          return callback();
+        } finally {
+          try {
+            if (draftStorage.getItem(PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_KEY) === lease) {
+              draftStorage.removeItem(PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_KEY);
+            }
+          } catch {
+            // The lease expires shortly; cleanup failure must not discard a
+            // pointer registry write that was already verified.
+          }
+        }
+      } catch {
+        return false;
+      }
     }
+    return false;
   }
 
   private tombstoneKeys(draftStorage: DraftStorageLike): readonly string[] {
@@ -1729,19 +1781,20 @@ export class OrderedStateStore {
       if (keys !== undefined) {
         return keys.filter((key) => key.startsWith(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX));
       }
+      const pointerKeys = this.readDraftPointers(draftStorage)
+        .map((pointer) => getConsumedDraftKey(pointer.draftId, pointer.sourceKey, pointer.sourceRevision));
+      return [ownKey, ...pointerKeys].filter((key, index, all) => all.indexOf(key) === index);
     } catch {
       return [ownKey];
     }
-    return [ownKey];
   }
 
   private tombstoneKeysForDraft(draftStorage: DraftStorageLike, draftId: string): readonly string[] {
     const ownKeys = this.tombstoneKeys(draftStorage);
-    if (draftStorage.listKeys !== undefined) {
-      return ownKeys;
-    }
-    const foreignKey = getConsumedDraftKey(draftId);
-    return ownKeys.includes(foreignKey) ? ownKeys : [...ownKeys, foreignKey];
+    return [
+      ...ownKeys,
+      getConsumedDraftKey(draftId),
+    ].filter((key, index, all) => all.indexOf(key) === index);
   }
 
   private parseDraftReference(reference: DraftReference): (PendingNoteDraftRecord & {

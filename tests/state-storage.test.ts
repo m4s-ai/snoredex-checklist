@@ -1047,6 +1047,45 @@ test("tombstones an owned copy rotated by the heartbeat", async () => {
     .some(([, value]) => (JSON.parse(value) as Record<string, unknown>).sourceKey === rotatedKey), true);
 });
 
+test("keeps distinct tombstones for unenumerable rotated copies", async () => {
+  const storage = new FakeStorage();
+  const fullDraftStorage = storage.draftStorage;
+  storage.draftStorage = {
+    getItem: fullDraftStorage.getItem,
+    setItem: fullDraftStorage.setItem,
+    removeItem: fullDraftStorage.removeItem,
+  };
+  const clock = new FakeClock();
+  const store = new OrderedStateStore(storage, clock);
+  storage.failDraftRemove = new Error("retain source for concurrent consumption");
+  assert.deepEqual(await store.saveImmediate(state(1, "unenumerable tombstone")), {
+    ok: true,
+    value: { state: state(1, "unenumerable tombstone") },
+  });
+  storage.failDraftRemove = undefined;
+  const sourceKey = [...storage.draftValues.keys()]
+    .find((key) => storage.draftValues.get(key)?.includes("unenumerable tombstone"));
+  assert.equal(typeof sourceKey, "string");
+  const sourceRecord = JSON.parse(storage.draftValues.get(sourceKey as string) as string) as Record<string, unknown>;
+  const sourceTombstoneKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:tombstone:${encodeURIComponent(String(sourceRecord.draftId))}:${encodeURIComponent(sourceKey as string)}:${encodeURIComponent(String(sourceRecord.revision))}`;
+  storage.draftValues.set(sourceTombstoneKey, JSON.stringify({
+    schema: "snoredex-checklist.pending-note-tombstone",
+    schemaVersion: 1,
+    sourceKey,
+    sourceDraftId: sourceRecord.draftId,
+    sourceRevision: sourceRecord.revision,
+    consumedAt: Date.now(),
+  }));
+
+  clock.advance(5_000);
+
+  const tombstones = [...storage.draftValues.entries()]
+    .filter(([key]) => key.includes(":tombstone:"))
+    .map(([, value]) => JSON.parse(value) as Record<string, unknown>);
+  assert.equal(tombstones.length, 2);
+  assert.equal(new Set(tombstones.map((tombstone) => tombstone.sourceKey)).size, 2);
+});
+
 test("keeps a new edit active after its previous draft is tombstoned", async () => {
   const storage = new FakeStorage();
   const store = new OrderedStateStore(storage);
@@ -1305,6 +1344,27 @@ test("keeps pointer registry entries for concurrent unenumerable owners", () => 
   const pointerRecord = JSON.parse(pointerRaw as string) as { pointers?: unknown[] };
   assert.equal(pointerRecord.pointers?.length, 2);
   assert.equal([...storage.draftValues.values()].filter((raw) => raw.includes("unenumerable owner")).length, 2);
+});
+
+test("fails closed while another owner holds the pointer registry lease", () => {
+  const storage = new FakeStorage();
+  const fullDraftStorage = storage.draftStorage;
+  storage.draftStorage = {
+    getItem: fullDraftStorage.getItem,
+    setItem: fullDraftStorage.setItem,
+    removeItem: fullDraftStorage.removeItem,
+  };
+  storage.draftValues.set(`${PRIVATE_STATE_NOTE_DRAFT_KEY}:pointer-lock`, JSON.stringify({
+    token: "foreign-owner:lease",
+    expiresAt: Date.now() + 1_000,
+  }));
+  const store = new OrderedStateStore(storage);
+
+  assert.deepEqual(store.scheduleNoteSave(state(0, "lease contention")), {
+    ok: false,
+    error: "STORAGE_WRITE_FAILED",
+  });
+  assert.equal([...storage.draftValues.values()].some((raw) => raw.includes("lease contention")), false);
 });
 
 test("probes a pointed foreign owner's tombstone without listKeys", () => {
