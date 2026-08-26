@@ -14,6 +14,9 @@ const result = spawnSync(process.execPath, [tsc, "-p", resolve(root, "tsconfig.s
 if (result.status !== 0) process.exit(result.status ?? 1);
 
 const fixture = JSON.parse(await readFile(resolve(root, "tests/fixtures/collector-catalogue.fixture.json"), "utf8"));
+const validator = await import(pathToFileURL(resolve(root, "src/catalogue/validate.ts")));
+const validated = validator.validateCatalogueFixture(fixture);
+if (!validated.ok) throw new Error(`synthetic fixture rejected: ${validated.errors.join(", ")}`);
 const provenance = {
   mode: "synthetic-fixture",
   sourceCommit: "synthetic-fixture",
