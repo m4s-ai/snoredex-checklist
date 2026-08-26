@@ -605,6 +605,7 @@ export class OrderedStateStore {
       this.draftPersistenceError = "STORAGE_COMMIT_UNCERTAIN";
       return undefined;
     }
+    const hasValidObservedRaw = this.hasValidObservedRaw();
     const draftRevision = revision ?? createDraftRevision(this.draftId);
     let ownerState: PendingNoteDraftRecord["ownerState"] = "active";
     let editTimestamp = Date.now();
@@ -643,8 +644,8 @@ export class OrderedStateStore {
       draftId: this.draftId,
       state: JSON.parse(serialized.value) as unknown,
       revision: draftRevision,
-      hasObservedRaw: this.hasObservedRaw,
-      observedRaw: this.hasObservedRaw ? this.observedRaw ?? null : null,
+      hasObservedRaw: hasValidObservedRaw,
+      observedRaw: hasValidObservedRaw ? this.observedRaw ?? null : null,
       updatedAt: editTimestamp,
       ownerState,
     };
@@ -679,6 +680,20 @@ export class OrderedStateStore {
       // Keep the in-memory draft so the caller can retry after surfacing the
       // failure; do not silently present the previous durable record as new.
       return undefined;
+    }
+  }
+
+  private hasValidObservedRaw(): boolean {
+    if (!this.hasObservedRaw || this.observedRaw === undefined) {
+      return false;
+    }
+    if (this.observedRaw === null) {
+      return true;
+    }
+    try {
+      return validatePrivateState(JSON.parse(this.observedRaw) as unknown).ok;
+    } catch {
+      return false;
     }
   }
 
@@ -799,7 +814,15 @@ export class OrderedStateStore {
       const tombstoneKey = draftStorage.listKeys === undefined
         ? getConsumedDraftKey(sourceDraftId)
         : getConsumedDraftKey(sourceDraftId, sourceKey, sourceRevision);
-      draftStorage.setItem(tombstoneKey, JSON.stringify(tombstone));
+      let consumedAt = tombstone.consumedAt;
+      const previousRaw = draftStorage.getItem(tombstoneKey);
+      if (previousRaw !== null) {
+        const previous = this.parseConsumedDraftRecord(previousRaw);
+        if (previous !== undefined && consumedAt <= previous.consumedAt) {
+          consumedAt = previous.consumedAt + 1;
+        }
+      }
+      draftStorage.setItem(tombstoneKey, JSON.stringify({ ...tombstone, consumedAt }));
       return true;
     } catch {
       return false;
@@ -886,12 +909,37 @@ export class OrderedStateStore {
       } satisfies PendingNoteDraftRecord);
       if (ownerState === "active" && this.isTombstonedDraftKey(reference.key, reference.draftId)) {
         const rotatedKey = createRotatedDraftStorageKey(this.draftId);
+        // Install a marker before publishing the rotated record. The source
+        // is written as consumed, then the marker is refreshed with a newer
+        // value so a reclaimer holding the pre-write marker cannot delete it
+        // after the source becomes visible.
+        const rotatedValue = JSON.stringify({
+          schema: PRIVATE_STATE_NOTE_DRAFT_SCHEMA,
+          schemaVersion: PRIVATE_STATE_NOTE_DRAFT_VERSION,
+          draftId: parsed.draftId,
+          state: parsed.state,
+          revision: parsed.revision,
+          hasObservedRaw: parsed.hasObservedRaw,
+          observedRaw: parsed.observedRaw,
+          updatedAt: parsed.updatedAt,
+          ownerState: "consumed",
+        } satisfies PendingNoteDraftRecord);
         if (!this.writeConsumedDraftTombstone(draftStorage, rotatedKey, this.draftId, parsed.revision)) {
           return;
         }
         try {
-          draftStorage.setItem(rotatedKey, value);
+          draftStorage.setItem(rotatedKey, rotatedValue);
         } catch {
+          return;
+        }
+        if (!this.writeConsumedDraftTombstone(draftStorage, rotatedKey, this.draftId, parsed.revision)) {
+          try {
+            if (draftStorage.getItem(rotatedKey) === rotatedValue) {
+              draftStorage.removeItem(rotatedKey);
+            }
+          } catch {
+            // Best-effort cleanup; the unsuppressed source is never adopted.
+          }
           return;
         }
         // A concurrent reclamation may remove the marker between the source
@@ -900,7 +948,7 @@ export class OrderedStateStore {
         // and discard only the value written by this transfer.
         if (!this.isTombstonedDraftKey(rotatedKey, this.draftId)) {
           try {
-            if (draftStorage.getItem(rotatedKey) === value) {
+            if (draftStorage.getItem(rotatedKey) === rotatedValue) {
               draftStorage.removeItem(rotatedKey);
             }
           } catch {
@@ -908,7 +956,7 @@ export class OrderedStateStore {
           }
           return;
         }
-        this.activeDraftReference = { ...reference, key: rotatedKey, value };
+        this.activeDraftReference = { ...reference, key: rotatedKey, value: rotatedValue };
         this.clearPendingNoteDraft(reference);
       } else {
         draftStorage.setItem(reference.key, value);

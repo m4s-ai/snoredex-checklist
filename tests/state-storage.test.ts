@@ -79,8 +79,8 @@ class FakeStorage implements StorageLike {
       }
       this.draftWrites += 1;
       this.draftValues.set(key, value);
-      if (key.includes(":rotated:")) {
-        this.afterRotatedDraftWrite?.(key);
+      if (key.includes(":tombstone:")) {
+        this.afterRotatedTombstoneWrite?.(key, value);
       }
     },
     removeItem: (key) => {
@@ -97,7 +97,7 @@ class FakeStorage implements StorageLike {
   public failDraftRemove: unknown = undefined;
   public failRotatedDraftSet: unknown = undefined;
   public beforeRotatedDraftQuota: ((key: string) => void) | undefined;
-  public afterRotatedDraftWrite: ((key: string) => void) | undefined;
+  public afterRotatedTombstoneWrite: ((key: string, value: string) => void) | undefined;
   public rewriteOnRead: string | undefined;
   public rewriteAfterWrite: string | undefined;
   public writes = 0;
@@ -742,13 +742,13 @@ test("does not adopt a rotated source when its tombstone disappears", async () =
     consumedAt: Date.now(),
   }));
   let raced = true;
-  storage.afterRotatedDraftWrite = (rotatedKey) => {
+  storage.afterRotatedTombstoneWrite = (tombstoneKey, value) => {
     if (!raced) return;
-    raced = false;
-    for (const [key, value] of storage.draftValues) {
-      if (!key.includes(":tombstone:")) continue;
-      const tombstone = JSON.parse(value) as Record<string, unknown>;
-      if (tombstone.sourceKey === rotatedKey) storage.draftValues.delete(key);
+    const tombstone = JSON.parse(value) as Record<string, unknown>;
+    if (String(tombstone.sourceKey).includes(":rotated:")
+      && storage.draftValues.has(String(tombstone.sourceKey))) {
+      raced = false;
+      storage.draftValues.delete(tombstoneKey);
     }
   };
 
@@ -756,7 +756,7 @@ test("does not adopt a rotated source when its tombstone disappears", async () =
   assert.equal(storage.draftValues.has(sourceKey), true);
   assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":rotated:") && !key.includes(":tombstone:")), false);
 
-  storage.afterRotatedDraftWrite = undefined;
+  storage.afterRotatedTombstoneWrite = undefined;
   storage.emitActive();
   assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":rotated:") && !key.includes(":tombstone:")), true);
 });
@@ -1379,6 +1379,30 @@ test("restores a valid recovery draft while rejecting a malformed canonical enve
   const restored = new OrderedStateStore(storage);
   assert.deepEqual(restored.read(), { ok: false, error: "LOCAL_STATE_UNREADABLE" });
   assert.deepEqual(restored.unsaved(), state(0, "recover despite malformed canonical state"));
+});
+
+test("does not persist an unreadable canonical baseline into a recovery draft", async () => {
+  const storage = new FakeStorage();
+  const store = new OrderedStateStore(storage);
+  assert.deepEqual(await store.saveImmediate(state(1)), {
+    ok: true,
+    value: { state: state(1) },
+  });
+  assert.deepEqual(store.read(), { ok: true, value: state(1) });
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, "{malformed");
+  assert.deepEqual(store.read(), { ok: false, error: "LOCAL_STATE_UNREADABLE" });
+
+  const edited = state(1, "edited after malformed canonical");
+  assert.deepEqual(store.scheduleNoteSave(edited), { ok: true, value: undefined });
+  const draftKey = [...storage.draftValues.keys()].find((key) => !key.includes(":tombstone:"));
+  assert.equal(typeof draftKey, "string");
+  const draft = JSON.parse(storage.draftValues.get(draftKey as string) as string) as Record<string, unknown>;
+  assert.equal(draft.hasObservedRaw, false);
+  assert.equal(draft.observedRaw, null);
+
+  const restored = new OrderedStateStore(storage);
+  assert.deepEqual(restored.read(), { ok: false, error: "LOCAL_STATE_UNREADABLE" });
+  assert.deepEqual(restored.unsaved(), edited);
 });
 
 test("never overwrites an unreadable existing value", async () => {
