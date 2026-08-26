@@ -14,6 +14,20 @@ test("accepts the reviewed browser snapshot shape", async () => {
   assert.equal((await validateSnapshot(fixture.catalogue)).ok, true);
 });
 
+test("fails closed on invalid provenance metadata", async () => {
+  const invalidSource = structuredClone(fixture.catalogue);
+  (invalidSource.meta as Record<string, unknown>).sourceRepository = {};
+  assert.deepEqual(await validateSnapshot(reseal(invalidSource)), { ok: false, reason: "invalid" });
+
+  const invalidDate = structuredClone(fixture.catalogue);
+  invalidDate.meta.dataAsOf = "2026-02-30";
+  assert.deepEqual(await validateSnapshot(reseal(invalidDate)), { ok: false, reason: "invalid" });
+
+  const invalidAssetBase = structuredClone(fixture.catalogue);
+  invalidAssetBase.meta.assetBaseUrl = "not-a-uri";
+  assert.deepEqual(await validateSnapshot(reseal(invalidAssetBase)), { ok: false, reason: "invalid" });
+});
+
 test("fails closed on dangling references and invalid item classes", async () => {
   const dangling = structuredClone(fixture.catalogue);
   dangling.items[0].setEditionId = "missing-edition";

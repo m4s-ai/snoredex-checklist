@@ -64,6 +64,25 @@ function isNullableText(value: unknown): value is string | null {
   return value === null || typeof value === "string";
 }
 
+function isUri(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0) return false;
+  try {
+    new URL(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  try {
+    return new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
+  } catch {
+    return false;
+  }
+}
+
 function allRecords(rows: readonly unknown[]): rows is readonly Record<string, unknown>[] {
   return rows.every(isRecord);
 }
@@ -103,6 +122,16 @@ export async function validateSnapshot(value: unknown): Promise<SnapshotValidati
   }
   if (value.meta.schema !== "snoredex-collector-catalogue" || value.meta.schemaVersion !== "1.0.0") {
     return { ok: false, reason: "unsupported" };
+  }
+  const { meta } = value;
+  if (!isString(meta.datasetId) || !isUri(meta.sourceRepository) || !isDate(meta.dataAsOf) ||
+      !(meta.previousFingerprint === null || typeof meta.previousFingerprint === "string") ||
+      !isUri(meta.assetBaseUrl) || !isRecord(meta.scope) ||
+      meta.scope.policy !== "positive-evidence/current-known" || meta.scope.allLocalitiesComplete !== false ||
+      meta.scope.absenceIsNotEvidence !== true || !Array.isArray(meta.licenceRefs) ||
+      !meta.licenceRefs.every((entry) => typeof entry === "string") ||
+      new Set(meta.licenceRefs).size !== meta.licenceRefs.length) {
+    return { ok: false, reason: "invalid" };
   }
   const fingerprint = value.meta.catalogueFingerprint;
   if (typeof fingerprint !== "string" || !/^sha256:[0-9a-f]{64}$/.test(fingerprint)) {
