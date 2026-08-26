@@ -161,6 +161,7 @@ export async function validateSnapshot(value: unknown): Promise<SnapshotValidati
     if (!isString(item.itemId) || !isString(item.localizationId) || !isString(item.setEditionId) ||
         !isString(item.localSetId) || !isString(item.cardReleaseId) || !isString(item.itemKind) ||
         !isString(item.progressClass) || !isString(item.workMappingState) ||
+        !isString(item.cardName) ||
         !isNullableString(item.workId) || !isNullableString(item.physicalPrintingId) ||
         !isNullableString(item.imageAssetId) || !isString(item.imageScope) ||
         !itemKinds.has(item.itemKind) || !progressClasses.has(item.progressClass)) {

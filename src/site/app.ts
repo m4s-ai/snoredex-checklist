@@ -126,7 +126,10 @@ function renderInvalid(container: HTMLElement, recoverableLocalization?: string,
   container.hidden = false;
   const section = text("section", undefined, "state-panel");
   section.setAttribute("aria-live", "polite");
-  section.append(text("h2", "Invalid checklist link"), text("p", "The complete link could not be validated. No catalogue or private collection state was read."));
+  const stateMessage = failClosed
+    ? "The complete link could not be validated. No catalogue or private collection state was read."
+    : "The complete link could not be validated. No private collection state was read.";
+  section.append(text("h2", "Invalid checklist link"), text("p", stateMessage));
   const actions = text("p");
   if (recoverableLocalization || window.location.search) {
     actions.append(link(recoverableLocalization ? `./${serializeQuery({ localization: recoverableLocalization })}` : "./", "Clear invalid criteria"));
