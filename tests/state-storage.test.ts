@@ -968,6 +968,65 @@ test("preserves a matching draft when the current canonical envelope is unreadab
   assert.equal(storage.draftValues.size, 1);
 });
 
+test("does not retire a pending foreign source while the canonical envelope is unreadable", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1) });
+  writer.scheduleNoteSave(state(1, "pending foreign"));
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: state(1) });
+  const foreignKey = [...storage.draftValues.keys()]
+    .find((key) => storage.draftValues.get(key)?.includes("pending foreign"));
+  assert.equal(typeof foreignKey, "string");
+  storage.failTombstoneSet = new Error("tombstone unavailable");
+  assert.deepEqual(await recovered.saveImmediate(state(1, "canonical edit")), {
+    ok: true,
+    value: { state: state(1, "canonical edit") },
+  });
+  storage.failTombstoneSet = undefined;
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, "{malformed");
+  assert.deepEqual(recovered.read(), { ok: false, error: "LOCAL_STATE_UNREADABLE" });
+  assert.deepEqual(recovered.unsaved(), state(1, "pending foreign"));
+  assert.equal(storage.draftValues.has(foreignKey as string), true);
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), false);
+});
+
+test("keeps the original consumed source when rotated tombstone persistence fails", async () => {
+  const storage = new FakeStorage();
+  const store = new OrderedStateStore(storage);
+  storage.failDraftRemove = new Error("cleanup unavailable");
+  assert.deepEqual(await store.saveImmediate(state(1, "consumed source")), {
+    ok: true,
+    value: { state: state(1, "consumed source") },
+  });
+  storage.failDraftRemove = undefined;
+  const sourceKey = [...storage.draftValues.keys()][0];
+  const sourceRecord = JSON.parse(storage.draftValues.get(sourceKey) as string) as Record<string, unknown>;
+  const tombstoneKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:tombstone:${encodeURIComponent(String(sourceRecord.draftId))}:${encodeURIComponent(sourceKey)}:${encodeURIComponent(String(sourceRecord.revision))}`;
+  storage.draftValues.set(tombstoneKey, JSON.stringify({
+    schema: "snoredex-checklist.pending-note-tombstone",
+    schemaVersion: 1,
+    sourceKey,
+    sourceDraftId: sourceRecord.draftId,
+    sourceRevision: sourceRecord.revision,
+    consumedAt: Date.now(),
+  }));
+  storage.failTombstoneSet = new Error("tombstone unavailable");
+  storage.emitActive();
+  assert.equal(storage.draftValues.has(sourceKey), true);
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":rotated:") && !key.includes(":tombstone:")), false);
+  storage.failTombstoneSet = undefined;
+  storage.emitActive();
+  const rotatedKey = [...storage.draftValues.keys()]
+    .find((key) => key.includes(":rotated:") && !key.includes(":tombstone:"));
+  assert.equal(typeof rotatedKey, "string");
+  assert.equal([...storage.draftValues.entries()]
+    .filter(([key]) => key.includes(":tombstone:"))
+    .some(([, value]) => (JSON.parse(value) as Record<string, unknown>).sourceKey === rotatedKey), true);
+});
+
 test("retains a foreign recovery reference when post-commit tombstoning fails", async () => {
   const storage = new FakeStorage();
   const seed = new OrderedStateStore(storage);

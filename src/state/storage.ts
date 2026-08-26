@@ -886,8 +886,14 @@ export class OrderedStateStore {
       } satisfies PendingNoteDraftRecord);
       if (ownerState === "active" && this.isTombstonedDraftKey(reference.key, reference.draftId)) {
         const rotatedKey = createRotatedDraftStorageKey(this.draftId);
-        draftStorage.setItem(rotatedKey, value);
-        this.writeConsumedDraftTombstone(draftStorage, rotatedKey, this.draftId, parsed.revision);
+        if (!this.writeConsumedDraftTombstone(draftStorage, rotatedKey, this.draftId, parsed.revision)) {
+          return;
+        }
+        try {
+          draftStorage.setItem(rotatedKey, value);
+        } catch {
+          return;
+        }
         this.activeDraftReference = { ...reference, key: rotatedKey, value };
         this.clearPendingNoteDraft(reference);
       } else {
@@ -1085,7 +1091,7 @@ export class OrderedStateStore {
     const pendingForeignRetirement = this.supersededDraftReference?.draftId === this.draftId
       ? undefined
       : this.supersededDraftReference;
-    if (pendingForeignRetirement !== undefined && this.consumeSupersededDraft(pendingForeignRetirement)) {
+    if (retireExactMatch && pendingForeignRetirement !== undefined && this.consumeSupersededDraft(pendingForeignRetirement)) {
       this.supersededDraftReference = undefined;
       this.activeDraftReference = undefined;
       this.activeDraftOwned = false;
