@@ -152,9 +152,12 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
   }
   const localizationIds = criteria.localization ? new Set([criteria.localization]) : undefined;
   const query = criteria.q?.toLowerCase();
+  // Research records are read-only catalogue context, not normal checklist rows. They
+  // only enter the result set when the shareable research criterion explicitly asks for them.
+  const research = criteria.research === "true" ? true : criteria.research === "false" ? false : undefined;
   const items = catalogue.items.filter((item) => (!localizationIds || localizationIds.has(item.localizationId)) &&
     (!query || publicSearchText(item).includes(query)) && (!criteria.kind || item.itemKind === criteria.kind) &&
-    (!criteria.research || (criteria.research === "true") === (item.progressClass === "research")));
+    (research === undefined ? item.progressClass !== "research" : research === (item.progressClass === "research")));
   const list = text("ul", undefined, "item-list");
   for (const item of items) {
     const row = text("li", undefined, "item-row");

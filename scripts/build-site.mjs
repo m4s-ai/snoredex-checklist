@@ -36,6 +36,9 @@ try {
   await mkdir(resolve(staging, "collection"), { recursive: true });
   await cp(resolve(root, "site-src/collection/index.html"), resolve(staging, "collection/index.html"));
   await cp(resolve(root, "site-src/styles.css"), resolve(staging, "styles.css"));
+  await cp(resolve(root, "LICENSE.md"), resolve(staging, "LICENSE.md"));
+  await cp(resolve(root, "THIRD_PARTY_NOTICES.md"), resolve(staging, "THIRD_PARTY_NOTICES.md"));
+  await cp(resolve(root, "LICENSES"), resolve(staging, "LICENSES"), { recursive: true });
 
   let hadPrevious = false;
   try {
