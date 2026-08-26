@@ -340,6 +340,12 @@ test("preserves a live foreign recovery draft during rebase", async () => {
   const reloaded = new OrderedStateStore(storage);
   assert.deepEqual(reloaded.read(), { ok: true, value: state(1, "live draft") });
   assert.equal(reloaded.unsaved(), undefined);
+  const laterWriter = new OrderedStateStore(storage);
+  assert.deepEqual(laterWriter.read(), { ok: true, value: state(1, "live draft") });
+  assert.deepEqual(await laterWriter.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
+  const afterCanonicalChange = new OrderedStateStore(storage);
+  assert.deepEqual(afterCanonicalChange.read(), { ok: true, value: state(2) });
+  assert.equal(afterCanonicalChange.unsaved(), undefined);
 });
 
 test("does not consume a foreign draft that changed during ownership transfer", async () => {
@@ -391,7 +397,7 @@ test("does not tombstone a later foreign revision that reuses the same state", a
   assert.deepEqual(recovered.read(), { ok: true, value: state(2) });
   assert.deepEqual(recovered.rebaseUnsavedDraft(), { ok: true, value: state(1, "same state revision") });
   const laterRevision = JSON.parse(storage.draftValues.get(foreignKey) as string) as Record<string, unknown>;
-  laterRevision.updatedAt = 0;
+  laterRevision.revision = `${String(laterRevision.revision)}:later`;
   storage.draftValues.set(foreignKey, JSON.stringify(laterRevision));
 
   assert.deepEqual(await recovered.saveImmediate(state(1, "same state revision")), {

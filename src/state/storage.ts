@@ -89,6 +89,7 @@ interface PendingNoteDraftRecord {
   readonly schemaVersion: typeof PRIVATE_STATE_NOTE_DRAFT_VERSION;
   readonly draftId: string;
   readonly state: unknown;
+  readonly revision: string;
   readonly hasObservedRaw: boolean;
   readonly observedRaw: string | null;
   readonly updatedAt: number;
@@ -100,7 +101,7 @@ interface ConsumedDraftRecord {
   readonly schemaVersion: typeof PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION;
   readonly sourceKey: string;
   readonly sourceDraftId: string;
-  readonly sourceValue: string;
+  readonly sourceRevision: string;
   readonly consumedAt: number;
 }
 
@@ -108,6 +109,7 @@ interface DraftReference {
   readonly key: string;
   readonly value: string;
   readonly draftId: string;
+  readonly revision?: string;
 }
 
 export function getPendingNoteDraftKey(draftId: string): string {
@@ -119,6 +121,7 @@ function getConsumedDraftKey(draftId: string): string {
 }
 
 let generatedDraftId = 0;
+let generatedDraftRevision = 0;
 
 function createDraftId(): string {
   generatedDraftId += 1;
@@ -128,6 +131,11 @@ function createDraftId(): string {
     return `store-${randomId}`;
   }
   return `store-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${generatedDraftId.toString(36)}`;
+}
+
+function createDraftRevision(draftId: string): string {
+  generatedDraftRevision += 1;
+  return `${draftId}:${Date.now().toString(36)}-${generatedDraftRevision.toString(36)}`;
 }
 
 const browserClock: TimerClock = {
@@ -262,6 +270,7 @@ export class OrderedStateStore {
   private noteGeneration = 0;
   private nextDraftToken = 0;
   private latestDraftToken = 0;
+  private latestDraftRevision: string | undefined;
   private lastKnownGood: PrivateState | undefined;
   private unsavedDraft: PrivateState | undefined;
   private pendingNote: PendingNote | undefined;
@@ -353,11 +362,13 @@ export class OrderedStateStore {
     const previousObservedRaw = this.observedRaw;
     const previousHasObservedRaw = this.hasObservedRaw;
     const previousLastKnownGood = this.lastKnownGood === undefined ? undefined : cloneState(this.lastKnownGood);
+    this.latestDraftRevision = createDraftRevision(this.draftId);
     this.observedRaw = raw;
     this.hasObservedRaw = true;
     this.lastKnownGood = current === undefined ? undefined : cloneState(current);
     const persistedReference = this.persistPendingNoteDraft(draft);
     if (this.storage.draftStorage !== undefined && persistedReference === undefined) {
+      this.latestDraftRevision = previousReference?.revision;
       this.observedRaw = previousObservedRaw;
       this.hasObservedRaw = previousHasObservedRaw;
       this.lastKnownGood = previousLastKnownGood;
@@ -387,6 +398,7 @@ export class OrderedStateStore {
     this.activeDraftOwned = false;
     this.recoveredForeignReference = undefined;
     this.supersededDraftReference = undefined;
+    this.latestDraftRevision = undefined;
     this.unsavedDraft = undefined;
     this.clearPendingNoteDraft(reference);
   }
@@ -472,11 +484,12 @@ export class OrderedStateStore {
   private rememberDraft(state: PrivateState): number {
     const draftToken = ++this.nextDraftToken;
     this.latestDraftToken = draftToken;
+    this.latestDraftRevision = createDraftRevision(this.draftId);
     this.unsavedDraft = cloneState(state);
     return draftToken;
   }
 
-  private persistPendingNoteDraft(state: PrivateState): DraftReference | undefined {
+  private persistPendingNoteDraft(state: PrivateState, revision = this.latestDraftRevision): DraftReference | undefined {
     const draftStorage = this.storage.draftStorage;
     if (draftStorage === undefined) {
       return undefined;
@@ -488,6 +501,7 @@ export class OrderedStateStore {
     if (this.hasObservedRaw && this.observedRaw === undefined) {
       return undefined;
     }
+    const draftRevision = revision ?? createDraftRevision(this.draftId);
     let ownerState: PendingNoteDraftRecord["ownerState"] = "active";
     const key = getPendingNoteDraftKey(this.draftId);
     if (this.activeDraftOwned && this.activeDraftReference?.key === key) {
@@ -516,6 +530,7 @@ export class OrderedStateStore {
       schemaVersion: PRIVATE_STATE_NOTE_DRAFT_VERSION,
       draftId: this.draftId,
       state: JSON.parse(serialized.value) as unknown,
+      revision: draftRevision,
       hasObservedRaw: this.hasObservedRaw,
       observedRaw: this.hasObservedRaw ? this.observedRaw ?? null : null,
       updatedAt: Date.now(),
@@ -524,7 +539,7 @@ export class OrderedStateStore {
     try {
       const value = JSON.stringify(record);
       draftStorage.setItem(key, value);
-      const reference = { key, value, draftId: this.draftId };
+      const reference = { key, value, draftId: this.draftId, revision: draftRevision };
       this.activeDraftReference = reference;
       this.activeDraftOwned = true;
       return reference;
@@ -535,7 +550,7 @@ export class OrderedStateStore {
   }
 
   private consumeSupersededDraft(reference: DraftReference | undefined): void {
-    if (reference === undefined || reference.draftId === this.draftId) {
+    if (reference === undefined || reference.draftId === this.draftId || reference.revision === undefined) {
       return;
     }
     const draftStorage = this.storage.draftStorage;
@@ -562,7 +577,7 @@ export class OrderedStateStore {
         schemaVersion: PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION,
         sourceKey: reference.key,
         sourceDraftId: reference.draftId,
-        sourceValue: reference.value,
+        sourceRevision: reference.revision,
         consumedAt: Date.now(),
       };
       // Keep the source record untouched. A separate state-scoped marker cannot
@@ -629,6 +644,7 @@ export class OrderedStateStore {
         schemaVersion: PRIVATE_STATE_NOTE_DRAFT_VERSION,
         draftId: parsed.draftId,
         state: parsed.state,
+        revision: parsed.revision,
         hasObservedRaw: parsed.hasObservedRaw,
         observedRaw: parsed.observedRaw,
         updatedAt: Date.now(),
@@ -731,8 +747,10 @@ export class OrderedStateStore {
       key: selected.key,
       value: selected.value,
       draftId: selected.draftId,
+      revision: selected.revision,
     };
     this.activeDraftOwned = selected.draftId === this.draftId;
+    this.latestDraftRevision = this.activeDraftOwned ? selected.revision : undefined;
     this.recoveredForeignReference = this.activeDraftOwned ? undefined : { ...this.activeDraftReference };
     const validated = validatePrivateState(selected.state);
     if (!validated.ok) {
@@ -743,6 +761,7 @@ export class OrderedStateStore {
         key: selected.key,
         value: selected.value,
         draftId: selected.draftId,
+        revision: selected.revision,
       };
       if (selected.draftId === this.draftId) {
         this.clearPendingNoteDraft(selectedReference);
@@ -773,13 +792,13 @@ export class OrderedStateStore {
         || tombstone.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION
         || tombstone.sourceKey !== candidate.key
         || tombstone.sourceDraftId !== candidate.draftId
-        || typeof tombstone.sourceValue !== "string"
+        || typeof tombstone.sourceRevision !== "string"
         || typeof tombstone.consumedAt !== "number"
         || !Number.isFinite(tombstone.consumedAt)
       ) {
         return false;
       }
-      return tombstone.sourceValue === candidate.value;
+      return tombstone.sourceRevision === candidate.revision;
     } catch {
       return false;
     }
@@ -815,6 +834,8 @@ export class OrderedStateStore {
       candidate.schema !== PRIVATE_STATE_NOTE_DRAFT_SCHEMA
       || candidate.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_VERSION
       || candidate.draftId !== reference.draftId
+      || (candidate.revision !== undefined
+        && (typeof candidate.revision !== "string" || candidate.revision.length === 0))
       || typeof candidate.hasObservedRaw !== "boolean"
       || typeof candidate.updatedAt !== "number"
       || !Number.isFinite(candidate.updatedAt)
@@ -848,6 +869,7 @@ export class OrderedStateStore {
       schemaVersion: PRIVATE_STATE_NOTE_DRAFT_VERSION,
       draftId: candidate.draftId,
       state: candidate.state,
+      revision: candidate.revision ?? `legacy:${candidate.updatedAt}`,
       hasObservedRaw: candidate.hasObservedRaw,
       observedRaw: candidate.observedRaw ?? null,
       updatedAt: candidate.updatedAt,
