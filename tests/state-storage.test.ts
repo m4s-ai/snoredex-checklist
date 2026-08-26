@@ -596,9 +596,11 @@ test("preserves a live foreign recovery draft during rebase", async () => {
   const tombstone = JSON.parse(storage.draftValues.get(tombstoneKey as string) as string) as Record<string, unknown>;
   assert.equal(tombstone.sourceKey, foreignKey);
   storage.emitInactive();
+  const inactiveLifecycle = JSON.parse(storage.draftValues.get(activeForeignKey as string) as string) as Record<string, unknown>;
+  assert.equal(inactiveLifecycle.ownerState, "inactive");
   storage.emitActive();
   const lifecycleRefreshed = JSON.parse(storage.draftValues.get(activeForeignKey as string) as string) as Record<string, unknown>;
-  assert.equal(lifecycleRefreshed.ownerState, "consumed");
+  assert.equal(lifecycleRefreshed.ownerState, "active");
   const reloaded = new OrderedStateStore(storage);
   assert.deepEqual(reloaded.read(), { ok: true, value: state(1, "live draft") });
   assert.equal(reloaded.unsaved(), undefined);
@@ -925,6 +927,44 @@ test("retains a foreign recovery reference when post-commit tombstoning fails", 
   storage.failTombstoneSet = undefined;
   assert.deepEqual(recovered.read(), { ok: true, value: state(1, "edited recovery") });
   assert.equal(recovered.unsaved(), undefined);
+  assert.deepEqual(await recovered.saveImmediate(state(2, "later edit")), {
+    ok: true,
+    value: { state: state(2, "later edit") },
+  });
+  assert.equal(recovered.unsaved(), undefined);
+});
+
+test("retains a retry when a foreign source rotates before tombstoning", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1) });
+  writer.scheduleNoteSave(state(1, "rotated recovery"));
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: state(1) });
+  assert.deepEqual(recovered.unsaved(), state(1, "rotated recovery"));
+
+  const sourceKey = [...storage.draftValues.keys()]
+    .find((key) => storage.draftValues.get(key)?.includes("rotated recovery"));
+  assert.equal(typeof sourceKey, "string");
+  const sourceRecord = JSON.parse(storage.draftValues.get(sourceKey as string) as string) as Record<string, unknown>;
+  storage.failTombstoneSet = new Error("tombstone unavailable");
+  assert.deepEqual(await recovered.saveImmediate(state(1, "edited recovery")), {
+    ok: true,
+    value: { state: state(1, "edited recovery") },
+  });
+  storage.failTombstoneSet = undefined;
+
+  const rotatedKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:${String(sourceRecord.draftId)}:rotated:test`;
+  storage.draftValues.delete(sourceKey as string);
+  storage.draftValues.set(rotatedKey, JSON.stringify(sourceRecord));
+  assert.deepEqual(recovered.read(), { ok: true, value: state(1, "edited recovery") });
+  assert.equal(recovered.unsaved(), undefined);
+  const tombstoneKey = [...storage.draftValues.keys()].find((key) => key.includes(":tombstone:"));
+  assert.equal(typeof tombstoneKey, "string");
+  const tombstone = JSON.parse(storage.draftValues.get(tombstoneKey as string) as string) as Record<string, unknown>;
+  assert.equal(tombstone.sourceKey, rotatedKey);
   assert.deepEqual(await recovered.saveImmediate(state(2, "later edit")), {
     ok: true,
     value: { state: state(2, "later edit") },
