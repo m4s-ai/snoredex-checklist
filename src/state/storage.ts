@@ -607,6 +607,7 @@ export class OrderedStateStore {
     }
     const draftRevision = revision ?? createDraftRevision(this.draftId);
     let ownerState: PendingNoteDraftRecord["ownerState"] = "active";
+    let editTimestamp = Date.now();
     const previousOwnedReference = this.activeDraftOwned ? this.activeDraftReference : undefined;
     const sourceIsTombstoned = previousOwnedReference !== undefined
       && this.isTombstonedDraftKey(previousOwnedReference.key, this.draftId);
@@ -628,6 +629,9 @@ export class OrderedStateStore {
               ownerState = "consumed";
             }
           }
+          if (current !== undefined && current.revision === draftRevision) {
+            editTimestamp = current.updatedAt;
+          }
         }
       } catch {
         // A lifecycle refresh remains best effort; a normal active record is safe to write.
@@ -641,7 +645,7 @@ export class OrderedStateStore {
       revision: draftRevision,
       hasObservedRaw: this.hasObservedRaw,
       observedRaw: this.hasObservedRaw ? this.observedRaw ?? null : null,
-      updatedAt: Date.now(),
+      updatedAt: editTimestamp,
       ownerState,
     };
     try {
@@ -823,7 +827,7 @@ export class OrderedStateStore {
         revision: parsed.revision,
         hasObservedRaw: parsed.hasObservedRaw,
         observedRaw: parsed.observedRaw,
-        updatedAt: Date.now(),
+        updatedAt: parsed.updatedAt,
         ownerState: nextOwnerState,
       } satisfies PendingNoteDraftRecord);
       if (ownerState === "active" && this.isTombstonedDraftKey(reference.key, reference.draftId)) {
@@ -899,6 +903,9 @@ export class OrderedStateStore {
         return false;
       }
       const currentValue = draftStorage?.getItem(expectedReference.key);
+      if (currentValue === null) {
+        return true;
+      }
       const exactMatch = currentValue === expectedReference.value;
       const refreshedOwnedMatch = allowRefreshedOwnedReference
         && expectedReference.draftId === this.draftId
@@ -921,10 +928,52 @@ export class OrderedStateStore {
     return false;
   }
 
+  private retainForeignRecovery(reference: DraftReference): void {
+    let retained = reference;
+    try {
+      const raw = this.storage.draftStorage?.getItem(reference.key);
+      if (raw !== null && raw !== undefined) {
+        const current = this.parseDraftReference({ ...reference, value: raw });
+        if (current !== undefined) {
+          retained = {
+            key: current.key,
+            value: current.value,
+            draftId: current.draftId,
+            revision: current.revision,
+          };
+        }
+      }
+    } catch {
+      // Keep the last verified reference; the next read can retry discovery.
+    }
+    this.recoveredForeignReference = retained;
+    this.recoveredDraftPresented = false;
+    const parsed = this.parseDraftReference(retained);
+    if (parsed !== undefined) {
+      const validated = validatePrivateState(parsed.state);
+      if (validated.ok) {
+        this.unsavedDraft = cloneState(validated.value);
+      }
+    }
+  }
+
   private restorePendingNoteDraft(): void {
     const draftStorage = this.storage.draftStorage;
     if (draftStorage === undefined) {
       return;
+    }
+    const pendingForeignRetirement = this.supersededDraftReference?.draftId === this.draftId
+      ? undefined
+      : this.supersededDraftReference;
+    if (pendingForeignRetirement !== undefined && this.consumeSupersededDraft(pendingForeignRetirement)) {
+      this.supersededDraftReference = undefined;
+      this.activeDraftReference = undefined;
+      this.activeDraftOwned = false;
+      this.latestDraftRevision = undefined;
+      this.recoveredForeignReference = undefined;
+      this.recoveredDraftPresented = false;
+      this.unsavedDraft = undefined;
+      this.stopDraftHeartbeat();
     }
     this.reclaimConsumedDrafts(draftStorage);
     const keys = this.draftKeys(draftStorage);
@@ -954,7 +1003,8 @@ export class OrderedStateStore {
         && candidate.ownerState !== "consumed"
         && !this.isDraftTombstoned(candidate));
     const selected = candidates.find((candidate) => candidate.draftId === this.draftId)
-      ?? candidates.sort((left, right) => right.updatedAt - left.updatedAt)[0];
+      ?? candidates.sort((left, right) => right.updatedAt - left.updatedAt
+        || right.revision.localeCompare(left.revision))[0];
     if (selected === undefined) {
       if (this.recoveredForeignReference !== undefined) {
         this.activeDraftReference = undefined;
@@ -1220,15 +1270,48 @@ export class OrderedStateStore {
       }
       return this.commit(state, operation).then((result) => {
         if (result.ok && operation.draftToken === this.latestDraftToken) {
-          this.unsavedDraft = undefined;
-          this.clearPendingNoteDraft(operation.draftStorageReference, true);
-          if (this.activeDraftOwned && this.activeDraftReference !== undefined) {
-            this.clearPendingNoteDraft(this.activeDraftReference, true);
+          const ownedReferences = [
+            operation.draftStorageReference,
+            this.activeDraftOwned ? this.activeDraftReference : undefined,
+            operation.supersededDraftReference?.draftId === this.draftId
+              ? operation.supersededDraftReference
+              : undefined,
+          ].filter((reference): reference is DraftReference => reference !== undefined)
+            .filter((reference, index, references) => references.findIndex((candidate) => candidate.key === reference.key) === index);
+          const ownedRetired = ownedReferences.every((reference) => this.clearPendingNoteDraft(reference, true));
+          const foreignReference = operation.supersededDraftReference?.draftId === this.draftId
+            ? undefined
+            : operation.supersededDraftReference;
+          const foreignRetired = foreignReference === undefined
+            || this.consumeSupersededDraft(foreignReference);
+          if (ownedRetired && foreignRetired) {
+            this.unsavedDraft = undefined;
+            this.recoveredForeignReference = undefined;
+            this.recoveredDraftPresented = false;
+            this.supersededDraftReference = undefined;
+          } else {
+            if (!ownedRetired && ownedReferences.length > 0) {
+              const retainedOwned = ownedReferences.find((reference) => {
+                try {
+                  return this.storage.draftStorage?.getItem(reference.key) !== null;
+                } catch {
+                  return false;
+                }
+              });
+              if (retainedOwned !== undefined) {
+                this.activeDraftReference = retainedOwned;
+                this.activeDraftOwned = true;
+                this.latestDraftRevision = retainedOwned.revision;
+              }
+              this.unsavedDraft = cloneState(state);
+              this.startDraftHeartbeat();
+            }
+            if (!foreignRetired && foreignReference !== undefined) {
+              this.retainForeignRecovery(foreignReference);
+              this.supersededDraftReference = foreignReference;
+            }
+            this.recoveredDraftPresented = false;
           }
-          this.consumeSupersededDraft(operation.supersededDraftReference);
-          this.recoveredForeignReference = undefined;
-          this.recoveredDraftPresented = false;
-          this.supersededDraftReference = undefined;
         }
         return result;
       });

@@ -70,6 +70,9 @@ class FakeStorage implements StorageLike {
     getItem: (key) => this.draftValues.get(key) ?? null,
     setItem: (key, value) => {
       if (this.failDraftSet !== undefined) throw this.failDraftSet;
+      if (this.failTombstoneSet !== undefined && key.includes(":tombstone:")) {
+        throw this.failTombstoneSet;
+      }
       if (this.failRotatedDraftSet !== undefined && key.includes(":rotated:")) {
         this.beforeRotatedDraftQuota?.(key);
         throw this.failRotatedDraftSet;
@@ -87,6 +90,7 @@ class FakeStorage implements StorageLike {
   public failGet = false;
   public failSet: unknown = undefined;
   public failDraftSet: unknown = undefined;
+  public failTombstoneSet: unknown = undefined;
   public failDraftRemove: unknown = undefined;
   public failRotatedDraftSet: unknown = undefined;
   public beforeRotatedDraftQuota: ((key: string) => void) | undefined;
@@ -263,6 +267,35 @@ test("keeps pending recovery records separate across tabs", async () => {
   await firstTab.flushNote();
   assert.equal(storage.draftValues.size, 1);
   assert.deepEqual(secondTab.unsaved(), state(0, "second tab"));
+});
+
+test("orders recovery drafts by edit time rather than heartbeat refresh time", () => {
+  const storage = new FakeStorage();
+  const clock = new FakeClock();
+  const lock = new BlockingLock();
+  storage.withLock = <T>(callback: () => Promise<T>) => lock.request(PRIVATE_STATE_LOCK_NAME, callback);
+  const older = new OrderedStateStore(storage, clock);
+  const newer = new OrderedStateStore(storage, clock);
+  void older.saveImmediate(state(0, "older edit"));
+  void newer.saveImmediate(state(0, "newer edit"));
+
+  const olderKey = [...storage.draftValues.keys()]
+    .find((key) => storage.draftValues.get(key)?.includes("older edit"));
+  const newerKey = [...storage.draftValues.keys()]
+    .find((key) => storage.draftValues.get(key)?.includes("newer edit"));
+  assert.equal(typeof olderKey, "string");
+  assert.equal(typeof newerKey, "string");
+  const olderRecord = JSON.parse(storage.draftValues.get(olderKey as string) as string) as Record<string, unknown>;
+  const newerRecord = JSON.parse(storage.draftValues.get(newerKey as string) as string) as Record<string, unknown>;
+  olderRecord.updatedAt = 1;
+  newerRecord.updatedAt = 2;
+  storage.draftValues.set(olderKey as string, JSON.stringify(olderRecord));
+  storage.draftValues.set(newerKey as string, JSON.stringify(newerRecord));
+
+  clock.advance(5_000);
+  const restored = new OrderedStateStore(storage, clock);
+  assert.deepEqual(restored.read(), { ok: true, value: undefined });
+  assert.deepEqual(restored.unsaved(), state(0, "newer edit"));
 });
 
 test("does not let a tab discard another tab's orphaned recovery draft", () => {
@@ -850,6 +883,44 @@ test("clears a heartbeat-refreshed draft after a locked note commit", async () =
   lock.release();
   assert.deepEqual(await flush, { ok: true, value: { state: state(0, "refresh before commit") } });
   assert.equal(storage.draftValues.size, 0);
+});
+
+test("retains an owned recovery reference when post-commit cleanup fails", async () => {
+  const storage = new FakeStorage();
+  const store = new OrderedStateStore(storage);
+  storage.failDraftRemove = new Error("cleanup unavailable");
+  assert.deepEqual(await store.saveImmediate(state(1, "keep after commit")), {
+    ok: true,
+    value: { state: state(1, "keep after commit") },
+  });
+  assert.deepEqual(store.unsaved(), state(1, "keep after commit"));
+  assert.equal(storage.draftValues.size, 1);
+  storage.failDraftRemove = undefined;
+  assert.deepEqual(store.read(), { ok: true, value: state(1, "keep after commit") });
+  assert.equal(store.unsaved(), undefined);
+});
+
+test("retains a foreign recovery reference when post-commit tombstoning fails", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1) });
+  writer.scheduleNoteSave(state(1, "foreign recovery"));
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: state(1) });
+  assert.deepEqual(recovered.unsaved(), state(1, "foreign recovery"));
+
+  storage.failTombstoneSet = new Error("tombstone unavailable");
+  assert.deepEqual(await recovered.saveImmediate(state(1, "edited recovery")), {
+    ok: true,
+    value: { state: state(1, "edited recovery") },
+  });
+  assert.deepEqual(recovered.unsaved(), state(1, "foreign recovery"));
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), false);
+  storage.failTombstoneSet = undefined;
+  assert.deepEqual(recovered.read(), { ok: true, value: state(1, "edited recovery") });
+  assert.equal(recovered.unsaved(), undefined);
 });
 
 test("keeps the draft heartbeat alive while an immediate save waits for the lock", async () => {
