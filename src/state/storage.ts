@@ -1683,46 +1683,59 @@ export class OrderedStateStore {
     if (draftStorage.listKeys !== undefined) {
       return true;
     }
-    return this.withDraftPointerLease(draftStorage, () => {
-      const nextPointer: CurrentDraftPointerRecord = {
-        schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
-        schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
-        draftId: this.draftId,
-        sourceKey: reference.key,
-        sourceRevision: reference.revision ?? "legacy",
-      };
-      const pointers = this.readDraftPointers(draftStorage)
-        .filter((pointer) => !(pointer.draftId === nextPointer.draftId && pointer.sourceKey === nextPointer.sourceKey));
-      const serialized = JSON.stringify({
-        schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
-        schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
-        pointers: [...pointers, nextPointer],
-      } satisfies CurrentDraftPointerRegistry);
-      draftStorage.setItem(getDraftPointerKey(), serialized);
-      return draftStorage.getItem(getDraftPointerKey()) === serialized;
-    });
+    // A lease can be replaced after the publication readback by another tab.
+    // Retry the read/merge/write transaction so that the next attempt folds
+    // the concurrent owner's pointer back into the registry instead of
+    // accepting a silently lost update.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (this.withDraftPointerLease(draftStorage, () => {
+        const nextPointer: CurrentDraftPointerRecord = {
+          schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
+          schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
+          draftId: this.draftId,
+          sourceKey: reference.key,
+          sourceRevision: reference.revision ?? "legacy",
+        };
+        const pointers = this.readDraftPointers(draftStorage)
+          .filter((pointer) => !(pointer.draftId === nextPointer.draftId && pointer.sourceKey === nextPointer.sourceKey));
+        const serialized = JSON.stringify({
+          schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
+          schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
+          pointers: [...pointers, nextPointer],
+        } satisfies CurrentDraftPointerRegistry);
+        draftStorage.setItem(getDraftPointerKey(), serialized);
+        return draftStorage.getItem(getDraftPointerKey()) === serialized;
+      })) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private clearDraftPointerIfMatches(draftStorage: DraftStorageLike, sourceKey: string): void {
     if (draftStorage.listKeys !== undefined) {
       return;
     }
-    this.withDraftPointerLease(draftStorage, () => {
-      const pointers = this.readDraftPointers(draftStorage);
-      const remaining = pointers.filter((pointer) => pointer.sourceKey !== sourceKey);
-      if (remaining.length !== pointers.length) {
-        if (remaining.length === 0) {
-          draftStorage.removeItem(getDraftPointerKey());
-        } else {
-          draftStorage.setItem(getDraftPointerKey(), JSON.stringify({
-            schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
-            schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
-            pointers: remaining,
-          } satisfies CurrentDraftPointerRegistry));
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (this.withDraftPointerLease(draftStorage, () => {
+        const pointers = this.readDraftPointers(draftStorage);
+        const remaining = pointers.filter((pointer) => pointer.sourceKey !== sourceKey);
+        if (remaining.length !== pointers.length) {
+          if (remaining.length === 0) {
+            draftStorage.removeItem(getDraftPointerKey());
+          } else {
+            draftStorage.setItem(getDraftPointerKey(), JSON.stringify({
+              schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
+              schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
+              pointers: remaining,
+            } satisfies CurrentDraftPointerRegistry));
+          }
         }
+        return true;
+      })) {
+        return;
       }
-      return true;
-    });
+    }
   }
 
   /**
@@ -1756,7 +1769,16 @@ export class OrderedStateStore {
           continue;
         }
         try {
-          return callback();
+          const result = callback();
+          // Treat a lease replacement during the callback as a conflict. The
+          // caller retries against the newer registry, preventing a verified
+          // write from being reported as successful after another owner has
+          // published over it.
+          const leaseAfterPublication = draftStorage.getItem(PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_KEY);
+          return leaseAfterPublication === lease
+            && draftStorage.getItem(PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_KEY) === lease
+            ? result
+            : false;
         } finally {
           try {
             if (draftStorage.getItem(PRIVATE_STATE_NOTE_DRAFT_POINTER_LOCK_KEY) === lease) {
