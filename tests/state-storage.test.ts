@@ -83,6 +83,7 @@ class FakeStorage implements StorageLike {
       }
       this.draftWrites += 1;
       this.draftValues.set(key, value);
+      this.afterDraftSetItem?.(key, value);
       if (key.includes(":tombstone:")) {
         this.afterRotatedTombstoneWrite?.(key, value);
       }
@@ -102,6 +103,7 @@ class FakeStorage implements StorageLike {
   public failRotatedDraftSet: unknown = undefined;
   public beforeRotatedDraftQuota: ((key: string) => void) | undefined;
   public afterDraftGetItem: ((key: string, value: string | null) => void) | undefined;
+  public afterDraftSetItem: ((key: string, value: string) => void) | undefined;
   public afterRotatedTombstoneWrite: ((key: string, value: string) => void) | undefined;
   public rewriteOnRead: string | undefined;
   public rewriteAfterWrite: string | undefined;
@@ -1122,6 +1124,46 @@ test("rechecks a concurrent tombstone before heartbeat rotation", async () => {
     .some(([, value]) => (JSON.parse(value) as Record<string, unknown>).sourceKey === rotatedKey), true);
 });
 
+test("keeps an in-place heartbeat refresh suppressed if consumption races its write", async () => {
+  const storage = new FakeStorage();
+  const clock = new FakeClock();
+  const store = new OrderedStateStore(storage, clock);
+  storage.failDraftRemove = new Error("retain source for concurrent consumption");
+  assert.deepEqual(await store.saveImmediate(state(1, "post-check race")), {
+    ok: true,
+    value: { state: state(1, "post-check race") },
+  });
+  storage.failDraftRemove = undefined;
+  const sourceKey = [...storage.draftValues.keys()][0];
+  const sourceRecord = JSON.parse(storage.draftValues.get(sourceKey) as string) as Record<string, unknown>;
+  const sourceTombstoneKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:tombstone:${encodeURIComponent(String(sourceRecord.draftId))}:${encodeURIComponent(sourceKey)}:${encodeURIComponent(String(sourceRecord.revision))}`;
+  let injected = false;
+  storage.afterDraftSetItem = (key, value) => {
+    if (injected || key !== sourceKey || value.includes('"ownerState":"consumed"')) {
+      return;
+    }
+    injected = true;
+    storage.draftValues.set(sourceTombstoneKey, JSON.stringify({
+      schema: "snoredex-checklist.pending-note-tombstone",
+      schemaVersion: 1,
+      sourceKey,
+      sourceDraftId: sourceRecord.draftId,
+      sourceRevision: sourceRecord.revision,
+      consumedAt: Date.now(),
+    }));
+  };
+
+  clock.advance(5_000);
+  storage.afterDraftSetItem = undefined;
+  const rotatedKey = [...storage.draftValues.keys()]
+    .find((key) => key.includes(":rotated:") && !key.includes(":tombstone:"));
+  assert.equal(rotatedKey, undefined);
+  assert.equal(storage.draftValues.has(sourceKey), true);
+  assert.equal([...storage.draftValues.entries()]
+    .filter(([key]) => key.includes(":tombstone:"))
+    .some(([, value]) => (JSON.parse(value) as Record<string, unknown>).sourceKey === sourceKey), true);
+});
+
 test("retains an owned recovery reference when post-commit cleanup fails", async () => {
   const storage = new FakeStorage();
   const store = new OrderedStateStore(storage);
@@ -1178,6 +1220,23 @@ test("uses the known owned draft key when draft enumeration is unavailable", asy
   storage.failDraftRemove = undefined;
   assert.deepEqual(store.read(), { ok: true, value: state(1, "known key") });
   assert.equal(storage.draftValues.size, 0);
+});
+
+test("discovers a rotated draft through its pointer without listKeys", () => {
+  const storage = new FakeStorage();
+  const fullDraftStorage = storage.draftStorage;
+  storage.draftStorage = {
+    getItem: fullDraftStorage.getItem,
+    setItem: fullDraftStorage.setItem,
+    removeItem: fullDraftStorage.removeItem,
+  };
+  const store = new OrderedStateStore(storage);
+  store.scheduleNoteSave(state(0, "first pointed draft"));
+  store.scheduleNoteSave(state(0, "second pointed draft"));
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":rotated:") && !key.includes(":tombstone:")), true);
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: undefined });
+  assert.deepEqual(recovered.unsaved(), state(0, "second pointed draft"));
 });
 
 test("preserves a matching draft when the current canonical envelope is unreadable", async () => {
@@ -1393,6 +1452,28 @@ test("keeps the previous durable draft when replacing it fails", async () => {
   storage.failDraftSet = undefined;
   assert.deepEqual(await store.flushNote(), { ok: true, value: { state: state(0, "second draft") } });
   assert.equal(storage.draftValues.has(firstDraftKey as string), false);
+});
+
+test("retries old draft cleanup after a rotated save commits", async () => {
+  const storage = new FakeStorage();
+  const store = new OrderedStateStore(storage);
+  store.scheduleNoteSave(state(0, "old pending draft"));
+  const oldKey = [...storage.draftValues.keys()][0];
+  storage.failDraftRemove = new Error("old cleanup unavailable");
+  store.scheduleNoteSave(state(0, "new pending draft"));
+  const newKey = [...storage.draftValues.keys()].find((key) => key !== oldKey);
+  assert.equal(typeof newKey, "string");
+  assert.deepEqual(await store.flushNote(), {
+    ok: true,
+    value: { state: state(0, "new pending draft") },
+  });
+  assert.equal(storage.draftValues.has(oldKey), true);
+  storage.failDraftRemove = undefined;
+  assert.deepEqual(await store.saveImmediate(state(0, "latest committed state")), {
+    ok: true,
+    value: { state: state(0, "latest committed state") },
+  });
+  assert.equal(storage.draftValues.has(oldKey), false);
 });
 
 test("falls back to an in-place active draft overwrite when rotation exceeds quota", async () => {
