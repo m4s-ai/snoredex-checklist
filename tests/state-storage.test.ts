@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  DRAFT_OWNER_LEASE_MS,
   NOTE_AUTOSAVE_DELAY_MS,
   OrderedStateStore,
   PRIVATE_STATE_STORAGE_KEY,
@@ -46,6 +45,25 @@ function state(quantityOwned: number, note?: string): PrivateState {
 class FakeStorage implements StorageLike {
   public values = new Map<string, string>();
   public draftValues = new Map<string, string>();
+  private readonly inactiveHandlers = new Set<() => void>();
+  private readonly activeHandlers = new Set<() => void>();
+  public registerDraftLifecycle(
+    onInactive: () => void,
+    onActive: () => void,
+  ): () => void {
+    this.inactiveHandlers.add(onInactive);
+    this.activeHandlers.add(onActive);
+    return () => {
+      this.inactiveHandlers.delete(onInactive);
+      this.activeHandlers.delete(onActive);
+    };
+  }
+  public emitInactive(): void {
+    for (const handler of this.inactiveHandlers) handler();
+  }
+  public emitActive(): void {
+    for (const handler of this.activeHandlers) handler();
+  }
   public draftStorage: DraftStorageLike = {
     getItem: (key) => this.draftValues.get(key) ?? null,
     setItem: (key, value) => {
@@ -267,12 +285,7 @@ test("allows an explicit rebase after a recovered draft conflicts", async () => 
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
 
-  const foreignKey = [...storage.draftValues.keys()][0];
-  const foreignRecord = JSON.parse(storage.draftValues.get(foreignKey) as string) as Record<string, unknown>;
-  storage.draftValues.set(foreignKey, JSON.stringify({
-    ...foreignRecord,
-    updatedAt: Date.now() - DRAFT_OWNER_LEASE_MS - 1,
-  }));
+  storage.emitInactive();
   const recovered = new OrderedStateStore(storage);
   assert.deepEqual(recovered.read(), { ok: true, value: state(2) });
   assert.deepEqual(await recovered.saveImmediate(state(1, "draft to rebase")), {
@@ -302,6 +315,9 @@ test("preserves a live foreign recovery draft during rebase", async () => {
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
 
+  const foreignKey = [...storage.draftValues.keys()][0];
+  const foreignRecord = JSON.parse(storage.draftValues.get(foreignKey) as string) as Record<string, unknown>;
+  storage.draftValues.set(foreignKey, JSON.stringify({ ...foreignRecord, updatedAt: 0, ownerState: "active" }));
   const recovered = new OrderedStateStore(storage);
   assert.deepEqual(recovered.read(), { ok: true, value: state(2) });
   assert.deepEqual(recovered.rebaseUnsavedDraft(), { ok: true, value: state(1, "live draft") });
@@ -360,6 +376,21 @@ test("clears its superseded recovery draft only after an immediate save succeeds
   assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(2) });
 });
 
+test("ignores and retires a recovery draft that already matches canonical state", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1) });
+  writer.scheduleNoteSave(state(1));
+  assert.equal(storage.draftValues.size, 1);
+
+  const restored = new OrderedStateStore(storage);
+  assert.deepEqual(restored.read(), { ok: true, value: state(1) });
+  assert.equal(restored.unsaved(), undefined);
+  assert.equal(storage.draftValues.size, 0);
+});
+
 test("skips a note flush discarded while waiting for the cross-tab lock", async () => {
   const storage = new FakeStorage();
   const seed = new OrderedStateStore(storage);
@@ -374,6 +405,22 @@ test("skips a note flush discarded while waiting for the cross-tab lock", async 
   store.discardUnsavedDraft();
   lock.release();
   assert.deepEqual(await flush, { ok: true, value: { state: state(1), skipped: true } });
+  assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(1) });
+});
+
+test("skips an immediate save discarded while waiting for the cross-tab lock", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+  const lock = new BlockingLock();
+  storage.withLock = <T>(callback: () => Promise<T>) => lock.request(PRIVATE_STATE_LOCK_NAME, callback);
+  const store = new OrderedStateStore(storage);
+  assert.deepEqual(store.read(), { ok: true, value: state(1) });
+  const save = store.saveImmediate(state(2));
+  await Promise.resolve();
+  store.discardUnsavedDraft();
+  lock.release();
+  assert.deepEqual(await save, { ok: true, value: { state: state(1), skipped: true } });
   assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(1) });
 });
 

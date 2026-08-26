@@ -9,8 +9,6 @@ export const PRIVATE_STATE_STORAGE_KEY = "snoredex-checklist.private-state";
 export const PRIVATE_STATE_LOCK_NAME = "snoredex-checklist.private-state-write";
 export const PRIVATE_STATE_NOTE_DRAFT_KEY = "snoredex-checklist.private-state.note-draft";
 export const NOTE_AUTOSAVE_DELAY_MS = 3_000;
-/** A pending draft is considered owned while its tab refreshes this lease. */
-export const DRAFT_OWNER_LEASE_MS = 30_000;
 const DRAFT_OWNER_HEARTBEAT_MS = 5_000;
 
 const PRIVATE_STATE_NOTE_DRAFT_SCHEMA = "snoredex-checklist.pending-note";
@@ -48,6 +46,10 @@ export interface StorageLike {
   readonly withLock?: <T>(callback: () => Promise<T>) => Promise<T>;
   readonly draftStorage?: DraftStorageLike;
   readonly draftId?: string;
+  readonly registerDraftLifecycle?: (
+    onInactive: () => void,
+    onActive: () => void,
+  ) => () => void;
 }
 
 export interface TimerClock {
@@ -85,6 +87,7 @@ interface PendingNoteDraftRecord {
   readonly hasObservedRaw: boolean;
   readonly observedRaw: string | null;
   readonly updatedAt: number;
+  readonly ownerState: "active" | "inactive";
 }
 
 interface DraftReference {
@@ -127,6 +130,12 @@ function cloneState(state: PrivateState): PrivateState {
     catalogueFingerprint: state.catalogueFingerprint,
     items: state.items.map((item) => ({ ...item })),
   };
+}
+
+function sameState(left: PrivateState, right: PrivateState): boolean {
+  const leftSerialized = serializePrivateState(left);
+  const rightSerialized = serializePrivateState(right);
+  return leftSerialized.ok && rightSerialized.ok && leftSerialized.value === rightSerialized.value;
 }
 
 function error<T>(code: PersistenceErrorCode): PersistenceResult<T> {
@@ -181,6 +190,21 @@ export function getBrowserStorage(): PersistenceResult<StorageLike> {
           return keys;
         },
       },
+      registerDraftLifecycle: (onInactive, onActive) => {
+        const target = globalThis as typeof globalThis & {
+          addEventListener?: (type: string, listener: () => void) => void;
+          removeEventListener?: (type: string, listener: () => void) => void;
+        };
+        if (target.addEventListener === undefined || target.removeEventListener === undefined) {
+          return () => undefined;
+        }
+        target.addEventListener("beforeunload", onInactive);
+        target.addEventListener("pageshow", onActive);
+        return () => {
+          target.removeEventListener?.("beforeunload", onInactive);
+          target.removeEventListener?.("pageshow", onActive);
+        };
+      },
     });
   } catch {
     return error("STORAGE_UNAVAILABLE");
@@ -224,6 +248,7 @@ export class OrderedStateStore {
   private unsavedDraft: PrivateState | undefined;
   private pendingNote: PendingNote | undefined;
   private draftHeartbeatTimer: unknown;
+  private readonly unregisterDraftLifecycle: (() => void) | undefined;
   private activeDraftReference: DraftReference | undefined;
   private activeDraftOwned = false;
   private observedRaw: string | null | undefined;
@@ -233,6 +258,10 @@ export class OrderedStateStore {
     this.storage = storage;
     this.clock = clock;
     this.draftId = storage.draftId ?? createDraftId();
+    this.unregisterDraftLifecycle = storage.registerDraftLifecycle?.(
+      () => this.markDraftOwnerInactive(),
+      () => this.markDraftOwnerActive(),
+    );
   }
 
   public read(): PersistenceResult<PrivateState | undefined> {
@@ -325,6 +354,7 @@ export class OrderedStateStore {
 
   /** Explicitly discard a recovered or pending note draft without changing canonical state. */
   public discardUnsavedDraft(): void {
+    this.immediateGeneration += 1;
     this.noteGeneration += 1;
     this.cancelPendingNote();
     this.nextDraftToken += 1;
@@ -427,6 +457,7 @@ export class OrderedStateStore {
       hasObservedRaw: this.hasObservedRaw,
       observedRaw: this.hasObservedRaw ? this.observedRaw ?? null : null,
       updatedAt: Date.now(),
+      ownerState: "active",
     };
     try {
       const value = JSON.stringify(record);
@@ -456,6 +487,53 @@ export class OrderedStateStore {
     }, DRAFT_OWNER_HEARTBEAT_MS);
   }
 
+  private markDraftOwnerInactive(): void {
+    this.setDraftOwnerState("inactive");
+    this.stopDraftHeartbeat();
+  }
+
+  private markDraftOwnerActive(): void {
+    this.setDraftOwnerState("active");
+    if (this.unsavedDraft !== undefined) {
+      this.startDraftHeartbeat();
+    }
+  }
+
+  private setDraftOwnerState(ownerState: "active" | "inactive"): void {
+    if (!this.activeDraftOwned || this.activeDraftReference === undefined) {
+      return;
+    }
+    try {
+      const draftStorage = this.storage.draftStorage;
+      if (draftStorage === undefined) {
+        return;
+      }
+      const reference = this.activeDraftReference;
+      const raw = draftStorage.getItem(reference.key);
+      if (raw === null) {
+        return;
+      }
+      const parsed = this.parseDraftReference({ ...reference, value: raw });
+      if (parsed === undefined || parsed.draftId !== this.draftId) {
+        return;
+      }
+      const value = JSON.stringify({
+        schema: PRIVATE_STATE_NOTE_DRAFT_SCHEMA,
+        schemaVersion: PRIVATE_STATE_NOTE_DRAFT_VERSION,
+        draftId: parsed.draftId,
+        state: parsed.state,
+        hasObservedRaw: parsed.hasObservedRaw,
+        observedRaw: parsed.observedRaw,
+        updatedAt: Date.now(),
+        ownerState,
+      } satisfies PendingNoteDraftRecord);
+      draftStorage.setItem(reference.key, value);
+      this.activeDraftReference = { ...reference, value };
+    } catch {
+      // Lifecycle hints are best effort; failure must not affect canonical state.
+    }
+  }
+
   private stopDraftHeartbeat(): void {
     if (this.draftHeartbeatTimer !== undefined) {
       this.clock.clearTimeout(this.draftHeartbeatTimer);
@@ -474,7 +552,7 @@ export class OrderedStateStore {
         return false;
       }
       const parsed = this.parseDraftReference({ ...reference, value: raw });
-      return parsed !== undefined && Date.now() - parsed.updatedAt <= DRAFT_OWNER_LEASE_MS;
+      return parsed !== undefined && parsed.ownerState === "active";
     } catch {
       // An unreadable owner marker is not evidence that a foreign tab is live.
       return false;
@@ -550,6 +628,14 @@ export class OrderedStateStore {
     if (!validated.ok) {
       return;
     }
+    if (this.lastKnownGood !== undefined && sameState(this.lastKnownGood, validated.value)) {
+      this.clearPendingNoteDraft({
+        key: selected.key,
+        value: selected.value,
+        draftId: selected.draftId,
+      });
+      return;
+    }
     this.unsavedDraft = cloneState(validated.value);
     this.hasObservedRaw = selected.hasObservedRaw;
     this.observedRaw = selected.hasObservedRaw ? selected.observedRaw : undefined;
@@ -588,6 +674,9 @@ export class OrderedStateStore {
       || typeof candidate.hasObservedRaw !== "boolean"
       || typeof candidate.updatedAt !== "number"
       || !Number.isFinite(candidate.updatedAt)
+      || (candidate.ownerState !== undefined
+        && candidate.ownerState !== "active"
+        && candidate.ownerState !== "inactive")
       || (candidate.hasObservedRaw
         ? (typeof candidate.observedRaw !== "string" && candidate.observedRaw !== null)
         : candidate.observedRaw !== null)
@@ -617,6 +706,7 @@ export class OrderedStateStore {
       hasObservedRaw: candidate.hasObservedRaw,
       observedRaw: candidate.observedRaw ?? null,
       updatedAt: candidate.updatedAt,
+      ownerState: candidate.ownerState ?? "active",
       key: reference.key,
       value: reference.value,
     };
