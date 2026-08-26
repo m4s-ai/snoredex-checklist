@@ -56,6 +56,14 @@ function isString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+function isNullableString(value: unknown): value is string | null {
+  return value === null || isString(value);
+}
+
+function allRecords(rows: readonly unknown[]): rows is readonly Record<string, unknown>[] {
+  return rows.every(isRecord);
+}
+
 function hasUniqueIds(rows: readonly unknown[], key: string): boolean {
   const ids = new Set<string>();
   for (const row of rows) {
@@ -86,14 +94,68 @@ export function validateSnapshot(value: unknown): SnapshotValidation {
   const works = value.works as readonly unknown[];
   const items = value.items as readonly unknown[];
   const assets = value.assets as readonly unknown[];
-  if (!hasUniqueIds(localizations, "localizationId") || !hasUniqueIds(localSets, "localSetId") ||
+  if (!allRecords(localizations) || !allRecords(localSets) || !allRecords(setEditions) ||
+      !allRecords(works) || !allRecords(items) || !allRecords(assets) ||
+      !hasUniqueIds(localizations, "localizationId") || !hasUniqueIds(localSets, "localSetId") ||
       !hasUniqueIds(setEditions, "setEditionId") || !hasUniqueIds(works, "workId") ||
       !hasUniqueIds(items, "itemId") || !hasUniqueIds(assets, "assetId")) {
     return { ok: false, reason: "invalid" };
   }
-  const localizationIds = new Set(localizations.map((row) => isRecord(row) ? row.localizationId : undefined));
-  if (items.some((item) => !isRecord(item) || !isString(item.itemId) || !localizationIds.has(item.localizationId))) {
+
+  if (localizations.some((row) => !isString(row.locality) || !isString(row.languageTag)) ||
+      localSets.some((row) => !isString(row.locality)) ||
+      setEditions.some((row) => !isString(row.localSetId) || !isString(row.localizationId)) ||
+      assets.some((row) => !isString(row.imageScope))) {
     return { ok: false, reason: "invalid" };
+  }
+
+  const localizationById = new Map(localizations.map((row) => [row.localizationId as string, row] as const));
+  const localSetById = new Map(localSets.map((row) => [row.localSetId as string, row] as const));
+  const editionById = new Map(setEditions.map((row) => [row.setEditionId as string, row] as const));
+  const workIds = new Set(works.map((row) => row.workId as string));
+  const assetById = new Map(assets.map((row) => [row.assetId as string, row] as const));
+  const releaseMappings = new Map<string, string>();
+  const itemKinds = new Set(["verified-printing", "finish-candidate", "research-placeholder"]);
+  const progressClasses = new Set(["current-known", "research"]);
+  const mappedWorkStates = new Set(["mapped", "mapped-by-explicit-equivalence"]);
+  const unmappedWorkStates = new Set(["unmapped", "needs-explicit-equivalence"]);
+
+  for (const item of items) {
+    if (!isString(item.itemId) || !isString(item.localizationId) || !isString(item.setEditionId) ||
+        !isString(item.localSetId) || !isString(item.cardReleaseId) || !isString(item.itemKind) ||
+        !isString(item.progressClass) || !isString(item.workMappingState) ||
+        !isNullableString(item.workId) || !isNullableString(item.physicalPrintingId) ||
+        !isNullableString(item.imageAssetId) || !isString(item.imageScope) ||
+        !itemKinds.has(item.itemKind) || !progressClasses.has(item.progressClass)) {
+      return { ok: false, reason: "invalid" };
+    }
+    const localization = localizationById.get(item.localizationId);
+    const localSet = localSetById.get(item.localSetId);
+    const edition = editionById.get(item.setEditionId);
+    if (!localization || !localSet || !edition ||
+        edition.localSetId !== item.localSetId || edition.localizationId !== item.localizationId ||
+        localSet.locality !== localization.locality) {
+      return { ok: false, reason: "invalid" };
+    }
+    const workIsMapped = mappedWorkStates.has(item.workMappingState);
+    if ((!workIsMapped && !unmappedWorkStates.has(item.workMappingState)) ||
+        workIsMapped !== (item.workId !== null) || (item.workId !== null && !workIds.has(item.workId))) {
+      return { ok: false, reason: "invalid" };
+    }
+    if (item.itemKind === "verified-printing") {
+      if (item.physicalPrintingId === null || item.progressClass !== "current-known") return { ok: false, reason: "invalid" };
+    } else if (item.physicalPrintingId !== null || item.progressClass !== "research" ||
+        (item.itemKind === "research-placeholder" && item.finish !== null)) {
+      return { ok: false, reason: "invalid" };
+    }
+    const previousMapping = releaseMappings.get(item.cardReleaseId);
+    const currentMapping = `${item.setEditionId}\u0000${item.workId ?? ""}\u0000${item.workMappingState}`;
+    if (previousMapping !== undefined && previousMapping !== currentMapping) return { ok: false, reason: "invalid" };
+    releaseMappings.set(item.cardReleaseId, currentMapping);
+    if (item.imageAssetId !== null) {
+      const asset = assetById.get(item.imageAssetId);
+      if (!asset || asset.imageScope !== item.imageScope) return { ok: false, reason: "invalid" };
+    }
   }
   return { ok: true, snapshot: value as unknown as CatalogueSnapshot };
 }
