@@ -108,6 +108,7 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
 }
 
 function renderInvalid(container: HTMLElement, recoverableLocalization?: string): void {
+  container.hidden = false;
   const section = text("section", undefined, "state-panel");
   section.setAttribute("aria-live", "polite");
   section.append(text("h2", "Invalid checklist link"), text("p", "The complete link could not be validated. No catalogue or private collection state was read."));
@@ -117,6 +118,13 @@ function renderInvalid(container: HTMLElement, recoverableLocalization?: string)
 }
 
 function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogue: CatalogueSnapshot): void {
+  if (criteria.status) {
+    const deferred = text("section", undefined, "state-panel");
+    deferred.setAttribute("aria-live", "polite");
+    deferred.append(text("h2", "Status filter pending"), text("p", "This public criterion is preserved in the link, but private progress is not available to the static shell yet. The collection state layer will apply it without exposing private values in the URL."));
+    container.replaceChildren(deferred);
+    return;
+  }
   if (!criteria.localization) {
     const summary = text("div", undefined, "state-panel");
     summary.append(text("h2", "Choose a localization"), text("p", "The home view shows public summaries only. Choose a localization to open its checklist and keep the URL shareable."));
