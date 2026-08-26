@@ -897,9 +897,14 @@ test("retains an owned recovery reference when post-commit cleanup fails", async
   });
   assert.deepEqual(store.unsaved(), state(1, "keep after commit"));
   assert.equal(storage.draftValues.size, 1);
+  const ownedKey = [...storage.draftValues.keys()][0];
+  const ownedRecord = JSON.parse(storage.draftValues.get(ownedKey) as string) as Record<string, unknown>;
+  const rotatedOwnedKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:${String(ownedRecord.draftId)}:rotated:cleanup`;
+  storage.draftValues.set(rotatedOwnedKey, JSON.stringify(ownedRecord));
   storage.failDraftRemove = undefined;
   assert.deepEqual(store.read(), { ok: true, value: state(1, "keep after commit") });
   assert.equal(store.unsaved(), undefined);
+  assert.equal(storage.draftValues.size, 0);
 });
 
 test("retains a foreign recovery reference when post-commit tombstoning fails", async () => {

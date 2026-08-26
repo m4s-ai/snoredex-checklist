@@ -962,6 +962,71 @@ export class OrderedStateStore {
     return false;
   }
 
+  private clearOwnedDraftCopies(expectedReference: DraftReference): boolean {
+    const draftStorage = this.storage.draftStorage;
+    if (draftStorage === undefined) {
+      return false;
+    }
+    const references: DraftReference[] = [];
+    let keys: readonly string[] | undefined;
+    try {
+      keys = draftStorage.listKeys?.(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX);
+      if (keys === undefined) {
+        return false;
+      }
+      for (const key of keys) {
+        if (key.startsWith(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX)) {
+          continue;
+        }
+        const raw = draftStorage.getItem(key);
+        if (raw === null) {
+          continue;
+        }
+        const parsed = this.parseDraftReference({
+          key,
+          value: raw,
+          draftId: this.draftId,
+        });
+        if (parsed !== undefined && parsed.revision === expectedReference.revision) {
+          references.push(parsed);
+        }
+      }
+    } catch {
+      return false;
+    }
+    if (references.length === 0) {
+      references.push(expectedReference);
+    }
+    const failed: DraftReference[] = [];
+    for (const reference of references) {
+      if (!this.clearPendingNoteDraft(reference, true)) {
+        failed.push(reference);
+      }
+    }
+    if (failed.length === 0) {
+      return true;
+    }
+    const retained = references.find((reference) => {
+      try {
+        return draftStorage.getItem(reference.key) !== null;
+      } catch {
+        return false;
+      }
+    }) ?? failed[0];
+    this.activeDraftReference = retained;
+    this.activeDraftOwned = true;
+    this.latestDraftRevision = retained.revision;
+    const parsed = this.parseDraftReference(retained);
+    const validated = parsed === undefined ? undefined : validatePrivateState(parsed.state);
+    if (validated?.ok) {
+      this.unsavedDraft = cloneState(validated.value);
+    }
+    this.recoveredForeignReference = undefined;
+    this.recoveredDraftPresented = false;
+    this.startDraftHeartbeat();
+    return false;
+  }
+
   private retainForeignRecovery(reference: DraftReference): void {
     let retained = reference;
     try {
@@ -1071,7 +1136,7 @@ export class OrderedStateStore {
         revision: selected.revision,
       };
       const retired = selected.draftId === this.draftId
-        ? this.clearPendingNoteDraft(selectedReference)
+        ? this.clearOwnedDraftCopies(selectedReference)
         : this.consumeSupersededDraft(selectedReference);
       if (!retired) {
         return;
