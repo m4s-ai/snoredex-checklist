@@ -30,7 +30,7 @@ try {
   await writeFile(resolve(assets, "snapshot.js"), `export const provenance = Object.freeze(${JSON.stringify(provenance)});\nexport default Object.freeze(${JSON.stringify(fixture.catalogue)});\n`, "utf8");
   const catalogue = await import(pathToFileURL(resolve(assets, "catalogue.js")));
   const snapshot = await import(pathToFileURL(resolve(assets, "snapshot.js")));
-  if (!catalogue.validateSnapshot(snapshot.default).ok) throw new Error("site snapshot failed browser boundary validation");
+  if (!(await catalogue.validateSnapshot(snapshot.default)).ok) throw new Error("site snapshot failed browser boundary validation");
 
   await cp(resolve(root, "site-src/index.html"), resolve(staging, "index.html"));
   await mkdir(resolve(staging, "collection"), { recursive: true });

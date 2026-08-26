@@ -180,7 +180,7 @@ function renderCollection(catalogue: CatalogueSnapshot): void {
 }
 
 enableThemeControl();
-const validated = validateSnapshot(snapshot);
+const validated = await validateSnapshot(snapshot);
 if (!validated.ok) {
   renderInvalid($("[data-view]"), undefined, true);
 } else if (document.body.dataset.page === "collection") {

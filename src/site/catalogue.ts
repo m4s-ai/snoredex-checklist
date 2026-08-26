@@ -73,8 +73,27 @@ function hasUniqueIds(rows: readonly unknown[], key: string): boolean {
   return true;
 }
 
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]));
+}
+
+async function hasMatchingFingerprint(value: unknown, expected: string): Promise<boolean> {
+  try {
+    const payload = structuredClone(value);
+    if (isRecord(payload) && isRecord(payload.meta)) delete payload.meta.catalogueFingerprint;
+    const bytes = JSON.stringify(canonicalize(payload));
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(bytes));
+    const actual = `sha256:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+    return actual === expected;
+  } catch {
+    return false;
+  }
+}
+
 /** Small browser-side guard for the already validated, build-time snapshot. */
-export function validateSnapshot(value: unknown): SnapshotValidation {
+export async function validateSnapshot(value: unknown): Promise<SnapshotValidation> {
   if (!isRecord(value) || !isRecord(value.meta)) {
     return { ok: false, reason: "invalid" };
   }
@@ -82,6 +101,9 @@ export function validateSnapshot(value: unknown): SnapshotValidation {
     return { ok: false, reason: "unsupported" };
   }
   if (!/^sha256:[0-9a-f]{64}$/.test(String(value.meta.catalogueFingerprint ?? ""))) {
+    return { ok: false, reason: "invalid" };
+  }
+  if (!(await hasMatchingFingerprint(value, value.meta.catalogueFingerprint))) {
     return { ok: false, reason: "invalid" };
   }
   const arrayKeys = ["localizations", "localSets", "setEditions", "works", "items", "assets"] as const;
