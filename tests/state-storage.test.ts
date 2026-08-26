@@ -585,22 +585,29 @@ test("preserves a live foreign recovery draft during rebase", async () => {
   });
   storage.emitInactive();
   storage.emitActive();
-  assert.equal(storage.draftValues.size, 2);
+  assert.equal(storage.draftValues.size, 3);
   const activeForeignKey = [...storage.draftValues.keys()]
     .find((key) => key !== foreignKey && !key.includes(":tombstone:"));
   assert.equal(typeof activeForeignKey, "string");
   const transferred = JSON.parse(storage.draftValues.get(activeForeignKey as string) as string) as Record<string, unknown>;
   assert.equal(transferred.ownerState, "consumed");
-  const tombstoneKey = [...storage.draftValues.keys()].find((key) => key.includes(":tombstone:"));
-  assert.equal(typeof tombstoneKey, "string");
-  const tombstone = JSON.parse(storage.draftValues.get(tombstoneKey as string) as string) as Record<string, unknown>;
-  assert.equal(tombstone.sourceKey, foreignKey);
+  const tombstones = [...storage.draftValues.entries()]
+    .filter(([key]) => key.includes(":tombstone:"))
+    .map(([, value]) => JSON.parse(value) as Record<string, unknown>);
+  assert.deepEqual(new Set(tombstones.map((tombstone) => tombstone.sourceKey)), new Set([foreignKey, activeForeignKey]));
   storage.emitInactive();
   const inactiveLifecycle = JSON.parse(storage.draftValues.get(activeForeignKey as string) as string) as Record<string, unknown>;
   assert.equal(inactiveLifecycle.ownerState, "inactive");
   storage.emitActive();
-  const lifecycleRefreshed = JSON.parse(storage.draftValues.get(activeForeignKey as string) as string) as Record<string, unknown>;
-  assert.equal(lifecycleRefreshed.ownerState, "active");
+  const reactivatedKey = [...storage.draftValues.keys()]
+    .find((key) => key !== foreignKey && key !== activeForeignKey && !key.includes(":tombstone:"));
+  assert.equal(typeof reactivatedKey, "string");
+  const lifecycleRefreshed = JSON.parse(storage.draftValues.get(reactivatedKey as string) as string) as Record<string, unknown>;
+  assert.equal(lifecycleRefreshed.ownerState, "consumed");
+  const refreshedTombstones = [...storage.draftValues.entries()]
+    .filter(([key]) => key.includes(":tombstone:"))
+    .map(([, value]) => JSON.parse(value) as Record<string, unknown>);
+  assert.equal(refreshedTombstones.some((tombstone) => tombstone.sourceKey === reactivatedKey), true);
   const reloaded = new OrderedStateStore(storage);
   assert.deepEqual(reloaded.read(), { ok: true, value: state(1, "live draft") });
   assert.equal(reloaded.unsaved(), undefined);
@@ -943,6 +950,22 @@ test("uses the known owned draft key when draft enumeration is unavailable", asy
   storage.failDraftRemove = undefined;
   assert.deepEqual(store.read(), { ok: true, value: state(1, "known key") });
   assert.equal(storage.draftValues.size, 0);
+});
+
+test("preserves a matching draft when the current canonical envelope is unreadable", async () => {
+  const storage = new FakeStorage();
+  const store = new OrderedStateStore(storage);
+  storage.failDraftRemove = new Error("cleanup unavailable");
+  assert.deepEqual(await store.saveImmediate(state(1, "last known good")), {
+    ok: true,
+    value: { state: state(1, "last known good") },
+  });
+  assert.equal(storage.draftValues.size, 1);
+  storage.failDraftRemove = undefined;
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, "{malformed");
+  assert.deepEqual(store.read(), { ok: false, error: "LOCAL_STATE_UNREADABLE" });
+  assert.deepEqual(store.unsaved(), state(1, "last known good"));
+  assert.equal(storage.draftValues.size, 1);
 });
 
 test("retains a foreign recovery reference when post-commit tombstoning fails", async () => {

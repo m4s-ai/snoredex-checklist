@@ -322,12 +322,12 @@ export class OrderedStateStore {
     try {
       candidate = JSON.parse(raw) as unknown;
     } catch {
-      this.restorePendingNoteDraft();
+      this.restorePendingNoteDraft(false);
       return error("LOCAL_STATE_UNREADABLE");
     }
     const validated = validatePrivateState(candidate);
     if (!validated.ok) {
-      this.restorePendingNoteDraft();
+      this.restorePendingNoteDraft(false);
       return error(classifyStateError(validated.error));
     }
     this.lastKnownGood = cloneState(validated.value);
@@ -768,24 +768,40 @@ export class OrderedStateStore {
         if (!currentState.ok || !sameState(expectedState.value, currentState.value)) {
           return false;
         }
-        const tombstone: ConsumedDraftRecord = {
-          schema: PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_SCHEMA,
-          schemaVersion: PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION,
-          sourceKey: current.key,
-          sourceDraftId: reference.draftId,
-          sourceRevision: reference.revision,
-          consumedAt: Date.now(),
-        };
         // Keep every source record untouched. Separate state-scoped markers
         // cannot overwrite owner writes that race with this transfer.
-        const tombstoneKey = keys === undefined
-          ? getConsumedDraftKey(reference.draftId)
-          : getConsumedDraftKey(reference.draftId, current.key, reference.revision);
-        draftStorage.setItem(tombstoneKey, JSON.stringify(tombstone));
+        if (!this.writeConsumedDraftTombstone(draftStorage, current.key, reference.draftId, reference.revision)) {
+          return false;
+        }
       }
       return true;
     } catch {
       // A failed tombstone must not make a verified canonical save fail.
+      return false;
+    }
+  }
+
+  private writeConsumedDraftTombstone(
+    draftStorage: DraftStorageLike,
+    sourceKey: string,
+    sourceDraftId: string,
+    sourceRevision: string,
+  ): boolean {
+    try {
+      const tombstone: ConsumedDraftRecord = {
+        schema: PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_SCHEMA,
+        schemaVersion: PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION,
+        sourceKey,
+        sourceDraftId,
+        sourceRevision,
+        consumedAt: Date.now(),
+      };
+      const tombstoneKey = draftStorage.listKeys === undefined
+        ? getConsumedDraftKey(sourceDraftId)
+        : getConsumedDraftKey(sourceDraftId, sourceKey, sourceRevision);
+      draftStorage.setItem(tombstoneKey, JSON.stringify(tombstone));
+      return true;
+    } catch {
       return false;
     }
   }
@@ -845,6 +861,10 @@ export class OrderedStateStore {
           nextOwnerState = "consumed";
         }
       }
+      if (ownerState === "inactive" && parsed.ownerState === "consumed"
+        && !this.isTombstonedDraftKey(reference.key, reference.draftId)) {
+        nextOwnerState = "consumed";
+      }
       if (nextOwnerState === "active"
         && this.unsavedDraft !== undefined
         && this.isTombstonedDraftKey(reference.key, reference.draftId)) {
@@ -867,6 +887,7 @@ export class OrderedStateStore {
       if (ownerState === "active" && this.isTombstonedDraftKey(reference.key, reference.draftId)) {
         const rotatedKey = createRotatedDraftStorageKey(this.draftId);
         draftStorage.setItem(rotatedKey, value);
+        this.writeConsumedDraftTombstone(draftStorage, rotatedKey, this.draftId, parsed.revision);
         this.activeDraftReference = { ...reference, key: rotatedKey, value };
         this.clearPendingNoteDraft(reference);
       } else {
@@ -1056,7 +1077,7 @@ export class OrderedStateStore {
     }
   }
 
-  private restorePendingNoteDraft(): void {
+  private restorePendingNoteDraft(retireExactMatch = true): void {
     const draftStorage = this.storage.draftStorage;
     if (draftStorage === undefined) {
       return;
@@ -1130,7 +1151,7 @@ export class OrderedStateStore {
     if (!validated.ok) {
       return;
     }
-    if (this.lastKnownGood !== undefined && sameState(this.lastKnownGood, validated.value)) {
+    if (retireExactMatch && this.lastKnownGood !== undefined && sameState(this.lastKnownGood, validated.value)) {
       const selectedReference = {
         key: selected.key,
         value: selected.value,
