@@ -1040,6 +1040,42 @@ test("tombstones an owned copy rotated by the heartbeat", async () => {
     .some(([, value]) => (JSON.parse(value) as Record<string, unknown>).sourceKey === rotatedKey), true);
 });
 
+test("keeps a new edit active after its previous draft is tombstoned", async () => {
+  const storage = new FakeStorage();
+  const store = new OrderedStateStore(storage);
+  storage.failDraftRemove = new Error("retain source for concurrent consumption");
+  assert.deepEqual(await store.saveImmediate(state(1, "original draft")), {
+    ok: true,
+    value: { state: state(1, "original draft") },
+  });
+  storage.failDraftRemove = undefined;
+  const sourceKey = [...storage.draftValues.keys()][0];
+  const sourceRecord = JSON.parse(storage.draftValues.get(sourceKey) as string) as Record<string, unknown>;
+  const sourceTombstoneKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:tombstone:${encodeURIComponent(String(sourceRecord.draftId))}:${encodeURIComponent(sourceKey)}:${encodeURIComponent(String(sourceRecord.revision))}`;
+  storage.draftValues.set(sourceTombstoneKey, JSON.stringify({
+    schema: "snoredex-checklist.pending-note-tombstone",
+    schemaVersion: 1,
+    sourceKey,
+    sourceDraftId: sourceRecord.draftId,
+    sourceRevision: sourceRecord.revision,
+    consumedAt: Date.now(),
+  }));
+
+  const edited = state(1, "new edit after consumption");
+  assert.deepEqual(store.scheduleNoteSave(edited), { ok: true, value: undefined });
+  const activeKey = [...storage.draftValues.keys()]
+    .find((key) => !key.includes(":tombstone:") && key !== sourceKey);
+  assert.equal(typeof activeKey, "string");
+  const activeRecord = JSON.parse(storage.draftValues.get(activeKey as string) as string) as Record<string, unknown>;
+  assert.equal(activeRecord.ownerState, "active");
+  assert.equal([...storage.draftValues.entries()]
+    .filter(([key]) => key.includes(":tombstone:"))
+    .some(([, value]) => (JSON.parse(value) as Record<string, unknown>).sourceKey === activeKey), false);
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: state(1, "original draft") });
+  assert.deepEqual(recovered.unsaved(), edited);
+});
+
 test("retains an owned recovery reference when post-commit cleanup fails", async () => {
   const storage = new FakeStorage();
   const store = new OrderedStateStore(storage);

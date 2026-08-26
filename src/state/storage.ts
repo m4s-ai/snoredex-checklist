@@ -702,7 +702,7 @@ export class OrderedStateStore {
     };
     try {
       const value = JSON.stringify(record);
-      if (sourceIsTombstoned && previousOwnedReference !== undefined) {
+      if (sourceIsTombstoned && previousOwnedReference !== undefined && ownerState === "consumed") {
         const rotatedKey = createRotatedDraftStorageKey(this.draftId);
         const rotatedValue = JSON.stringify({ ...record, ownerState: "consumed" } satisfies PendingNoteDraftRecord);
         // A heartbeat must not publish a rotated consumed copy without its
