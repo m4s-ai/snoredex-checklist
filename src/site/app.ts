@@ -26,7 +26,7 @@ function enableThemeControl(): void {
   if (!button) return;
   const update = (): void => {
     const theme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
-    button.textContent = theme === "dark" ? "Use light theme" : "Use dark theme";
+    button.textContent = "Dark theme";
     button.setAttribute("aria-pressed", String(theme === "dark"));
   };
   button.addEventListener("click", () => {
@@ -118,7 +118,10 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
   container.replaceChildren(form);
 }
 
-function renderInvalid(container: HTMLElement, recoverableLocalization?: string): void {
+function renderInvalid(container: HTMLElement, recoverableLocalization?: string, failClosed = false): void {
+  if (failClosed) {
+    for (const element of document.querySelectorAll<HTMLElement>("[data-catalogue-dependent]")) element.hidden = true;
+  }
   container.hidden = false;
   const section = text("section", undefined, "state-panel");
   section.setAttribute("aria-live", "polite");
@@ -178,7 +181,7 @@ function renderCollection(catalogue: CatalogueSnapshot): void {
 enableThemeControl();
 const validated = validateSnapshot(snapshot);
 if (!validated.ok) {
-  renderInvalid($("[data-view]"));
+  renderInvalid($("[data-view]"), undefined, true);
 } else if (document.body.dataset.page === "collection") {
   renderCollection(validated.snapshot);
 } else {
