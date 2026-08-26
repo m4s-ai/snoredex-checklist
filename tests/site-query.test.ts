@@ -34,3 +34,8 @@ test("allows non-ASCII search text within the decoded length limit", () => {
   assert.equal(parsed.ok, true);
   if (parsed.ok) assert.equal(parsed.criteria.q, "界".repeat(57));
 });
+
+test("rejects percent escapes that are not valid UTF-8", () => {
+  assert.deepEqual(parseQuery("?q=%FF", ids), { ok: false });
+  assert.deepEqual(parseQuery("?q=%C3%28", ids), { ok: false });
+});

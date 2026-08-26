@@ -35,6 +35,12 @@ export function parseQuery(search: string, localizationIds: ReadonlySet<string>)
   const raw = search.startsWith("?") ? search.slice(1) : search;
   if (raw.length > MAX_QUERY_RAW || /%(?![0-9a-fA-F]{2})/.test(raw)) return { ok: false };
   try {
+    // URLSearchParams replaces malformed UTF-8 with U+FFFD; reject it before parsing.
+    decodeURIComponent(raw.replace(/\+/g, "%20"));
+  } catch {
+    return { ok: false };
+  }
+  try {
     params = new URLSearchParams(raw);
   } catch {
     return { ok: false };

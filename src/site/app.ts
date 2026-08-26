@@ -1,4 +1,5 @@
 import { validateSnapshot, type CatalogueSnapshot, type SnapshotItem, type SnapshotLocalization } from "./catalogue.js";
+import { matchesResearch } from "./filter.js";
 import { parseQuery, serializeQuery, type QueryCriteria } from "./query.js";
 import snapshot, { provenance } from "./snapshot.js";
 
@@ -152,12 +153,9 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
   }
   const localizationIds = criteria.localization ? new Set([criteria.localization]) : undefined;
   const query = criteria.q?.toLowerCase();
-  // Research records are read-only catalogue context, not normal checklist rows. They
-  // only enter the result set when the shareable research criterion explicitly asks for them.
-  const research = criteria.research === "true" ? true : criteria.research === "false" ? false : undefined;
   const items = catalogue.items.filter((item) => (!localizationIds || localizationIds.has(item.localizationId)) &&
     (!query || publicSearchText(item).includes(query)) && (!criteria.kind || item.itemKind === criteria.kind) &&
-    (research === undefined ? item.progressClass !== "research" : research === (item.progressClass === "research")));
+    matchesResearch(item.progressClass, criteria.research));
   const list = text("ul", undefined, "item-list");
   for (const item of items) {
     const row = text("li", undefined, "item-row");
