@@ -322,6 +322,8 @@ test("preserves a live foreign recovery draft during rebase", async () => {
   assert.deepEqual(recovered.read(), { ok: true, value: state(2) });
   assert.deepEqual(recovered.rebaseUnsavedDraft(), { ok: true, value: state(1, "live draft") });
   assert.equal(storage.draftValues.size, 2);
+  storage.emitInactive();
+  storage.emitActive();
   assert.deepEqual(await recovered.saveImmediate(state(1, "live draft")), {
     ok: true,
     value: { state: state(1, "live draft") },

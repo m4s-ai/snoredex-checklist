@@ -560,11 +560,11 @@ export class OrderedStateStore {
     try {
       const expected = this.parseDraftReference(reference);
       const raw = draftStorage.getItem(reference.key);
-      if (expected === undefined || raw === null || raw !== reference.value) {
+      if (expected === undefined || raw === null) {
         return;
       }
       const current = this.parseDraftReference({ ...reference, value: raw });
-      if (current === undefined || current.ownerState === "consumed") {
+      if (current === undefined || current.ownerState === "consumed" || current.revision !== reference.revision) {
         return;
       }
       const expectedState = validatePrivateState(expected.state);
