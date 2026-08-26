@@ -119,6 +119,14 @@ export function validateSnapshot(value: unknown): SnapshotValidation {
   const progressClasses = new Set(["current-known", "research"]);
   const mappedWorkStates = new Set(["mapped", "mapped-by-explicit-equivalence"]);
   const unmappedWorkStates = new Set(["unmapped", "needs-explicit-equivalence"]);
+  for (const edition of setEditions) {
+    const localization = localizationById.get(edition.localizationId as string);
+    const localSet = localSetById.get(edition.localSetId as string);
+    if (!localization || !localSet || localSet.locality !== localization.locality) {
+      return { ok: false, reason: "invalid" };
+    }
+  }
+  const physicalPrintingIds = new Set<string>();
 
   for (const item of items) {
     if (!isString(item.itemId) || !isString(item.localizationId) || !isString(item.setEditionId) ||
@@ -144,6 +152,8 @@ export function validateSnapshot(value: unknown): SnapshotValidation {
     }
     if (item.itemKind === "verified-printing") {
       if (item.physicalPrintingId === null || item.progressClass !== "current-known") return { ok: false, reason: "invalid" };
+      if (physicalPrintingIds.has(item.physicalPrintingId)) return { ok: false, reason: "invalid" };
+      physicalPrintingIds.add(item.physicalPrintingId);
     } else if (item.physicalPrintingId !== null || item.progressClass !== "research" ||
         (item.itemKind === "research-placeholder" && item.finish !== null)) {
       return { ok: false, reason: "invalid" };

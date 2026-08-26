@@ -17,3 +17,16 @@ test("fails closed on dangling references and invalid item classes", () => {
   invalidClass.items[0].itemKind = "research-placeholder";
   assert.deepEqual(validateSnapshot(invalidClass), { ok: false, reason: "invalid" });
 });
+
+test("fails closed on orphan editions and duplicate physical printings", () => {
+  const orphanEdition = structuredClone(fixture.catalogue);
+  orphanEdition.setEditions[0].localizationId = "missing-localization";
+  assert.deepEqual(validateSnapshot(orphanEdition), { ok: false, reason: "invalid" });
+
+  const duplicatePrinting = structuredClone(fixture.catalogue);
+  duplicatePrinting.items.push({
+    ...duplicatePrinting.items[0],
+    itemId: "item-00000000-0000-5000-8000-000000000004"
+  });
+  assert.deepEqual(validateSnapshot(duplicatePrinting), { ok: false, reason: "invalid" });
+});
