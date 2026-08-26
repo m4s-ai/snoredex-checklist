@@ -327,6 +327,47 @@ test("preserves a live foreign recovery draft during rebase", async () => {
     value: { state: state(1, "live draft") },
   });
   assert.equal(storage.draftValues.size, 1);
+  const transferred = JSON.parse(storage.draftValues.get(foreignKey) as string) as Record<string, unknown>;
+  assert.equal(transferred.ownerState, "consumed");
+  storage.emitInactive();
+  storage.emitActive();
+  const lifecycleRefreshed = JSON.parse(storage.draftValues.get(foreignKey) as string) as Record<string, unknown>;
+  assert.equal(lifecycleRefreshed.ownerState, "consumed");
+  const reloaded = new OrderedStateStore(storage);
+  assert.deepEqual(reloaded.read(), { ok: true, value: state(1, "live draft") });
+  assert.equal(reloaded.unsaved(), undefined);
+});
+
+test("does not consume a foreign draft that changed during ownership transfer", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1)), { ok: true, value: { state: state(1) } });
+
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1) });
+  writer.scheduleNoteSave(state(1, "live draft"));
+  const otherTab = new OrderedStateStore(storage);
+  assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
+  assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
+
+  const foreignKey = [...storage.draftValues.keys()][0];
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: state(2) });
+  assert.deepEqual(recovered.rebaseUnsavedDraft(), { ok: true, value: state(1, "live draft") });
+  const changedForeign = JSON.parse(storage.draftValues.get(foreignKey) as string) as Record<string, unknown>;
+  changedForeign.state = state(1, "edited by owner");
+  storage.draftValues.set(foreignKey, JSON.stringify(changedForeign));
+
+  assert.deepEqual(await recovered.saveImmediate(state(1, "live draft")), {
+    ok: true,
+    value: { state: state(1, "live draft") },
+  });
+  const remaining = JSON.parse(storage.draftValues.get(foreignKey) as string) as Record<string, unknown>;
+  assert.equal(remaining.ownerState, "active");
+  assert.deepEqual(new OrderedStateStore(storage).unsaved(), undefined);
+  const restored = new OrderedStateStore(storage);
+  assert.deepEqual(restored.read(), { ok: true, value: state(1, "live draft") });
+  assert.deepEqual(restored.unsaved(), state(1, "edited by owner"));
 });
 
 test("keeps the old baseline when rebasing cannot persist the replacement draft", async () => {
@@ -417,6 +458,9 @@ test("skips an immediate save discarded while waiting for the cross-tab lock", a
   const store = new OrderedStateStore(storage);
   assert.deepEqual(store.read(), { ok: true, value: state(1) });
   const save = store.saveImmediate(state(2));
+  assert.equal(storage.draftValues.size, 1);
+  const durableImmediate = JSON.parse([...storage.draftValues.values()][0]) as { state: unknown };
+  assert.deepEqual(durableImmediate.state, state(2));
   await Promise.resolve();
   store.discardUnsavedDraft();
   lock.release();
