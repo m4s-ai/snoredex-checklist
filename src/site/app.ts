@@ -76,7 +76,7 @@ function renderIndex(catalogue: CatalogueSnapshot): void {
 
 function publicSearchText(item: SnapshotItem): string {
   return [item.cardName, item.localCardName, item.localSetName, item.localSetCode, item.collectorNumber]
-    .filter((value): value is string => typeof value === "string").join(" ").toLocaleLowerCase();
+    .filter((value): value is string => typeof value === "string").join(" ").toLowerCase();
 }
 
 function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalogue: CatalogueSnapshot): void {
@@ -108,6 +108,11 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
     // Empty optional controls are omitted; explicit empty URL values remain invalid.
     select.disabled = select.value === "";
     input.disabled = input.value === "";
+  });
+  window.addEventListener("pageshow", () => {
+    // bfcache can restore the submitted DOM; controls must remain editable on Back.
+    select.disabled = false;
+    input.disabled = false;
   });
   form.append(localization, query, submit);
   container.replaceChildren(form);
@@ -143,7 +148,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
     return;
   }
   const localizationIds = criteria.localization ? new Set([criteria.localization]) : undefined;
-  const query = criteria.q?.toLocaleLowerCase();
+  const query = criteria.q?.toLowerCase();
   const items = catalogue.items.filter((item) => (!localizationIds || localizationIds.has(item.localizationId)) &&
     (!query || publicSearchText(item).includes(query)) && (!criteria.kind || item.itemKind === criteria.kind) &&
     (!criteria.research || (criteria.research === "true") === (item.progressClass === "research")));
