@@ -1706,7 +1706,20 @@ export class OrderedStateStore {
         draftStorage.setItem(getDraftPointerKey(), serialized);
         return draftStorage.getItem(getDraftPointerKey()) === serialized;
       })) {
-        return true;
+        // A stale callback can still publish after another owner completed
+        // its own lease checks. Confirm that this transaction's pointer
+        // survived the entire publication, otherwise retry the merge so the
+        // newer registry is not reported as success while this source becomes
+        // undiscoverable.
+        try {
+          const pointers = this.readDraftPointers(draftStorage);
+          if (pointers.some((pointer) => pointer.draftId === this.draftId && pointer.sourceKey === reference.key)) {
+            return true;
+          }
+        } catch {
+          // A failed confirmation is indistinguishable from a lost update;
+          // retry against the last readable registry.
+        }
       }
     }
     return false;

@@ -1416,6 +1416,54 @@ test("remerges a pointer after the lease changes during publication", () => {
   assert.equal(pointerRecord.pointers?.[1]?.sourceKey, ownSourceKey);
 });
 
+test("remerges a pointer when a stale callback overwrites the registry", () => {
+  const storage = new FakeStorage();
+  const fullDraftStorage = storage.draftStorage;
+  storage.draftStorage = {
+    getItem: fullDraftStorage.getItem,
+    setItem: fullDraftStorage.setItem,
+    removeItem: fullDraftStorage.removeItem,
+  };
+  const pointerKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:current`;
+  const lockKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:pointer-lock`;
+  let registryPublished = false;
+  let injected = false;
+  storage.afterDraftGetItem = (key, value) => {
+    if (key === pointerKey && value !== null) {
+      registryPublished = true;
+    }
+    if (injected || !registryPublished || key !== lockKey || value === null) {
+      return;
+    }
+    injected = true;
+    storage.draftValues.set(pointerKey, JSON.stringify({
+      schema: "snoredex-checklist.pending-note-pointer",
+      schemaVersion: 2,
+      pointers: [{
+        schema: "snoredex-checklist.pending-note-pointer",
+        schemaVersion: 2,
+        draftId: "stale-owner",
+        sourceKey: `${PRIVATE_STATE_NOTE_DRAFT_KEY}:stale-source`,
+        sourceRevision: "1",
+      }],
+    }));
+  };
+
+  const store = new OrderedStateStore(storage);
+  assert.equal(store.scheduleNoteSave(state(0, "stale pointer recovery")).ok, true);
+  storage.afterDraftGetItem = undefined;
+  const pointerRaw = storage.draftValues.get(pointerKey);
+  assert.equal(typeof pointerRaw, "string");
+  const pointerRecord = JSON.parse(pointerRaw as string) as {
+    pointers?: Array<{ draftId?: string; sourceKey?: string }>;
+  };
+  const ownSourceKey = [...storage.draftValues.keys()]
+    .find((key) => key !== pointerKey && key !== lockKey);
+  assert.equal(pointerRecord.pointers?.length, 2);
+  assert.equal(pointerRecord.pointers?.[0]?.draftId, "stale-owner");
+  assert.equal(pointerRecord.pointers?.[1]?.sourceKey, ownSourceKey);
+});
+
 test("probes a pointed foreign owner's tombstone without listKeys", () => {
   const storage = new FakeStorage();
   const fullDraftStorage = storage.draftStorage;
