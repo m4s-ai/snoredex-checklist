@@ -470,10 +470,17 @@ export class OrderedStateStore {
       this.clearPendingNoteDraft(previousOwnedReference);
     }
     if (previousReference !== undefined && persistedReference?.key !== previousReference.key) {
-      if (previousReference.draftId === this.draftId || !this.isDraftOwnerActive(previousReference)) {
+      if (previousReference.draftId === this.draftId) {
         this.clearPendingNoteDraft(previousReference);
-      } else {
+      } else if (this.isDraftOwnerActive(previousReference)) {
         this.supersededDraftReference = previousReference;
+      } else {
+        // An inactive foreign source is still a logical recovery revision;
+        // suppress it with a tombstone rather than deleting the source. The
+        // owner may reactivate and rotate its physical copy later.
+        if (!this.consumeSupersededDraft(previousReference)) {
+          this.supersededDraftReference = previousReference;
+        }
       }
     }
     this.recoveredForeignReference = undefined;
@@ -695,6 +702,36 @@ export class OrderedStateStore {
     };
     try {
       const value = JSON.stringify(record);
+      if (sourceIsTombstoned && previousOwnedReference !== undefined) {
+        const rotatedKey = createRotatedDraftStorageKey(this.draftId);
+        const rotatedValue = JSON.stringify({ ...record, ownerState: "consumed" } satisfies PendingNoteDraftRecord);
+        // A heartbeat must not publish a rotated consumed copy without its
+        // matching suppression marker; otherwise reclamation can never reach
+        // the orphaned full-state envelope.
+        if (!this.writeConsumedDraftTombstone(draftStorage, rotatedKey, this.draftId, draftRevision)) {
+          return undefined;
+        }
+        try {
+          draftStorage.setItem(rotatedKey, rotatedValue);
+        } catch {
+          return undefined;
+        }
+        if (!this.writeConsumedDraftTombstone(draftStorage, rotatedKey, this.draftId, draftRevision)
+          || !this.isTombstonedDraftKey(rotatedKey, this.draftId)) {
+          try {
+            if (draftStorage.getItem(rotatedKey) === rotatedValue) {
+              draftStorage.removeItem(rotatedKey);
+            }
+          } catch {
+            // Best-effort cleanup; the original tombstoned source remains.
+          }
+          return undefined;
+        }
+        const reference = { key: rotatedKey, value: rotatedValue, draftId: this.draftId, revision: draftRevision };
+        this.activeDraftReference = reference;
+        this.activeDraftOwned = true;
+        return reference;
+      }
       try {
         draftStorage.setItem(key, value);
       } catch (cause) {

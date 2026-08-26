@@ -555,12 +555,14 @@ test("allows an explicit rebase after a recovered draft conflicts", async () => 
     error: "STORAGE_COMMIT_UNCERTAIN",
   });
   assert.deepEqual(recovered.rebaseUnsavedDraft(), { ok: true, value: state(1, "draft to rebase") });
-  assert.equal(storage.draftValues.size, 1);
+  assert.equal(storage.draftValues.size, 3);
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), true);
   assert.deepEqual(await recovered.saveImmediate(state(1, "draft to rebase")), {
     ok: true,
     value: { state: state(1, "draft to rebase") },
   });
-  assert.equal(storage.draftValues.size, 0);
+  assert.equal(storage.draftValues.size, 2);
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), true);
   assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(1, "draft to rebase") });
 });
 
@@ -1004,6 +1006,38 @@ test("clears a heartbeat-refreshed draft after a locked note commit", async () =
   lock.release();
   assert.deepEqual(await flush, { ok: true, value: { state: state(0, "refresh before commit") } });
   assert.equal(storage.draftValues.size, 0);
+});
+
+test("tombstones an owned copy rotated by the heartbeat", async () => {
+  const storage = new FakeStorage();
+  const clock = new FakeClock();
+  const store = new OrderedStateStore(storage, clock);
+  storage.failDraftRemove = new Error("cleanup unavailable");
+  assert.deepEqual(await store.saveImmediate(state(1, "heartbeat rotation")), {
+    ok: true,
+    value: { state: state(1, "heartbeat rotation") },
+  });
+  storage.failDraftRemove = undefined;
+  const sourceKey = [...storage.draftValues.keys()][0];
+  const sourceRecord = JSON.parse(storage.draftValues.get(sourceKey) as string) as Record<string, unknown>;
+  const sourceTombstoneKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:tombstone:${encodeURIComponent(String(sourceRecord.draftId))}:${encodeURIComponent(sourceKey)}:${encodeURIComponent(String(sourceRecord.revision))}`;
+  storage.draftValues.set(sourceTombstoneKey, JSON.stringify({
+    schema: "snoredex-checklist.pending-note-tombstone",
+    schemaVersion: 1,
+    sourceKey,
+    sourceDraftId: sourceRecord.draftId,
+    sourceRevision: sourceRecord.revision,
+    consumedAt: Date.now(),
+  }));
+
+  clock.advance(5_000);
+  const rotatedKey = [...storage.draftValues.keys()]
+    .find((key) => key.includes(":rotated:") && !key.includes(":tombstone:"));
+  assert.equal(typeof rotatedKey, "string");
+  assert.equal(storage.draftValues.has(sourceKey), false);
+  assert.equal([...storage.draftValues.entries()]
+    .filter(([key]) => key.includes(":tombstone:"))
+    .some(([, value]) => (JSON.parse(value) as Record<string, unknown>).sourceKey === rotatedKey), true);
 });
 
 test("retains an owned recovery reference when post-commit cleanup fails", async () => {
