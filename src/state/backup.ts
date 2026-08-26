@@ -359,18 +359,27 @@ export class PrivateStateLifecycle {
     });
   }
 
-  public async restore(confirmed: boolean): Promise<LifecycleResult> {
+  public async restore(
+    confirmed: boolean,
+    targetFingerprint: string,
+    knownItemIds: ReadonlySet<string>,
+  ): Promise<LifecycleResult> {
     if (!confirmed) return ok({ active: undefined, recovery: undefined, changed: false });
     return exclusive(this.storage, () => {
       const current = readAuthority(this.storage);
       if (!current.ok) return current;
       const recovery = current.value.authority.recovery;
       if (recovery === undefined) return fail("EXPORT_FAILED");
+      const validatedRecovery = validatePrivateState(recovery, knownItemIds);
+      if (!validatedRecovery.ok) return fail(mapStateError(validatedRecovery.error));
+      if (typeof targetFingerprint !== "string" || validatedRecovery.value.catalogueFingerprint !== targetFingerprint) {
+        return fail("STATE_FINGERPRINT_UNSUPPORTED");
+      }
       const active = current.value.authority.active;
       if (active === undefined || active.items.length === 0) {
-        return writeAuthority(this.storage, current.value.raw, recovery, undefined);
+        return writeAuthority(this.storage, current.value.raw, validatedRecovery.value, undefined);
       }
-      return writeAuthority(this.storage, current.value.raw, recovery, active);
+      return writeAuthority(this.storage, current.value.raw, validatedRecovery.value, active);
     });
   }
 }

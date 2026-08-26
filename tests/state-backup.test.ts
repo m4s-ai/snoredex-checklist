@@ -153,11 +153,35 @@ test("clear and restore use one recoverable slot and swap without merging", asyn
   if (!cleared.ok) return;
   assert.deepEqual(cleared.value.active?.items, []);
   assert.equal(cleared.value.recovery?.items[0]?.note, "keep me");
-  const restored = await lifecycle.restore(true);
+  const restored = await lifecycle.restore(true, fingerprint, knownItemIds);
   assert.equal(restored.ok, true);
   if (!restored.ok) return;
   assert.equal(restored.value.active?.items[0]?.note, "keep me");
   assert.equal(restored.value.recovery, undefined);
+});
+
+test("restore fails closed when recovery is not valid for the active catalogue", async () => {
+  const storage = new FakeStorage();
+  const storedRecovery = state("keep me");
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(storedRecovery));
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision, now: () => exportedAt });
+  assert.equal((await lifecycle.clear(true)).ok, true);
+  assert.deepEqual(await lifecycle.restore(true, otherFingerprint, knownItemIds), {
+    ok: false,
+    error: "STATE_FINGERPRINT_UNSUPPORTED",
+  });
+
+  const unknownItemRecovery = { ...storedRecovery, items: [{ ...storedRecovery.items[0], itemId: "item-00000000-0000-0000-0000-00000000000b" }] };
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify({
+    schema: "snoredex-private-state-authority",
+    schemaVersion: 1,
+    active: { ...storedRecovery, items: [] },
+    recovery: unknownItemRecovery,
+  }));
+  assert.deepEqual(await lifecycle.restore(true, fingerprint, knownItemIds), {
+    ok: false,
+    error: "IMPORT_INVALID_STATE_DATA",
+  });
 });
 
 test("a stale preview cannot replace a newer local collection", async () => {
