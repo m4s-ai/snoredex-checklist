@@ -47,6 +47,7 @@ function state(quantityOwned: number, note?: string): PrivateState {
 class FakeStorage implements StorageLike {
   public values = new Map<string, string>();
   public draftValues = new Map<string, string>();
+  public draftId: string | undefined;
   private readonly inactiveHandlers = new Set<() => void>();
   private readonly activeHandlers = new Set<() => void>();
   public registerDraftLifecycle(
@@ -1502,6 +1503,154 @@ test("retains a tombstone until a missing-source pointer can be removed", () => 
   new OrderedStateStore(storage).read();
   assert.equal(storage.draftValues.has(pointerKey), false);
   assert.equal(storage.draftValues.has(tombstoneKey), false);
+});
+
+test("derives suppression markers from a replacement behind a stale pointer", () => {
+  const storage = new FakeStorage();
+  const fullDraftStorage = storage.draftStorage;
+  storage.draftStorage = {
+    getItem: fullDraftStorage.getItem,
+    setItem: fullDraftStorage.setItem,
+    removeItem: fullDraftStorage.removeItem,
+    withAtomicUpdate: fullDraftStorage.withAtomicUpdate,
+  };
+  storage.draftId = "writer-owner";
+  const writer = new OrderedStateStore(storage);
+  assert.equal(writer.scheduleNoteSave(state(0, "replacement behind stale pointer")).ok, true);
+  const pointerKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:current`;
+  const pointerRaw = storage.draftValues.get(pointerKey);
+  assert.equal(typeof pointerRaw, "string");
+  const pointerRecord = JSON.parse(pointerRaw as string) as { pointers: Array<Record<string, string>> };
+  const pointer = pointerRecord.pointers[0];
+  const sourceRaw = storage.draftValues.get(pointer.sourceKey);
+  assert.equal(typeof sourceRaw, "string");
+  const sourceRecord = JSON.parse(sourceRaw as string) as Record<string, unknown>;
+  const replacementRevision = `${String(sourceRecord.revision)}:replacement`;
+  storage.draftValues.set(pointer.sourceKey, JSON.stringify({
+    ...sourceRecord,
+    revision: replacementRevision,
+    updatedAt: Number(sourceRecord.updatedAt) + 1,
+  }));
+  // A different owner recovers the retained replacement and consumes it.
+  storage.draftId = "reader-owner";
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: undefined });
+  assert.deepEqual(recovered.unsaved(), state(0, "replacement behind stale pointer"));
+  recovered.discardUnsavedDraft();
+
+  // A restart must see the replacement-revision tombstone even though the
+  // pointer still advertises the old revision.
+  const restarted = new OrderedStateStore(storage);
+  assert.deepEqual(restarted.read(), { ok: true, value: undefined });
+  assert.equal(restarted.unsaved(), undefined);
+});
+
+test("does not remove a replacement pointer after a missing-source race", () => {
+  const storage = new FakeStorage();
+  const fullDraftStorage = storage.draftStorage;
+  storage.draftStorage = {
+    getItem: fullDraftStorage.getItem,
+    setItem: fullDraftStorage.setItem,
+    removeItem: fullDraftStorage.removeItem,
+    withAtomicUpdate: fullDraftStorage.withAtomicUpdate,
+  };
+  const pointerKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:current`;
+  const sourceKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:missing-race`;
+  const tombstoneKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:tombstone:${encodeURIComponent("foreign-owner")}:${encodeURIComponent(sourceKey)}:old`;
+  storage.draftValues.set(pointerKey, JSON.stringify({
+    schema: "snoredex-checklist.pending-note-pointer",
+    schemaVersion: 2,
+    pointers: [{
+      schema: "snoredex-checklist.pending-note-pointer",
+      schemaVersion: 2,
+      draftId: "foreign-owner",
+      sourceKey,
+      sourceRevision: "old",
+    }],
+  }));
+  storage.draftValues.set(tombstoneKey, JSON.stringify({
+    schema: "snoredex-checklist.pending-note-tombstone",
+    schemaVersion: 1,
+    sourceKey,
+    sourceDraftId: "foreign-owner",
+    sourceRevision: "old",
+    consumedAt: Date.now(),
+  }));
+  let sourceReads = 0;
+  storage.afterDraftGetItem = (key) => {
+    if (key !== sourceKey || ++sourceReads !== 2) {
+      return;
+    }
+    storage.draftValues.set(sourceKey, JSON.stringify({
+      schema: "snoredex-checklist.pending-note",
+      schemaVersion: 1,
+      draftId: "foreign-owner",
+      state: state(0, "replacement pointer"),
+      revision: "new",
+      hasObservedRaw: true,
+      observedRaw: null,
+      updatedAt: Date.now(),
+      ownerState: "active",
+    }));
+    storage.draftValues.set(pointerKey, JSON.stringify({
+      schema: "snoredex-checklist.pending-note-pointer",
+      schemaVersion: 2,
+      pointers: [{
+        schema: "snoredex-checklist.pending-note-pointer",
+        schemaVersion: 2,
+        draftId: "foreign-owner",
+        sourceKey,
+        sourceRevision: "new",
+      }],
+    }));
+  };
+  new OrderedStateStore(storage).read();
+  storage.afterDraftGetItem = undefined;
+  const pointerAfter = JSON.parse(storage.draftValues.get(pointerKey) as string) as { pointers: Array<Record<string, string>> };
+  assert.equal(pointerAfter.pointers[0].sourceRevision, "new");
+  assert.equal(storage.draftValues.has(tombstoneKey), false);
+});
+
+test("retains the tombstone when the pointer registry cannot be read", () => {
+  const storage = new FakeStorage();
+  const fullDraftStorage = storage.draftStorage;
+  storage.draftStorage = {
+    getItem: fullDraftStorage.getItem,
+    setItem: fullDraftStorage.setItem,
+    removeItem: fullDraftStorage.removeItem,
+    withAtomicUpdate: fullDraftStorage.withAtomicUpdate,
+  };
+  storage.draftId = "foreign-owner";
+  const pointerKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:current`;
+  const sourceKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:unreadable-registry`;
+  const tombstoneKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:tombstone:foreign-owner`;
+  storage.draftValues.set(pointerKey, JSON.stringify({
+    schema: "snoredex-checklist.pending-note-pointer",
+    schemaVersion: 2,
+    pointers: [{
+      schema: "snoredex-checklist.pending-note-pointer",
+      schemaVersion: 2,
+      draftId: "foreign-owner",
+      sourceKey,
+      sourceRevision: "old",
+    }],
+  }));
+  storage.draftValues.set(tombstoneKey, JSON.stringify({
+    schema: "snoredex-checklist.pending-note-tombstone",
+    schemaVersion: 1,
+    sourceKey,
+    sourceDraftId: "foreign-owner",
+    sourceRevision: "old",
+    consumedAt: Date.now(),
+  }));
+  storage.afterDraftGetItem = (key) => {
+    if (key === pointerKey) {
+      throw new Error("registry unavailable");
+    }
+  };
+  new OrderedStateStore(storage).read();
+  storage.afterDraftGetItem = undefined;
+  assert.equal(storage.draftValues.has(tombstoneKey), true);
 });
 
 test("probes a pointed foreign owner's tombstone without listKeys", () => {

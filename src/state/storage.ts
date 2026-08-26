@@ -1292,7 +1292,7 @@ export class OrderedStateStore {
       }
       const currentValue = draftStorage?.getItem(expectedReference.key);
       if (currentValue === null) {
-        return this.clearDraftPointerIfMatches(draftStorage, expectedReference.key);
+        return this.clearDraftPointerIfMatches(draftStorage, expectedReference.key, expectedReference.revision);
       }
       const exactMatch = currentValue === expectedReference.value;
       const refreshedOwnedMatch = allowRefreshedOwnedReference
@@ -1302,7 +1302,7 @@ export class OrderedStateStore {
         && currentValue === this.activeDraftReference.value;
       if (exactMatch || refreshedOwnedMatch) {
         draftStorage.removeItem(expectedReference.key);
-        if (!this.clearDraftPointerIfMatches(draftStorage, expectedReference.key)) {
+        if (!this.clearDraftPointerIfMatches(draftStorage, expectedReference.key, expectedReference.revision)) {
           return false;
         }
         if (this.activeDraftReference?.key === expectedReference.key
@@ -1555,7 +1555,7 @@ export class OrderedStateStore {
         }
         const sourceRaw = draftStorage.getItem(tombstone.sourceKey);
         if (sourceRaw === null) {
-          if (!this.clearDraftPointerIfMatches(draftStorage, tombstone.sourceKey)) {
+          if (!this.clearDraftPointerIfMatches(draftStorage, tombstone.sourceKey, tombstone.sourceRevision)) {
             continue;
           }
           this.removeTombstoneIfUnchanged(draftStorage, tombstoneKey, tombstoneRaw);
@@ -1585,7 +1585,7 @@ export class OrderedStateStore {
         // Owners rotate to a new physical key whenever this tombstone exists,
         // so deleting this unchanged key cannot remove a later owner revision.
         draftStorage.removeItem(tombstone.sourceKey);
-        if (!this.clearDraftPointerIfMatches(draftStorage, tombstone.sourceKey)) {
+        if (!this.clearDraftPointerIfMatches(draftStorage, tombstone.sourceKey, tombstone.sourceRevision)) {
           try {
             draftStorage.setItem(tombstone.sourceKey, sourceRaw);
           } catch {
@@ -1690,7 +1690,7 @@ export class OrderedStateStore {
     };
   }
 
-  private readDraftPointers(draftStorage: DraftStorageLike): readonly CurrentDraftPointerRecord[] {
+  private readDraftPointersStrict(draftStorage: DraftStorageLike): readonly CurrentDraftPointerRecord[] | undefined {
     try {
       const raw = draftStorage.getItem(getDraftPointerKey());
       if (raw === null) {
@@ -1698,21 +1698,26 @@ export class OrderedStateStore {
       }
       const candidate = JSON.parse(raw) as unknown;
       if (typeof candidate !== "object" || candidate === null) {
-        return [];
+        return undefined;
       }
       const registry = candidate as Partial<CurrentDraftPointerRegistry>;
       if (registry.schema === PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA
         && registry.schemaVersion === PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION
         && Array.isArray(registry.pointers)) {
-        return registry.pointers
+        const pointers = registry.pointers
           .map((pointer) => this.parseDraftPointerRecord(pointer))
           .filter((pointer): pointer is CurrentDraftPointerRecord => pointer !== undefined);
+        return pointers.length === registry.pointers.length ? pointers : undefined;
       }
       const legacy = this.parseDraftPointerRecord(candidate);
-      return legacy === undefined ? [] : [legacy];
+      return legacy === undefined ? undefined : [legacy];
     } catch {
-      return [];
+      return undefined;
     }
+  }
+
+  private readDraftPointers(draftStorage: DraftStorageLike): readonly CurrentDraftPointerRecord[] {
+    return this.readDraftPointersStrict(draftStorage) ?? [];
   }
 
   private writeDraftPointer(draftStorage: DraftStorageLike, reference: DraftReference): boolean {
@@ -1732,12 +1737,16 @@ export class OrderedStateStore {
           sourceKey: reference.key,
           sourceRevision: reference.revision ?? "legacy",
         };
-        const pointers = this.readDraftPointers(draftStorage)
+        const pointers = this.readDraftPointersStrict(draftStorage);
+        if (pointers === undefined) {
+          return false;
+        }
+        const nextPointers = pointers
           .filter((pointer) => !(pointer.draftId === nextPointer.draftId && pointer.sourceKey === nextPointer.sourceKey));
         const serialized = JSON.stringify({
           schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
           schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
-          pointers: [...pointers, nextPointer],
+          pointers: [...nextPointers, nextPointer],
         } satisfies CurrentDraftPointerRegistry);
         draftStorage.setItem(getDraftPointerKey(), serialized);
         return draftStorage.getItem(getDraftPointerKey()) === serialized;
@@ -1747,7 +1756,11 @@ export class OrderedStateStore {
     }
   }
 
-  private clearDraftPointerIfMatches(draftStorage: DraftStorageLike, sourceKey: string): boolean {
+  private clearDraftPointerIfMatches(
+    draftStorage: DraftStorageLike,
+    sourceKey: string,
+    expectedRevision?: string,
+  ): boolean {
     if (draftStorage.listKeys !== undefined) {
       return true;
     }
@@ -1757,7 +1770,17 @@ export class OrderedStateStore {
     }
     try {
       return withAtomicUpdate(() => {
-        const pointers = this.readDraftPointers(draftStorage);
+        const pointers = this.readDraftPointersStrict(draftStorage);
+        if (pointers === undefined) {
+          return false;
+        }
+        const matching = pointers.filter((pointer) => pointer.sourceKey === sourceKey);
+        if (expectedRevision !== undefined
+          && matching.some((pointer) => pointer.sourceRevision !== expectedRevision)) {
+          // A newer owner has republished this source key. The stale cleanup
+          // marker is safe to retire, but the replacement pointer must remain.
+          return true;
+        }
         const remaining = pointers.filter((pointer) => pointer.sourceKey !== sourceKey);
         if (remaining.length !== pointers.length) {
           if (remaining.length === 0) {
@@ -1786,7 +1809,29 @@ export class OrderedStateStore {
         return keys.filter((key) => key.startsWith(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX));
       }
       const pointerKeys = this.readDraftPointers(draftStorage)
-        .map((pointer) => getConsumedDraftKey(pointer.draftId, pointer.sourceKey, pointer.sourceRevision));
+        .flatMap((pointer) => {
+          const keys = [getConsumedDraftKey(pointer.draftId, pointer.sourceKey, pointer.sourceRevision)];
+          // A failed in-place rollback can leave the replacement bytes behind
+          // while the old pointer revision remains. Derive an equivalent marker
+          // from the discoverable source so adoption/discard still suppresses
+          // that replacement revision after a restart.
+          try {
+            const raw = draftStorage.getItem(pointer.sourceKey);
+            if (raw !== null) {
+              const parsed = this.parseDraftReference({
+                key: pointer.sourceKey,
+                value: raw,
+                draftId: pointer.draftId,
+              });
+              if (parsed !== undefined && parsed.draftId === pointer.draftId && parsed.revision !== pointer.sourceRevision) {
+                keys.push(getConsumedDraftKey(pointer.draftId, pointer.sourceKey, parsed.revision));
+              }
+            }
+          } catch {
+            // Keep the pointer-declared marker when the source cannot be read.
+          }
+          return keys;
+        });
       return [ownKey, ...pointerKeys].filter((key, index, all) => all.indexOf(key) === index);
     } catch {
       return [ownKey];
