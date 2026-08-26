@@ -310,7 +310,8 @@ test("does not let a tab discard another tab's orphaned recovery draft", () => {
   assert.deepEqual(secondTab.read(), { ok: true, value: undefined });
   assert.deepEqual(secondTab.unsaved(), state(0, "keep this draft"));
   secondTab.discardUnsavedDraft();
-  assert.equal(storage.draftValues.size, 1);
+  assert.equal(storage.draftValues.size, 2);
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), true);
 });
 
 test("durable recovery restores its original concurrency baseline", async () => {
@@ -325,7 +326,6 @@ test("durable recovery restores its original concurrency baseline", async () => 
 
   const otherTab = new OrderedStateStore(storage);
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
-  otherTab.discardUnsavedDraft();
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
 
   const restored = new OrderedStateStore(storage, clock);
@@ -350,6 +350,7 @@ test("consumes a foreign source after an edited direct replacement save", async 
   const recovered = new OrderedStateStore(storage);
   assert.deepEqual(recovered.read(), { ok: true, value: state(1) });
   assert.deepEqual(recovered.unsaved(), state(1, "recovered draft"));
+  assert.deepEqual(recovered.adoptUnsavedDraft(), { ok: true, value: state(1, "recovered draft") });
   assert.deepEqual(await recovered.saveImmediate(state(1, "edited recovered draft")), {
     ok: true,
     value: { state: state(1, "edited recovered draft") },
@@ -474,13 +475,12 @@ test("uses the recovery record baseline when another tab already applied the not
     value: { state: state(1, "canonical note") },
   });
 
+  const otherTab = new OrderedStateStore(storage);
+  assert.deepEqual(otherTab.read(), { ok: true, value: state(1, "canonical note") });
+
   const writer = new OrderedStateStore(storage);
   assert.deepEqual(writer.read(), { ok: true, value: state(1, "canonical note") });
   writer.scheduleNoteSave(state(1));
-
-  const otherTab = new OrderedStateStore(storage);
-  assert.deepEqual(otherTab.read(), { ok: true, value: state(1, "canonical note") });
-  otherTab.discardUnsavedDraft();
   assert.deepEqual(await otherTab.saveImmediate(state(2)), {
     ok: true,
     value: { state: state(2) },
@@ -540,7 +540,6 @@ test("allows an explicit rebase after a recovered draft conflicts", async () => 
 
   const otherTab = new OrderedStateStore(storage);
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
-  otherTab.discardUnsavedDraft();
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
 
   storage.emitInactive();
@@ -571,7 +570,6 @@ test("preserves a live foreign recovery draft during rebase", async () => {
 
   const otherTab = new OrderedStateStore(storage);
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
-  otherTab.discardUnsavedDraft();
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
 
   const foreignKey = [...storage.draftValues.keys()][0];
@@ -633,7 +631,6 @@ test("does not consume a foreign draft that changed during ownership transfer", 
   writer.scheduleNoteSave(state(1, "live draft"));
   const otherTab = new OrderedStateStore(storage);
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
-  otherTab.discardUnsavedDraft();
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
 
   const foreignKey = [...storage.draftValues.keys()][0];
@@ -666,7 +663,6 @@ test("reclaims consumed source records after an explicit inactive lifecycle", as
   writer.scheduleNoteSave(state(1, "reclaim me"));
   const otherTab = new OrderedStateStore(storage);
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
-  otherTab.discardUnsavedDraft();
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
 
   const recovered = new OrderedStateStore(storage);
@@ -695,7 +691,6 @@ test("rotates a tombstoned source before owner reactivation", async () => {
   writer.scheduleNoteSave(state(1, "rotate me"));
   const otherTab = new OrderedStateStore(storage);
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
-  otherTab.discardUnsavedDraft();
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
   const sourceKey = [...storage.draftValues.keys()][0];
 
@@ -771,7 +766,6 @@ test("does not tombstone a later foreign revision that reuses the same state", a
   writer.scheduleNoteSave(state(1, "same state revision"));
   const otherTab = new OrderedStateStore(storage);
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
-  otherTab.discardUnsavedDraft();
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
 
   const foreignKey = [...storage.draftValues.keys()][0];
@@ -799,7 +793,6 @@ test("keeps the old baseline when rebasing cannot persist the replacement draft"
   writer.scheduleNoteSave(state(1, "draft with old baseline"));
   const otherTab = new OrderedStateStore(storage);
   assert.deepEqual(otherTab.read(), { ok: true, value: state(1) });
-  otherTab.discardUnsavedDraft();
   assert.deepEqual(await otherTab.saveImmediate(state(2)), { ok: true, value: { state: state(2) } });
 
   const recovered = new OrderedStateStore(storage);
@@ -1109,6 +1102,7 @@ test("retains a foreign recovery reference when post-commit tombstoning fails", 
   const recovered = new OrderedStateStore(storage);
   assert.deepEqual(recovered.read(), { ok: true, value: state(1) });
   assert.deepEqual(recovered.unsaved(), state(1, "foreign recovery"));
+  assert.deepEqual(recovered.adoptUnsavedDraft(), { ok: true, value: state(1, "foreign recovery") });
 
   storage.failTombstoneSet = new Error("tombstone unavailable");
   assert.deepEqual(await recovered.saveImmediate(state(1, "edited recovery")), {
@@ -1141,6 +1135,7 @@ test("retains a retry when a foreign source rotates before tombstoning", async (
   const recovered = new OrderedStateStore(storage);
   assert.deepEqual(recovered.read(), { ok: true, value: state(1) });
   assert.deepEqual(recovered.unsaved(), state(1, "rotated recovery"));
+  assert.deepEqual(recovered.adoptUnsavedDraft(), { ok: true, value: state(1, "rotated recovery") });
 
   const sourceKey = [...storage.draftValues.keys()]
     .find((key) => storage.draftValues.get(key)?.includes("rotated recovery"));
@@ -1403,6 +1398,67 @@ test("does not persist an unreadable canonical baseline into a recovery draft", 
   const restored = new OrderedStateStore(storage);
   assert.deepEqual(restored.read(), { ok: false, error: "LOCAL_STATE_UNREADABLE" });
   assert.deepEqual(restored.unsaved(), edited);
+});
+
+test("does not implicitly adopt a draft whose canonical baseline is unknown", async () => {
+  const storage = new FakeStorage();
+  const originalBase = state(1, "keep note");
+  const original: PrivateState = {
+    ...originalBase,
+    items: [
+      ...originalBase.items,
+      {
+        itemId: secondItemId,
+        status: "have",
+        quantityOwned: 1,
+        quantityOrdered: 0,
+        note: "delete note",
+      },
+    ],
+  };
+  const draft: PrivateState = {
+    ...original,
+    items: [original.items[0]],
+  };
+  const changedCanonical: PrivateState = {
+    ...original,
+    items: original.items.map((item, index) => index === 0
+      ? { ...item, quantityOwned: 2 }
+      : item),
+  };
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(original), { ok: true, value: { state: original } });
+
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: original });
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, "{malformed");
+  assert.deepEqual(writer.read(), { ok: false, error: "LOCAL_STATE_UNREADABLE" });
+  assert.deepEqual(writer.scheduleNoteSave(draft), { ok: true, value: undefined });
+  const foreignDraftRaw = [...storage.draftValues.values()].find((raw) => {
+    try {
+      const parsed = JSON.parse(raw) as { state?: { items?: unknown[] } };
+      return Array.isArray(parsed.state?.items) && parsed.state.items.length === 1;
+    } catch {
+      return false;
+    }
+  });
+  assert.equal(typeof foreignDraftRaw, "string");
+
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(changedCanonical));
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: changedCanonical });
+  assert.deepEqual(recovered.unsaved(), draft);
+  const detectsAdoption = (recovered as unknown as {
+    isRecoveredDraftReplacement: (submitted: PrivateState) => boolean;
+  }).isRecoveredDraftReplacement(changedCanonical);
+  assert.equal(detectsAdoption, false);
+  assert.deepEqual(await recovered.saveImmediate(changedCanonical), {
+    ok: false,
+    error: "STORAGE_COMMIT_UNCERTAIN",
+  });
+  assert.deepEqual(recovered.unsaved(), changedCanonical);
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), false);
+  assert.equal([...storage.draftValues.values()].includes(foreignDraftRaw as string), true);
 });
 
 test("never overwrites an unreadable existing value", async () => {

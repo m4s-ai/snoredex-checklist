@@ -74,6 +74,7 @@ interface PendingNote {
   readonly draftToken: number;
   readonly draftStorageReference: DraftReference | undefined;
   readonly supersededDraftReference: DraftReference | undefined;
+  readonly recoveryDraftReference: DraftReference | undefined;
 }
 
 interface SaveOperation {
@@ -82,6 +83,7 @@ interface SaveOperation {
   readonly draftToken: number;
   readonly draftStorageReference: DraftReference | undefined;
   readonly supersededDraftReference: DraftReference | undefined;
+  readonly recoveryDraftReference: DraftReference | undefined;
 }
 
 interface PendingNoteDraftRecord {
@@ -340,10 +342,16 @@ export class OrderedStateStore {
   }
 
   public unsaved(): PrivateState | undefined {
-    if (this.recoveredForeignReference !== undefined) {
-      this.recoveredDraftPresented = true;
-    }
     return this.unsavedDraft === undefined ? undefined : cloneState(this.unsavedDraft);
+  }
+
+  /** Explicitly accept the currently presented recovery draft for the next save. */
+  public adoptUnsavedDraft(): PersistenceResult<PrivateState | undefined> {
+    if (this.unsavedDraft === undefined) {
+      return success(undefined);
+    }
+    this.recoveredDraftPresented = true;
+    return success(cloneState(this.unsavedDraft));
   }
 
   /**
@@ -393,10 +401,10 @@ export class OrderedStateStore {
     // reading unsaved() still demonstrates adoption only when every recovered
     // note change, including deletions, is represented in the submitted state.
     const baseline = this.recoveredDraftBaseline();
-    if (baseline === null) {
+    if (baseline === null || baseline === undefined) {
       return false;
     }
-    const baselineItems = new Map(baseline?.items.map((item) => [item.itemId, item]));
+    const baselineItems = new Map(baseline.items.map((item) => [item.itemId, item]));
     const recoveredItems = new Map(this.unsavedDraft.items.map((item) => [item.itemId, item]));
     const submittedItems = new Map(state.items.map((item) => [item.itemId, item]));
     const itemIds = new Set([...baselineItems.keys(), ...recoveredItems.keys()]);
@@ -482,11 +490,14 @@ export class OrderedStateStore {
     this.nextDraftToken += 1;
     this.latestDraftToken = this.nextDraftToken;
     const reference = this.activeDraftOwned ? this.activeDraftReference : undefined;
+    const foreignReference = this.recoveredForeignReference
+      ?? (this.supersededDraftReference?.draftId === this.draftId ? undefined : this.supersededDraftReference);
+    const foreignRetired = foreignReference === undefined || this.consumeSupersededDraft(foreignReference);
     this.activeDraftReference = undefined;
     this.activeDraftOwned = false;
     this.recoveredForeignReference = undefined;
     this.recoveredDraftPresented = false;
-    this.supersededDraftReference = undefined;
+    this.supersededDraftReference = foreignRetired ? undefined : foreignReference;
     this.latestDraftRevision = undefined;
     this.unsavedDraft = undefined;
     this.clearPendingNoteDraft(reference);
@@ -498,6 +509,7 @@ export class OrderedStateStore {
     const recoveredDraft = this.isRecoveredDraftReplacement(state)
       ? this.recoveredForeignReference
       : undefined;
+    const recoveryDraftReference = this.recoveredForeignReference;
     this.cancelPendingNote(previousDraft !== undefined);
     const draftToken = this.rememberDraft(state);
     const persistedReference = this.persistPendingNoteDraft(state);
@@ -513,6 +525,7 @@ export class OrderedStateStore {
       draftToken,
       draftStorageReference: persistedReference ?? previousDraft,
       supersededDraftReference: this.supersededDraftReference ?? recoveredDraft,
+      recoveryDraftReference,
     });
   }
 
@@ -523,6 +536,7 @@ export class OrderedStateStore {
     const recoveredDraft = this.isRecoveredDraftReplacement(state)
       ? this.recoveredForeignReference
       : undefined;
+    const recoveryDraftReference = this.recoveredForeignReference;
     const draftToken = this.rememberDraft(state);
     const supersededDraftReference = this.supersededDraftReference ?? recoveredDraft;
     const draftStorageReference = this.persistPendingNoteDraft(state) ?? previousDraft;
@@ -541,6 +555,7 @@ export class OrderedStateStore {
       draftToken,
       draftStorageReference,
       supersededDraftReference,
+      recoveryDraftReference,
     };
     this.startDraftHeartbeat();
     return this.draftPersistenceError === undefined
@@ -569,6 +584,7 @@ export class OrderedStateStore {
       draftToken: pending.draftToken,
       draftStorageReference: pending.draftStorageReference,
       supersededDraftReference: pending.supersededDraftReference,
+      recoveryDraftReference: pending.recoveryDraftReference,
     });
   }
 
@@ -1477,10 +1493,17 @@ export class OrderedStateStore {
           const foreignRetired = foreignReference === undefined
             || this.consumeSupersededDraft(foreignReference);
           if (ownedRetired && foreignRetired) {
-            this.unsavedDraft = undefined;
-            this.recoveredForeignReference = undefined;
-            this.recoveredDraftPresented = false;
-            this.supersededDraftReference = undefined;
+            const retainRecovery = operation.recoveryDraftReference !== undefined
+              && (foreignReference === undefined || foreignReference.key !== operation.recoveryDraftReference.key);
+            if (retainRecovery) {
+              this.retainForeignRecovery(operation.recoveryDraftReference);
+              this.supersededDraftReference = operation.recoveryDraftReference;
+            } else {
+              this.unsavedDraft = undefined;
+              this.recoveredForeignReference = undefined;
+              this.recoveredDraftPresented = false;
+              this.supersededDraftReference = undefined;
+            }
           } else {
             if (!ownedRetired && ownedReferences.length > 0) {
               const retainedOwned = ownedReferences.find((reference) => {
@@ -1501,6 +1524,11 @@ export class OrderedStateStore {
             if (!foreignRetired && foreignReference !== undefined) {
               this.retainForeignRecovery(foreignReference);
               this.supersededDraftReference = foreignReference;
+            }
+            if (foreignRetired && operation.recoveryDraftReference !== undefined
+              && (foreignReference === undefined || foreignReference.key !== operation.recoveryDraftReference.key)) {
+              this.retainForeignRecovery(operation.recoveryDraftReference);
+              this.supersededDraftReference = operation.recoveryDraftReference;
             }
             this.recoveredDraftPresented = false;
           }
