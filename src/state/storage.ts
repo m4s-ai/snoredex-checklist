@@ -814,6 +814,7 @@ export class OrderedStateStore {
         this.activeDraftOwned = true;
         return reference;
       }
+      let previousInPlaceValue: string | undefined;
       try {
         draftStorage.setItem(key, value);
       } catch (cause) {
@@ -829,7 +830,12 @@ export class OrderedStateStore {
         ) {
           throw cause;
         }
+        const previousValue = draftStorage.getItem(previousOwnedReference.key);
+        if (previousValue === null) {
+          throw cause;
+        }
         key = previousOwnedReference.key;
+        previousInPlaceValue = previousValue;
         draftStorage.setItem(key, value);
       }
       let persistedValue = value;
@@ -876,6 +882,16 @@ export class OrderedStateStore {
       const reference = { key, value: persistedValue, draftId: this.draftId, revision: draftRevision };
       if (!this.writeDraftPointer(draftStorage, reference)) {
         this.draftPersistenceError = "STORAGE_WRITE_FAILED";
+        if (previousInPlaceValue !== undefined) {
+          try {
+            draftStorage.setItem(previousOwnedReference?.key ?? key, previousInPlaceValue);
+            if (draftStorage.getItem(previousOwnedReference?.key ?? key) === previousInPlaceValue) {
+              return undefined;
+            }
+          } catch {
+            // Fall through to best-effort cleanup when restoration is unavailable.
+          }
+        }
         try {
           if (draftStorage.getItem(key) === persistedValue) {
             draftStorage.removeItem(key);
@@ -1272,8 +1288,7 @@ export class OrderedStateStore {
       }
       const currentValue = draftStorage?.getItem(expectedReference.key);
       if (currentValue === null) {
-        this.clearDraftPointerIfMatches(draftStorage, expectedReference.key);
-        return true;
+        return this.clearDraftPointerIfMatches(draftStorage, expectedReference.key);
       }
       const exactMatch = currentValue === expectedReference.value;
       const refreshedOwnedMatch = allowRefreshedOwnedReference
@@ -1283,7 +1298,9 @@ export class OrderedStateStore {
         && currentValue === this.activeDraftReference.value;
       if (exactMatch || refreshedOwnedMatch) {
         draftStorage.removeItem(expectedReference.key);
-        this.clearDraftPointerIfMatches(draftStorage, expectedReference.key);
+        if (!this.clearDraftPointerIfMatches(draftStorage, expectedReference.key)) {
+          return false;
+        }
         if (this.activeDraftReference?.key === expectedReference.key
           && (this.activeDraftReference.value === expectedReference.value || refreshedOwnedMatch)) {
           this.activeDraftReference = undefined;
@@ -1561,8 +1578,16 @@ export class OrderedStateStore {
         // Owners rotate to a new physical key whenever this tombstone exists,
         // so deleting this unchanged key cannot remove a later owner revision.
         draftStorage.removeItem(tombstone.sourceKey);
+        if (!this.clearDraftPointerIfMatches(draftStorage, tombstone.sourceKey)) {
+          try {
+            draftStorage.setItem(tombstone.sourceKey, sourceRaw);
+          } catch {
+            // If restoration is unavailable, the fail-closed path below still
+            // leaves the tombstone for a future recovery attempt.
+          }
+          continue;
+        }
         this.removeTombstoneIfUnchanged(draftStorage, tombstoneKey, tombstoneRaw);
-        this.clearDraftPointerIfMatches(draftStorage, tombstone.sourceKey);
       } catch {
         // Recovery cleanup is best effort and must never block loading state.
       }
@@ -1715,16 +1740,16 @@ export class OrderedStateStore {
     }
   }
 
-  private clearDraftPointerIfMatches(draftStorage: DraftStorageLike, sourceKey: string): void {
+  private clearDraftPointerIfMatches(draftStorage: DraftStorageLike, sourceKey: string): boolean {
     if (draftStorage.listKeys !== undefined) {
-      return;
+      return true;
     }
     const withAtomicUpdate = draftStorage.withAtomicUpdate;
     if (withAtomicUpdate === undefined) {
-      return;
+      return false;
     }
     try {
-      withAtomicUpdate(() => {
+      return withAtomicUpdate(() => {
         const pointers = this.readDraftPointers(draftStorage);
         const remaining = pointers.filter((pointer) => pointer.sourceKey !== sourceKey);
         if (remaining.length !== pointers.length) {
@@ -1742,6 +1767,7 @@ export class OrderedStateStore {
       });
     } catch {
       // Keep the pointer registry intact; a later recovery/read can retry.
+      return false;
     }
   }
 

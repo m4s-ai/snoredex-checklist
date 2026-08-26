@@ -93,7 +93,10 @@ class FakeStorage implements StorageLike {
       this.draftValues.delete(key);
     },
     listKeys: (prefix) => [...this.draftValues.keys()].filter((key) => key.startsWith(prefix)),
-    withAtomicUpdate: (callback) => callback(),
+    withAtomicUpdate: (callback) => {
+      if (this.failAtomicUpdate !== undefined) throw this.failAtomicUpdate;
+      return callback();
+    },
   };
   public withLock: StorageLike["withLock"] = undefined;
   public failGet = false;
@@ -101,6 +104,7 @@ class FakeStorage implements StorageLike {
   public failDraftSet: unknown = undefined;
   public failTombstoneSet: unknown = undefined;
   public failDraftRemove: unknown = undefined;
+  public failAtomicUpdate: unknown = undefined;
   public failRotatedDraftSet: unknown = undefined;
   public beforeRotatedDraftQuota: ((key: string) => void) | undefined;
   public afterDraftGetItem: ((key: string, value: string | null) => void) | undefined;
@@ -1367,6 +1371,57 @@ test("fails closed without an atomic pointer registry primitive", () => {
     error: "STORAGE_WRITE_FAILED",
   });
   assert.equal([...storage.draftValues.values()].some((raw) => raw.includes("atomic primitive unavailable")), false);
+});
+
+test("restores the previous draft when fallback pointer publication fails", () => {
+  const storage = new FakeStorage();
+  const fullDraftStorage = storage.draftStorage;
+  storage.draftStorage = {
+    getItem: fullDraftStorage.getItem,
+    setItem: fullDraftStorage.setItem,
+    removeItem: fullDraftStorage.removeItem,
+    withAtomicUpdate: fullDraftStorage.withAtomicUpdate,
+  };
+  const store = new OrderedStateStore(storage);
+  assert.equal(store.scheduleNoteSave(state(0, "old durable draft")).ok, true);
+  const oldEntry = [...storage.draftValues.entries()]
+    .find(([key, value]) => key !== `${PRIVATE_STATE_NOTE_DRAFT_KEY}:current`
+      && value.includes("old durable draft"));
+  assert.equal(typeof oldEntry, "object");
+
+  storage.failRotatedDraftSet = new Error("quota");
+  storage.failAtomicUpdate = new Error("atomic registry unavailable");
+  assert.deepEqual(store.scheduleNoteSave(state(0, "new edit")), {
+    ok: false,
+    error: "STORAGE_WRITE_FAILED",
+  });
+  storage.failRotatedDraftSet = undefined;
+  storage.failAtomicUpdate = undefined;
+  assert.equal(storage.draftValues.get(oldEntry?.[0] as string), oldEntry?.[1]);
+  assert.equal([...storage.draftValues.values()].some((raw) => raw.includes("new edit")), false);
+});
+
+test("retains pointer cleanup for a retry after an atomic removal failure", () => {
+  const storage = new FakeStorage();
+  const fullDraftStorage = storage.draftStorage;
+  storage.draftStorage = {
+    getItem: fullDraftStorage.getItem,
+    setItem: fullDraftStorage.setItem,
+    removeItem: fullDraftStorage.removeItem,
+    withAtomicUpdate: fullDraftStorage.withAtomicUpdate,
+  };
+  const store = new OrderedStateStore(storage);
+  assert.equal(store.scheduleNoteSave(state(0, "cleanup retry")).ok, true);
+  const pointerKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:current`;
+  const pointerBefore = storage.draftValues.get(pointerKey);
+  assert.equal(typeof pointerBefore, "string");
+
+  storage.failAtomicUpdate = new Error("atomic registry unavailable");
+  store.discardUnsavedDraft();
+  assert.equal(storage.draftValues.get(pointerKey), pointerBefore);
+  storage.failAtomicUpdate = undefined;
+  store.discardUnsavedDraft();
+  assert.equal(storage.draftValues.has(pointerKey), false);
 });
 
 test("probes a pointed foreign owner's tombstone without listKeys", () => {
