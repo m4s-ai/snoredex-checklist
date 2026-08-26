@@ -972,7 +972,7 @@ export class OrderedStateStore {
     try {
       keys = draftStorage.listKeys?.(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX);
       if (keys === undefined) {
-        return false;
+        return this.clearPendingNoteDraft(expectedReference, true);
       }
       for (const key of keys) {
         if (key.startsWith(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX)) {
@@ -982,12 +982,12 @@ export class OrderedStateStore {
         if (raw === null) {
           continue;
         }
-        const parsed = this.parseDraftReference({
+      const parsed = this.parseDraftReference({
           key,
           value: raw,
           draftId: this.draftId,
         });
-        if (parsed !== undefined && parsed.revision === expectedReference.revision) {
+        if (parsed !== undefined) {
           references.push(parsed);
         }
       }
@@ -1101,9 +1101,11 @@ export class OrderedStateStore {
         candidate !== undefined
         && candidate.ownerState !== "consumed"
         && !this.isDraftTombstoned(candidate));
-    const selected = candidates.find((candidate) => candidate.draftId === this.draftId)
-      ?? candidates.sort((left, right) => right.updatedAt - left.updatedAt
-        || right.revision.localeCompare(left.revision))[0];
+    const sortByNewest = (left: PendingNoteDraftRecord, right: PendingNoteDraftRecord): number =>
+      right.updatedAt - left.updatedAt || right.revision.localeCompare(left.revision);
+    const selected = candidates.filter((candidate) => candidate.draftId === this.draftId)
+      .sort(sortByNewest)[0]
+      ?? candidates.sort(sortByNewest)[0];
     if (selected === undefined) {
       if (this.recoveredForeignReference !== undefined) {
         this.activeDraftReference = undefined;

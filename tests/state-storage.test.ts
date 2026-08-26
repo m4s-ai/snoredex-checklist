@@ -907,6 +907,44 @@ test("retains an owned recovery reference when post-commit cleanup fails", async
   assert.equal(storage.draftValues.size, 0);
 });
 
+test("selects the newest owned draft revision before exact cleanup", async () => {
+  const storage = new FakeStorage();
+  const store = new OrderedStateStore(storage);
+  storage.failDraftRemove = new Error("cleanup unavailable");
+  assert.deepEqual(await store.saveImmediate(state(1, "older edit")), {
+    ok: true,
+    value: { state: state(1, "older edit") },
+  });
+  assert.deepEqual(await store.saveImmediate(state(1, "newer edit")), {
+    ok: true,
+    value: { state: state(1, "newer edit") },
+  });
+  assert.equal(storage.draftValues.size, 2);
+  storage.failDraftRemove = undefined;
+  assert.deepEqual(store.read(), { ok: true, value: state(1, "newer edit") });
+  assert.equal(store.unsaved(), undefined);
+  assert.equal(storage.draftValues.size, 0);
+});
+
+test("uses the known owned draft key when draft enumeration is unavailable", async () => {
+  const storage = new FakeStorage();
+  const fullDraftStorage = storage.draftStorage;
+  storage.draftStorage = {
+    getItem: fullDraftStorage.getItem,
+    setItem: fullDraftStorage.setItem,
+    removeItem: fullDraftStorage.removeItem,
+  };
+  const store = new OrderedStateStore(storage);
+  storage.failDraftRemove = new Error("cleanup unavailable");
+  assert.deepEqual(await store.saveImmediate(state(1, "known key")), {
+    ok: true,
+    value: { state: state(1, "known key") },
+  });
+  storage.failDraftRemove = undefined;
+  assert.deepEqual(store.read(), { ok: true, value: state(1, "known key") });
+  assert.equal(storage.draftValues.size, 0);
+});
+
 test("retains a foreign recovery reference when post-commit tombstoning fails", async () => {
   const storage = new FakeStorage();
   const seed = new OrderedStateStore(storage);
