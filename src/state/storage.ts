@@ -702,7 +702,33 @@ export class OrderedStateStore {
     };
     try {
       const value = JSON.stringify(record);
-      if (sourceIsTombstoned && previousOwnedReference !== undefined && ownerState === "consumed") {
+      let consumedSourceDetected = sourceIsTombstoned
+        && previousOwnedReference !== undefined
+        && ownerState === "consumed";
+      if (!consumedSourceDetected
+        && previousOwnedReference !== undefined
+        && ownerState === "active"
+        && this.isTombstonedDraftKey(previousOwnedReference.key, this.draftId)) {
+        // Re-read the source after the initial snapshot. Another tab may have
+        // consumed it between the first check and publication. Only treat a
+        // matching revision/state as a heartbeat transfer; a new edit stays
+        // active and must remain recoverable.
+        try {
+          const raw = draftStorage.getItem(previousOwnedReference.key);
+          const current = raw === null
+            ? this.parseDraftReference(previousOwnedReference)
+            : this.parseDraftReference({ ...previousOwnedReference, value: raw });
+          const validatedCurrent = current === undefined ? undefined : validatePrivateState(current.state);
+          consumedSourceDetected = current !== undefined
+            && current.revision === draftRevision
+            && validatedCurrent?.ok === true
+            && sameState(validatedCurrent.value, state);
+        } catch {
+          // Keep the active path when the race cannot be verified; the caller
+          // retains its in-memory draft and can retry on the next heartbeat.
+        }
+      }
+      if (consumedSourceDetected && previousOwnedReference !== undefined) {
         const rotatedKey = createRotatedDraftStorageKey(this.draftId);
         const rotatedValue = JSON.stringify({ ...record, ownerState: "consumed" } satisfies PendingNoteDraftRecord);
         // A heartbeat must not publish a rotated consumed copy without its

@@ -67,7 +67,11 @@ class FakeStorage implements StorageLike {
     for (const handler of this.activeHandlers) handler();
   }
   public draftStorage: DraftStorageLike = {
-    getItem: (key) => this.draftValues.get(key) ?? null,
+    getItem: (key) => {
+      const value = this.draftValues.get(key) ?? null;
+      this.afterDraftGetItem?.(key, value);
+      return value;
+    },
     setItem: (key, value) => {
       if (this.failDraftSet !== undefined) throw this.failDraftSet;
       if (this.failTombstoneSet !== undefined && key.includes(":tombstone:")) {
@@ -97,6 +101,7 @@ class FakeStorage implements StorageLike {
   public failDraftRemove: unknown = undefined;
   public failRotatedDraftSet: unknown = undefined;
   public beforeRotatedDraftQuota: ((key: string) => void) | undefined;
+  public afterDraftGetItem: ((key: string, value: string | null) => void) | undefined;
   public afterRotatedTombstoneWrite: ((key: string, value: string) => void) | undefined;
   public rewriteOnRead: string | undefined;
   public rewriteAfterWrite: string | undefined;
@@ -1074,6 +1079,47 @@ test("keeps a new edit active after its previous draft is tombstoned", async () 
   const recovered = new OrderedStateStore(storage);
   assert.deepEqual(recovered.read(), { ok: true, value: state(1, "original draft") });
   assert.deepEqual(recovered.unsaved(), edited);
+});
+
+test("rechecks a concurrent tombstone before heartbeat rotation", async () => {
+  const storage = new FakeStorage();
+  const clock = new FakeClock();
+  const store = new OrderedStateStore(storage, clock);
+  storage.failDraftRemove = new Error("retain source for concurrent consumption");
+  assert.deepEqual(await store.saveImmediate(state(1, "heartbeat race")), {
+    ok: true,
+    value: { state: state(1, "heartbeat race") },
+  });
+  storage.failDraftRemove = undefined;
+  const sourceKey = [...storage.draftValues.keys()][0];
+  const sourceRecord = JSON.parse(storage.draftValues.get(sourceKey) as string) as Record<string, unknown>;
+  const sourceTombstoneKey = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:tombstone:${encodeURIComponent(String(sourceRecord.draftId))}:${encodeURIComponent(sourceKey)}:${encodeURIComponent(String(sourceRecord.revision))}`;
+  let injected = false;
+  storage.afterDraftGetItem = (key, value) => {
+    if (injected || key !== sourceKey || value === null) {
+      return;
+    }
+    injected = true;
+    storage.draftValues.set(sourceTombstoneKey, JSON.stringify({
+      schema: "snoredex-checklist.pending-note-tombstone",
+      schemaVersion: 1,
+      sourceKey,
+      sourceDraftId: sourceRecord.draftId,
+      sourceRevision: sourceRecord.revision,
+      consumedAt: Date.now(),
+    }));
+  };
+
+  clock.advance(5_000);
+  storage.afterDraftGetItem = undefined;
+  const rotatedKey = [...storage.draftValues.keys()]
+    .find((key) => key.includes(":rotated:") && !key.includes(":tombstone:"));
+  assert.equal(typeof rotatedKey, "string");
+  const rotated = JSON.parse(storage.draftValues.get(rotatedKey as string) as string) as Record<string, unknown>;
+  assert.equal(rotated.ownerState, "consumed");
+  assert.equal([...storage.draftValues.entries()]
+    .filter(([key]) => key.includes(":tombstone:"))
+    .some(([, value]) => (JSON.parse(value) as Record<string, unknown>).sourceKey === rotatedKey), true);
 });
 
 test("retains an owned recovery reference when post-commit cleanup fails", async () => {
