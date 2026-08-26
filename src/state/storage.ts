@@ -346,6 +346,42 @@ export class OrderedStateStore {
     return this.unsavedDraft === undefined ? undefined : cloneState(this.unsavedDraft);
   }
 
+  /**
+   * Return the canonical state observed when the recovered draft was written.
+   *
+   * The current canonical envelope may have changed in another tab since the
+   * draft was created.  It is therefore not a safe baseline for deciding
+   * whether a direct save adopted a recovered note change.
+   */
+  private recoveredDraftBaseline(): PrivateState | undefined | null {
+    const reference = this.recoveredForeignReference;
+    if (reference === undefined) {
+      return null;
+    }
+    try {
+      const record = JSON.parse(reference.value) as Partial<PendingNoteDraftRecord>;
+      if (record.hasObservedRaw === false) {
+        return undefined;
+      }
+      if (record.hasObservedRaw !== true) {
+        return null;
+      }
+      if (record.observedRaw === null) {
+        return undefined;
+      }
+      if (typeof record.observedRaw !== "string") {
+        return null;
+      }
+      const candidate = JSON.parse(record.observedRaw) as unknown;
+      const validated = validatePrivateState(candidate);
+      return validated.ok ? validated.value : null;
+    } catch {
+      // A malformed recovery baseline must never cause us to consume a
+      // foreign draft implicitly.
+      return null;
+    }
+  }
+
   private isRecoveredDraftReplacement(state: PrivateState): boolean {
     if (this.recoveredForeignReference === undefined || this.unsavedDraft === undefined) {
       return false;
@@ -356,7 +392,11 @@ export class OrderedStateStore {
     // A direct caller that submits an edited recovered draft without first
     // reading unsaved() still demonstrates adoption only when every recovered
     // note change, including deletions, is represented in the submitted state.
-    const baselineItems = new Map(this.lastKnownGood?.items.map((item) => [item.itemId, item]));
+    const baseline = this.recoveredDraftBaseline();
+    if (baseline === null) {
+      return false;
+    }
+    const baselineItems = new Map(baseline?.items.map((item) => [item.itemId, item]));
     const recoveredItems = new Map(this.unsavedDraft.items.map((item) => [item.itemId, item]));
     const submittedItems = new Map(state.items.map((item) => [item.itemId, item]));
     const itemIds = new Set([...baselineItems.keys(), ...recoveredItems.keys()]);
@@ -568,6 +608,8 @@ export class OrderedStateStore {
     const draftRevision = revision ?? createDraftRevision(this.draftId);
     let ownerState: PendingNoteDraftRecord["ownerState"] = "active";
     const previousOwnedReference = this.activeDraftOwned ? this.activeDraftReference : undefined;
+    const sourceIsTombstoned = previousOwnedReference !== undefined
+      && this.isTombstonedDraftKey(previousOwnedReference.key, this.draftId);
     let key = previousOwnedReference !== undefined
       ? createRotatedDraftStorageKey(this.draftId)
       : getPendingNoteDraftKey(this.draftId);
@@ -580,7 +622,6 @@ export class OrderedStateStore {
             value: raw,
             draftId: this.draftId,
           });
-          const sourceIsTombstoned = this.isTombstonedDraftKey(previousOwnedReference.key, this.draftId);
           if (current !== undefined && (sourceIsTombstoned || current.ownerState === "consumed")) {
             const validatedCurrent = validatePrivateState(current.state);
             if (validatedCurrent.ok && sameState(validatedCurrent.value, state)) {
@@ -605,7 +646,19 @@ export class OrderedStateStore {
     };
     try {
       const value = JSON.stringify(record);
-      draftStorage.setItem(key, value);
+      try {
+        draftStorage.setItem(key, value);
+      } catch (cause) {
+        // A normal active draft can be safely overwritten when a second full
+        // envelope would exceed quota.  Never fall back for a tombstoned
+        // source: that record is concurrently reclaimable and must remain
+        // immutable until the rotated replacement is durable.
+        if (!isQuotaError(cause) || previousOwnedReference === undefined || sourceIsTombstoned) {
+          throw cause;
+        }
+        key = previousOwnedReference.key;
+        draftStorage.setItem(key, value);
+      }
       const reference = { key, value, draftId: this.draftId, revision: draftRevision };
       this.activeDraftReference = reference;
       this.activeDraftOwned = true;

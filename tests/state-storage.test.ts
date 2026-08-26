@@ -69,6 +69,9 @@ class FakeStorage implements StorageLike {
     getItem: (key) => this.draftValues.get(key) ?? null,
     setItem: (key, value) => {
       if (this.failDraftSet !== undefined) throw this.failDraftSet;
+      if (this.failRotatedDraftSet !== undefined && key.includes(":rotated:")) {
+        throw this.failRotatedDraftSet;
+      }
       this.draftWrites += 1;
       this.draftValues.set(key, value);
     },
@@ -81,6 +84,7 @@ class FakeStorage implements StorageLike {
   public failGet = false;
   public failSet: unknown = undefined;
   public failDraftSet: unknown = undefined;
+  public failRotatedDraftSet: unknown = undefined;
   public rewriteOnRead: string | undefined;
   public rewriteAfterWrite: string | undefined;
   public writes = 0;
@@ -418,6 +422,43 @@ test("keeps a recovered source when a read-based edit retains a note deleted by 
   const reloaded = new OrderedStateStore(storage);
   assert.deepEqual(reloaded.read(), { ok: true, value: state(1, "canonical note") });
   assert.deepEqual(reloaded.unsaved(), state(0));
+});
+
+test("uses the recovery record baseline when another tab already applied the note deletion", async () => {
+  const storage = new FakeStorage();
+  const seed = new OrderedStateStore(storage);
+  assert.deepEqual(await seed.saveImmediate(state(1, "canonical note")), {
+    ok: true,
+    value: { state: state(1, "canonical note") },
+  });
+
+  const writer = new OrderedStateStore(storage);
+  assert.deepEqual(writer.read(), { ok: true, value: state(1, "canonical note") });
+  writer.scheduleNoteSave(state(1));
+
+  const otherTab = new OrderedStateStore(storage);
+  assert.deepEqual(otherTab.read(), { ok: true, value: state(1, "canonical note") });
+  otherTab.discardUnsavedDraft();
+  assert.deepEqual(await otherTab.saveImmediate(state(2)), {
+    ok: true,
+    value: { state: state(2) },
+  });
+
+  const recovered = new OrderedStateStore(storage);
+  assert.deepEqual(recovered.read(), { ok: true, value: state(2) });
+  assert.deepEqual(recovered.unsaved(), state(1));
+  // The CAS guard must still reject the stale canonical write; inspect the
+  // adoption decision separately so a changed non-note field cannot erase the
+  // recovery record's original note baseline.
+  const detectsAdoption = (recovered as unknown as {
+    isRecoveredDraftReplacement: (submitted: PrivateState) => boolean;
+  }).isRecoveredDraftReplacement(state(2));
+  assert.equal(detectsAdoption, true);
+  assert.deepEqual(await recovered.saveImmediate(state(2)), {
+    ok: false,
+    error: "STORAGE_COMMIT_UNCERTAIN",
+  });
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":tombstone:")), false);
 });
 
 test("clears an in-memory foreign recovery when its source disappears", async () => {
@@ -813,6 +854,25 @@ test("keeps the previous durable draft when replacing it fails", async () => {
   storage.failDraftSet = undefined;
   assert.deepEqual(await store.flushNote(), { ok: true, value: { state: state(0, "second draft") } });
   assert.equal(storage.draftValues.has(firstDraftKey as string), false);
+});
+
+test("falls back to an in-place active draft overwrite when rotation exceeds quota", async () => {
+  const storage = new FakeStorage();
+  const store = new OrderedStateStore(storage);
+  store.scheduleNoteSave(state(0, "first draft"));
+  const firstDraftKey = [...storage.draftValues.keys()][0];
+  assert.equal(typeof firstDraftKey, "string");
+
+  const quotaError = Object.assign(new Error("quota"), { name: "QuotaExceededError" });
+  storage.failRotatedDraftSet = quotaError;
+  assert.deepEqual(store.scheduleNoteSave(state(0, "second draft")), { ok: true, value: undefined });
+  assert.equal(storage.draftValues.size, 1);
+  assert.equal(storage.draftValues.has(firstDraftKey as string), true);
+  assert.equal([...storage.draftValues.keys()].some((key) => key.includes(":rotated:")), false);
+
+  storage.failRotatedDraftSet = undefined;
+  assert.deepEqual(await store.flushNote(), { ok: true, value: { state: state(0, "second draft") } });
+  assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(0, "second draft") });
 });
 
 test("queued saves keep the newest edit authoritative and page-close flush is explicit", async () => {
