@@ -290,13 +290,13 @@ function renderProgress(catalogue: CatalogueSnapshot, localizationId: string | u
   return section;
 }
 
-function renderItemRow(item: SnapshotItem, inactive = false, ownerLabel?: string): HTMLLIElement {
+function renderItemRow(item: SnapshotItem, inactive = false, ownerLabel?: string, setIdentity?: string): HTMLLIElement {
   const row = text("li", undefined, "item-row") as HTMLLIElement;
   const identity = text("div", undefined, "item-identity");
   identity.append(text("strong", item.cardName ?? "Unnamed item"));
   if (item.localCardName && item.localCardName !== item.cardName) identity.append(text("span", ` · ${item.localCardName}`));
   const set = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
-  if (set) identity.append(text("span", ` · ${set}`));
+  if (set) identity.append(text("span", ` · ${set}${setIdentity ? ` · ${setIdentity}` : ""}`));
   if (ownerLabel) identity.append(text("span", ` · ${ownerLabel}`));
   row.append(identity);
   const cue = item.progressClass === "research"
@@ -388,6 +388,14 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
     const inactive = text("section", undefined, "state-panel");
     inactive.append(text("h2", model.inactiveHeading), text("p", model.inactiveSummary));
     const inactiveList = text("ul", undefined, "item-list");
+    const inactiveSetIdentityCounts = new Map<string, Set<string>>();
+    for (const item of inactiveItems) {
+      const setLabel = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
+      const key = `${item.localizationId}\u0000${setLabel}`;
+      const identities = inactiveSetIdentityCounts.get(key) ?? new Set<string>();
+      identities.add(item.setEditionId ?? item.itemId);
+      inactiveSetIdentityCounts.set(key, identities);
+    }
     for (const item of inactiveItems) {
       const localization = catalogue.localizations.find((candidate) => candidate.localizationId === item.localizationId);
       let ownerLabel = item.localizationId;
@@ -397,7 +405,10 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
         const displayLabel = (localizationLabelCounts.get(key) ?? 0) > 1 ? `${label} · ${localization.localizationId}` : label;
         ownerLabel = `${displayLabel}${localization.locality ? ` (${localization.locality})` : ""}`;
       }
-      inactiveList.append(renderItemRow(item, true, ownerLabel));
+      const setLabel = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
+      const setKey = `${item.localizationId}\u0000${setLabel}`;
+      const setIdentity = (inactiveSetIdentityCounts.get(setKey)?.size ?? 0) > 1 ? item.setEditionId : undefined;
+      inactiveList.append(renderItemRow(item, true, ownerLabel, setIdentity));
     }
     inactive.append(inactiveList);
     content.push(inactive);
