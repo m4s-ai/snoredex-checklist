@@ -87,6 +87,7 @@ input, select { min-height: 44px; width: 100%; border: 1px solid var(--control);
 textarea { width: 100%; min-height: 5rem; resize: vertical; border: 1px solid var(--control); border-radius: 12px; padding: .55rem .7rem; background: var(--surface); color: var(--ink); font: inherit; }
 .state-feedback { min-height: 1.4em; color: var(--muted); font-size: .85rem; }
 .state-retry { justify-self: start; background: var(--surface); color: var(--ink); }
+.recovery-actions { display: flex; flex-wrap: wrap; gap: .55rem; }
 .item-details { margin-top: .65rem; }
 .item-details > summary { color: var(--primary); cursor: pointer; font-weight: 600; }
 .item-detail-list { display: grid; grid-template-columns: minmax(8rem, max-content) minmax(0, 1fr); gap: .25rem .8rem; margin: .65rem 0 0; font-size: .9rem; overflow-wrap: anywhere; }

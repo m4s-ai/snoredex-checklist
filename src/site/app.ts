@@ -594,6 +594,54 @@ function renderCollectionControls(item: SnapshotItem, controller: CollectionStat
   return wrapper;
 }
 
+function statusKey(state: PrivateStateRead): string {
+  return [...state.statuses.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([itemId, status]) => `${itemId}:${status}`).join("|");
+}
+
+function renderRecoveryPanel(controller: CollectionStateController): HTMLElement | undefined {
+  const recovery = controller.recovery;
+  if (recovery === undefined) return undefined;
+  const panel = text("section", undefined, "state-panel recovery-panel");
+  const feedback = text("p", undefined, "state-feedback");
+  feedback.setAttribute("role", "status");
+  feedback.setAttribute("aria-live", "polite");
+  const actions = text("div", undefined, "recovery-actions");
+  const adopt = text("button", "Adopt recovered changes") as HTMLButtonElement;
+  adopt.type = "button";
+  const discard = text("button", "Discard recovered changes") as HTMLButtonElement;
+  discard.type = "button";
+  const run = (action: () => Promise<CollectionEditResult>): void => {
+    adopt.disabled = true;
+    discard.disabled = true;
+    feedback.textContent = "Saving…";
+    void action().then((result) => {
+      if (result.ok) feedback.textContent = "Recovered changes saved.";
+      else {
+        feedback.textContent = "Recovery action failed. The recovered draft is still available; retry when ready.";
+        adopt.disabled = false;
+        discard.disabled = false;
+      }
+    });
+  };
+  adopt.addEventListener("click", () => run(() => controller.adoptRecovery()));
+  discard.addEventListener("click", () => run(async () => controller.discardRecovery()));
+  actions.append(adopt, discard);
+  panel.append(
+    text("h2", "Recovered unsaved collection changes"),
+    text("p", `A private draft from an interrupted save is available (${recovery.itemIds.length} item${recovery.itemIds.length === 1 ? "" : "s"}${recovery.noteItemIds.length > 0 ? `, including ${recovery.noteItemIds.length} note${recovery.noteItemIds.length === 1 ? "" : "s"}` : ""}). Choose whether to adopt or discard it before editing.`),
+    actions,
+    feedback,
+  );
+  let stop: (() => void) | undefined;
+  stop = controller.onChange(() => {
+    if (controller.recovery === undefined) {
+      stop?.();
+      panel.remove();
+    }
+  });
+  return panel;
+}
+
 function renderItemRow(item: SnapshotItem, catalogue: CatalogueSnapshot, inactive = false, ownerLabel?: string, setIdentity?: string, stateController?: CollectionStateController): HTMLLIElement {
   const row = text("li", undefined, "item-row") as HTMLLIElement;
   row.dataset.itemId = item.itemId;
@@ -633,18 +681,19 @@ function renderItemRow(item: SnapshotItem, catalogue: CatalogueSnapshot, inactiv
 }
 
 function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogue: CatalogueSnapshot, state: PrivateStateRead, stateController?: CollectionStateController): void {
+  const recoveryPanel = stateController === undefined ? undefined : renderRecoveryPanel(stateController);
   if (criteria.status && !state.readable) {
     const deferred = text("section", undefined, "state-panel");
     deferred.setAttribute("aria-live", "polite");
     deferred.append(text("h2", "Status filter unavailable"), text("p", "The local collection state could not be read, so this status filter was not applied. Reload the page or restore a valid local collection and try again."));
-    container.replaceChildren(deferred);
+    container.replaceChildren(...(recoveryPanel === undefined ? [deferred] : [recoveryPanel, deferred]));
     return;
   }
   const hasFilter = Boolean(criteria.edition || criteria.q || criteria.kind || criteria.research || criteria.status);
   if (!criteria.localization && !hasFilter) {
     const summary = text("div", undefined, "state-panel");
     summary.append(text("h2", "Choose a localization or search"), text("p", "Browse one localization or search the public catalogue across set groups. The owning localization and set remain labelled on every result."));
-    container.replaceChildren(summary);
+    container.replaceChildren(...(recoveryPanel === undefined ? [summary] : [recoveryPanel, summary]));
     return;
   }
   const progress = renderProgress(catalogue, criteria.localization, criteria.edition, state);
@@ -652,9 +701,22 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
     const updated = renderProgress(catalogue, criteria.localization, criteria.edition, stateController.state);
     progress.replaceChildren(...updated.childNodes);
   });
+  if (criteria.status && stateController !== undefined) {
+    let previousStatusKey = statusKey(stateController.state);
+    let stopStatusListener: (() => void) | undefined;
+    stopStatusListener = stateController.onChange(() => {
+      const nextStatusKey = statusKey(stateController.state);
+      if (nextStatusKey === previousStatusKey) return;
+      previousStatusKey = nextStatusKey;
+      stopStatusListener?.();
+      renderResults(container, criteria, catalogue, stateController.state, stateController);
+    });
+  }
   const model = buildResultViewModel(criteria, catalogue, matchesResearch, state.readable ? state.statuses : undefined);
   const { activeItems: items, inactiveItems } = model;
-  const content: Node[] = [progress, text("p", model.activeSummary)];
+  const content: Node[] = [];
+  if (recoveryPanel !== undefined) content.push(recoveryPanel);
+  content.push(progress, text("p", model.activeSummary));
   const groups = buildBrowseHierarchy(criteria, catalogue, matchesResearch, state.readable ? state.statuses : undefined);
   const grouped = text("div", undefined, "browse-results");
   const localizationLabelCounts = new Map<string, number>();

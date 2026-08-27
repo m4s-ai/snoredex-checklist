@@ -26,6 +26,10 @@ interface PersistenceResult<T> {
 
 interface OrderedStateStoreLike {
   read(): PersistenceResult<PrivateState | undefined>;
+  unsaved(): PrivateState | undefined;
+  adoptUnsavedDraft(): PersistenceResult<PrivateState | undefined>;
+  discardUnsavedDraft(): void;
+  hasPendingNote(): boolean;
   saveImmediate(state: PrivateState): Promise<PersistenceResult<{ readonly skipped?: boolean }>>;
   scheduleNoteSave(state: PrivateState): PersistenceResult<void>;
   flushNote(): Promise<PersistenceResult<{ readonly skipped?: boolean }>>;
@@ -50,14 +54,22 @@ export type CollectionEditResult =
   | { readonly ok: true; readonly skipped?: boolean }
   | { readonly ok: false; readonly error: string };
 
+export interface CollectionRecoverySummary {
+  readonly itemIds: readonly string[];
+  readonly noteItemIds: readonly string[];
+}
+
 export interface CollectionStateController {
   readonly available: true;
   readonly state: PrivateStateRead;
+  readonly recovery: CollectionRecoverySummary | undefined;
   record(itemId: string): PrivateItemState | undefined;
   setStatus(itemId: string, status: CollectionStatus): Promise<CollectionEditResult>;
   setQuantities(itemId: string, quantityOwned: unknown, quantityOrdered: unknown): Promise<CollectionEditResult>;
   scheduleNote(itemId: string, note: string): CollectionEditResult;
   flushNote(): Promise<CollectionEditResult>;
+  adoptRecovery(): Promise<CollectionEditResult>;
+  discardRecovery(): CollectionEditResult;
   onChange(listener: () => void): () => void;
   onSave(listener: (itemId: string, result: CollectionEditResult) => void): () => void;
 }
@@ -87,11 +99,13 @@ class BrowserCollectionStateController implements CollectionStateController {
   private readonly catalogueFingerprint: string;
   private readonly noteAutosaveDelay: number;
   private records = new Map<string, PrivateItemState>();
+  private recoveryDraft: PrivateState | undefined;
   private hasActiveState = false;
   private listeners = new Set<() => void>();
   private saveListeners = new Set<(itemId: string, result: CollectionEditResult) => void>();
   private noteFlushTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
   private pendingNoteItemId: string | undefined;
+  private pendingNoteState: PrivateState | undefined;
 
   public constructor(
     store: OrderedStateStoreLike,
@@ -105,6 +119,7 @@ class BrowserCollectionStateController implements CollectionStateController {
     this.noteAutosaveDelay = noteAutosaveDelay;
     this.catalogueFingerprint = catalogueFingerprint;
     this.hasActiveState = active !== undefined;
+    this.recoveryDraft = store.unsaved();
     for (const record of active?.items ?? []) this.records.set(record.itemId, record);
   }
 
@@ -112,6 +127,15 @@ class BrowserCollectionStateController implements CollectionStateController {
     const statuses = new Map<string, CollectionStatus>();
     for (const [itemId, record] of this.records) statuses.set(itemId, record.status);
     return { readable: true, hasActiveState: this.hasActiveState || this.records.size > 0, statuses };
+  }
+
+  public get recovery(): CollectionRecoverySummary | undefined {
+    if (this.recoveryDraft === undefined) return undefined;
+    const itemIds = this.recoveryDraft.items.map((record) => record.itemId);
+    const noteItemIds = this.recoveryDraft.items
+      .filter((record) => record.note !== undefined)
+      .map((record) => record.itemId);
+    return { itemIds, noteItemIds };
   }
 
   public record(itemId: string): PrivateItemState | undefined {
@@ -134,6 +158,7 @@ class BrowserCollectionStateController implements CollectionStateController {
     this.setRecord(itemId, result.value);
     this.cancelNoteTimer();
     this.pendingNoteItemId = undefined;
+    this.pendingNoteState = undefined;
     const outcome = persistenceError(await this.store.saveImmediate(this.stateForSave()));
     this.notifySave(itemId, outcome);
     return outcome;
@@ -145,6 +170,7 @@ class BrowserCollectionStateController implements CollectionStateController {
     this.setRecord(itemId, result.value);
     this.cancelNoteTimer();
     this.pendingNoteItemId = undefined;
+    this.pendingNoteState = undefined;
     const outcome = persistenceError(await this.store.saveImmediate(this.stateForSave()));
     this.notifySave(itemId, outcome);
     return outcome;
@@ -158,10 +184,12 @@ class BrowserCollectionStateController implements CollectionStateController {
     const scheduled = this.store.scheduleNoteSave(this.stateForSave());
     if (!scheduled.ok) {
       this.pendingNoteItemId = undefined;
+      this.pendingNoteState = undefined;
       const outcome = failure(scheduled.error ?? "STORAGE_WRITE_FAILED");
       this.notifySave(itemId, outcome);
       return outcome;
     }
+    this.pendingNoteState = this.stateForSave();
     this.cancelNoteTimer();
     this.noteFlushTimer = globalThis.setTimeout(() => {
       this.noteFlushTimer = undefined;
@@ -173,10 +201,46 @@ class BrowserCollectionStateController implements CollectionStateController {
   public async flushNote(): Promise<CollectionEditResult> {
     this.cancelNoteTimer();
     const itemId = this.pendingNoteItemId;
+    if (this.pendingNoteState !== undefined && !this.store.hasPendingNote()) {
+      const scheduled = this.store.scheduleNoteSave(this.pendingNoteState);
+      if (!scheduled.ok) {
+        const outcome = failure(scheduled.error ?? "STORAGE_WRITE_FAILED");
+        if (itemId !== undefined) this.notifySave(itemId, outcome);
+        return outcome;
+      }
+    }
     const outcome = persistenceError(await this.store.flushNote());
     this.pendingNoteItemId = undefined;
+    if (outcome.ok && !outcome.skipped) this.pendingNoteState = undefined;
     if (itemId !== undefined) this.notifySave(itemId, outcome);
     return outcome;
+  }
+
+  public async adoptRecovery(): Promise<CollectionEditResult> {
+    const current = this.recoveryDraft;
+    if (current === undefined) return { ok: true, skipped: true };
+    const adopted = this.store.adoptUnsavedDraft();
+    if (!adopted.ok) return failure(adopted.error ?? "LOCAL_STATE_UNREADABLE");
+    const draft = adopted.value ?? current;
+    const outcome = persistenceError(await this.store.saveImmediate(draft));
+    if (!outcome.ok) return outcome;
+    this.cancelNoteTimer();
+    this.pendingNoteItemId = undefined;
+    this.pendingNoteState = undefined;
+    this.records = new Map(draft.items.map((record) => [record.itemId, record]));
+    this.hasActiveState = this.records.size > 0;
+    this.recoveryDraft = undefined;
+    this.notify();
+    return outcome;
+  }
+
+  public discardRecovery(): CollectionEditResult {
+    if (this.recoveryDraft === undefined) return { ok: true, skipped: true };
+    this.store.discardUnsavedDraft();
+    if (this.store.unsaved() !== undefined) return failure("STORAGE_WRITE_FAILED");
+    this.recoveryDraft = undefined;
+    this.notify();
+    return { ok: true };
   }
 
   private setRecord(itemId: string, record: PrivateItemState | undefined): void {
@@ -223,6 +287,9 @@ export async function createCollectionStateController(
     const active = persisted.value;
     if (active !== undefined && active.catalogueFingerprint !== catalogueFingerprint) return undefined;
     if (active !== undefined && active.items.some((item) => !knownTrackableItemIds.has(item.itemId))) return undefined;
+    const recovery = store.unsaved();
+    if (recovery !== undefined && recovery.catalogueFingerprint !== catalogueFingerprint) return undefined;
+    if (recovery !== undefined && recovery.items.some((item) => !knownTrackableItemIds.has(item.itemId))) return undefined;
     return new BrowserCollectionStateController(
       store,
       domainModule,
