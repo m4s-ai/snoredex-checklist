@@ -14,6 +14,9 @@ const $ = <T extends Element>(selector: string): T => {
   return element;
 };
 
+type Cleanup = () => void;
+const resultCleanups = new WeakMap<HTMLElement, Set<Cleanup>>();
+
 function text(tag: string, value?: unknown, className?: string): HTMLElement {
   const element = document.createElement(tag);
   if (className) element.className = className;
@@ -479,7 +482,7 @@ const STATUS_OPTIONS = [
   ["skip", "Skip"],
 ] as const;
 
-function renderCollectionControls(item: SnapshotItem, controller: CollectionStateController): HTMLElement {
+function renderCollectionControls(item: SnapshotItem, controller: CollectionStateController, registerCleanup?: (cleanup: Cleanup) => void): HTMLElement {
   const record = controller.record(item.itemId);
   const wrapper = text("div", undefined, "collection-controls");
   const feedback = text("span", undefined, "state-feedback");
@@ -490,8 +493,11 @@ function renderCollectionControls(item: SnapshotItem, controller: CollectionStat
   retry.hidden = true;
   let retryAction: (() => Promise<CollectionEditResult>) | undefined;
   const showResult = (result: CollectionEditResult): void => {
-    if (result.ok) {
+    if (result.ok && !result.skipped) {
       feedback.textContent = "Saved";
+      retry.hidden = true;
+    } else if (result.ok) {
+      feedback.textContent = "Saving…";
       retry.hidden = true;
     } else {
       feedback.textContent = "Save failed. Your draft is still visible; retry when ready.";
@@ -507,9 +513,10 @@ function renderCollectionControls(item: SnapshotItem, controller: CollectionStat
   retry.addEventListener("click", () => {
     if (retryAction !== undefined) runSave(retryAction);
   });
-  controller.onSave((itemId, result) => {
+  const stopSaveListener = controller.onSave((itemId, result) => {
     if (itemId === item.itemId) showResult(result);
   });
+  registerCleanup?.(stopSaveListener);
 
   const fieldset = text("fieldset", undefined, "status-controls") as HTMLFieldSetElement;
   fieldset.append(text("legend", "Collection status"));
@@ -550,13 +557,14 @@ function renderCollectionControls(item: SnapshotItem, controller: CollectionStat
   ordered.value = String(record?.quantityOrdered ?? 0);
   ordered.setAttribute("inputmode", "numeric");
   orderedLabel.append(ordered);
-  controller.onChange(() => {
+  const stopChangeListener = controller.onChange(() => {
     const latest = controller.record(item.itemId);
     const latestStatus = latest?.status ?? "need";
     for (const [value, input] of statusInputs) input.checked = value === latestStatus;
     if (document.activeElement !== owned) owned.value = String(latest?.quantityOwned ?? 0);
     if (document.activeElement !== ordered) ordered.value = String(latest?.quantityOrdered ?? 0);
   });
+  registerCleanup?.(stopChangeListener);
   const saveQuantities = (): void => {
     runSave(() => controller.setQuantities(item.itemId, Number(owned.value), Number(ordered.value)));
   };
@@ -598,7 +606,7 @@ function statusKey(state: PrivateStateRead): string {
   return [...state.statuses.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([itemId, status]) => `${itemId}:${status}`).join("|");
 }
 
-function renderRecoveryPanel(controller: CollectionStateController, onResolved?: () => void): HTMLElement | undefined {
+function renderRecoveryPanel(controller: CollectionStateController, onResolved?: () => void, registerCleanup?: (cleanup: Cleanup) => void): HTMLElement | undefined {
   const recovery = controller.recovery;
   if (recovery === undefined) return undefined;
   const panel = text("section", undefined, "state-panel recovery-panel");
@@ -640,10 +648,11 @@ function renderRecoveryPanel(controller: CollectionStateController, onResolved?:
       onResolved?.();
     }
   });
+  registerCleanup?.(() => stop?.());
   return panel;
 }
 
-function renderItemRow(item: SnapshotItem, catalogue: CatalogueSnapshot, inactive = false, ownerLabel?: string, setIdentity?: string, stateController?: CollectionStateController): HTMLLIElement {
+function renderItemRow(item: SnapshotItem, catalogue: CatalogueSnapshot, inactive = false, ownerLabel?: string, setIdentity?: string, stateController?: CollectionStateController, registerCleanup?: (cleanup: Cleanup) => void): HTMLLIElement {
   const row = text("li", undefined, "item-row") as HTMLLIElement;
   row.dataset.itemId = item.itemId;
   if (item.progressClass === "research") row.classList.add("item-row-research");
@@ -674,7 +683,7 @@ function renderItemRow(item: SnapshotItem, catalogue: CatalogueSnapshot, inactiv
   if (inactive) tags.append(text("span", "Inactive", "item-cue"));
   content.append(tags);
   if (!inactive && item.active && item.progressClass === "current-known" && stateController !== undefined && stateController.recovery === undefined) {
-    content.append(renderCollectionControls(item, stateController));
+    content.append(renderCollectionControls(item, stateController, registerCleanup));
   }
   content.append(renderItemDetails(item, catalogue, scopeLabel));
   row.append(content);
@@ -682,9 +691,13 @@ function renderItemRow(item: SnapshotItem, catalogue: CatalogueSnapshot, inactiv
 }
 
 function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogue: CatalogueSnapshot, state: PrivateStateRead, stateController?: CollectionStateController): void {
+  resultCleanups.get(container)?.forEach((cleanup) => cleanup());
+  const cleanups = new Set<Cleanup>();
+  resultCleanups.set(container, cleanups);
+  const registerCleanup = (cleanup: Cleanup): void => { cleanups.add(cleanup); };
   const recoveryPanel = stateController === undefined
     ? undefined
-    : renderRecoveryPanel(stateController, () => renderResults(container, criteria, catalogue, stateController.state, stateController));
+    : renderRecoveryPanel(stateController, () => renderResults(container, criteria, catalogue, stateController.state, stateController), registerCleanup);
   if (criteria.status && !state.readable) {
     const deferred = text("section", undefined, "state-panel");
     deferred.setAttribute("aria-live", "polite");
@@ -700,10 +713,11 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
     return;
   }
   const progress = renderProgress(catalogue, criteria.localization, criteria.edition, state);
-  stateController?.onChange(() => {
+  const stopProgressListener = stateController?.onChange(() => {
     const updated = renderProgress(catalogue, criteria.localization, criteria.edition, stateController.state);
     progress.replaceChildren(...updated.childNodes);
   });
+  if (stopProgressListener !== undefined) registerCleanup(stopProgressListener);
   if (criteria.status && stateController !== undefined) {
     let previousStatusKey = statusKey(stateController.state);
     let stopStatusListener: (() => void) | undefined;
@@ -715,6 +729,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
       stopStatusListener?.();
       renderResults(container, criteria, catalogue, stateController.state, stateController);
     });
+    registerCleanup(() => stopStatusListener?.());
   }
   const model = buildResultViewModel(criteria, catalogue, matchesResearch, state.readable ? state.statuses : undefined);
   const { activeItems: items, inactiveItems } = model;
@@ -765,7 +780,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
           candidate.setEditionId === edition.edition.setEditionId && candidate.active && candidate.progressClass !== "research"));
         for (const item of currentItems) {
           const itemIdentity = (currentCollisionCounts.get(itemRowCollisionKey(item)) ?? 0) > 1 ? item.itemId : undefined;
-          list.append(renderItemRow(item, catalogue, false, undefined, itemIdentity, stateController));
+          list.append(renderItemRow(item, catalogue, false, undefined, itemIdentity, stateController, registerCleanup));
         }
         if (list.childElementCount > 0) editionSection.append(list);
         const research = edition.items.filter((item) => item.active && item.progressClass === "research");
@@ -777,7 +792,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
             candidate.setEditionId === edition.edition.setEditionId && candidate.active && candidate.progressClass === "research"));
           for (const item of research) {
             const itemIdentity = (researchCollisionCounts.get(itemRowCollisionKey(item)) ?? 0) > 1 ? item.itemId : undefined;
-            researchList.append(renderItemRow(item, catalogue, false, undefined, itemIdentity, stateController));
+            researchList.append(renderItemRow(item, catalogue, false, undefined, itemIdentity, stateController, registerCleanup));
           }
           researchSection.append(researchList);
           editionSection.append(researchSection);
@@ -819,7 +834,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
         : (inactiveSetIdentityCounts.get(setKey)?.size ?? 0) > 1 ? item.setEditionId : undefined;
       const itemIdentity = (inactiveCollisionCounts.get(itemRowCollisionKey(item, false)) ?? 0) > 1 ? item.itemId : undefined;
       const identitySuffix = [setIdentity, itemIdentity].filter(Boolean).join(" · ") || undefined;
-      inactiveList.append(renderItemRow(item, catalogue, true, ownerLabel, identitySuffix, stateController));
+      inactiveList.append(renderItemRow(item, catalogue, true, ownerLabel, identitySuffix, stateController, registerCleanup));
     }
     inactive.append(inactiveList);
     content.push(inactive);
