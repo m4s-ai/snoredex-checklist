@@ -110,6 +110,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
   private listeners = new Set<() => void>();
   private saveListeners = new Set<(itemId: string, result: CollectionEditResult) => void>();
   private noteFlushTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
+  private noteFlushInFlight: Promise<CollectionEditResult> | undefined;
   private pendingNoteItemId: string | undefined;
   private pendingNoteState: PrivateState | undefined;
   private supersededNoteItemIds = new Set<string>();
@@ -217,8 +218,19 @@ export class BrowserCollectionStateController implements CollectionStateControll
     return scheduled.ok ? { ok: true } : failure(scheduled.error ?? "STORAGE_WRITE_FAILED");
   }
 
-  public async flushNote(): Promise<CollectionEditResult> {
+  public flushNote(): Promise<CollectionEditResult> {
     this.cancelNoteTimer();
+    if (this.noteFlushInFlight !== undefined) return this.noteFlushInFlight;
+    const operation = this.flushNoteInternal();
+    this.noteFlushInFlight = operation;
+    void operation.then(
+      () => { if (this.noteFlushInFlight === operation) this.noteFlushInFlight = undefined; },
+      () => { if (this.noteFlushInFlight === operation) this.noteFlushInFlight = undefined; },
+    );
+    return operation;
+  }
+
+  private async flushNoteInternal(): Promise<CollectionEditResult> {
     const itemId = this.pendingNoteItemId;
     const pendingState = this.pendingNoteState;
     if (this.pendingNoteState !== undefined && !this.store.hasPendingNote()) {

@@ -187,3 +187,16 @@ test("lets the controller own note autosave timing", async () => {
   await controller.flushNote();
   assert.deepEqual(scheduleFlushes, [false]);
 });
+
+test("coalesces blur and timer note flushes while one save is in flight", async () => {
+  const noteFlush = deferred<SaveOutcome>();
+  const controller = makeController([], [noteFlush], undefined, [], [], true);
+
+  assert.deepEqual(controller.scheduleNote("item-a", "note"), { ok: true });
+  const timerFlush = controller.flushNote();
+  const blurFlush = controller.flushNote();
+  assert.strictEqual(blurFlush, timerFlush);
+
+  noteFlush.resolve({ ok: true, value: {} });
+  assert.deepEqual(await blurFlush, { ok: true, skipped: undefined });
+});
