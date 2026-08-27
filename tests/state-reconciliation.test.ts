@@ -226,6 +226,17 @@ test("rejects unknown, future and incomplete chains before mutation", () => {
   });
   assert.deepEqual(rejectedManifest, { ok: false, error: "STATE_RECONCILIATION_BLOCKED" });
 
+  const hiddenDanglingTarget = reconcilePrivateState(state(oldFingerprint, [
+    { itemId: oldA, status: "have", quantityOwned: 1, quantityOrdered: 0 },
+  ]), targetFingerprint, {
+    migrations: [migration(oldFingerprint, targetFingerprint, [
+      transition(oldA, [targetA], "retained", "preserve", "identity-retained"),
+      transition(oldB, [targetB], "rekey-1:1", "preserve", "one-to-one-preserve"),
+    ])],
+    knownTargetItemIds: new Set([targetA]),
+  });
+  assert.deepEqual(hiddenDanglingTarget, { ok: false, error: "STATE_RECONCILIATION_BLOCKED" });
+
   const mismatchedRetained = reconcilePrivateState(state(oldFingerprint, [
     { itemId: oldA, status: "have", quantityOwned: 1, quantityOrdered: 0 },
   ]), targetFingerprint, {

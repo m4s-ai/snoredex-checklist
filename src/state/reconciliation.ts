@@ -449,6 +449,13 @@ export function reconcilePrivateState(
   const chain = findChain(state.catalogueFingerprint, targetFingerprint, migrations);
   if (chain === "ambiguous") return blockedSource(state, targetFingerprint, "STATE_RECONCILIATION_BLOCKED", "ambiguous-chain");
   if (chain === undefined || chain.length === 0) return unsupportedSource(state, targetFingerprint);
+  if (context.knownTargetItemIds !== undefined) {
+    const finalMigration = chain[chain.length - 1];
+    if (finalMigration.transitions.some((transition) =>
+      transition.toItemIds.some((itemId) => !context.knownTargetItemIds?.has(itemId)))) {
+      return fail("STATE_RECONCILIATION_BLOCKED");
+    }
+  }
 
   let working = new Map<string, WorkingRecord>(state.items.map((item) => [item.itemId, {
     state: cloneItem(item),
