@@ -44,7 +44,8 @@ export interface BrowseLocalizationViewModel {
 
 function publicSearchValue(value: unknown): string {
   if (typeof value === "string") return value;
-  if (Array.isArray(value)) return value.filter((entry): entry is string => typeof entry === "string").join(" ");
+  if (Array.isArray(value)) return value.map(publicSearchValue).filter(Boolean).join(" ");
+  if (typeof value === "object" && value !== null) return Object.values(value).map(publicSearchValue).filter(Boolean).join(" ");
   return "";
 }
 

@@ -48,6 +48,12 @@ test("searches public fields with AND terms and never rarity metadata", () => {
   const result = buildResultViewModel({ q: "Snorlax reverse-holo" }, fixture.catalogue, matchesResearch);
   assert.deepEqual(result.activeItems.map((item) => item.itemId), [fixture.catalogue.items[1].itemId]);
 
+  const structured = structuredClone(fixture.catalogue);
+  (structured.items[0] as Record<string, unknown>).markings = [{ kind: "stamp", role: "promo", text: "dragon" }];
+  (structured.items[0] as Record<string, unknown>).distribution = { kind: "retail", name: "Card shop", region: "EU", date: "2026-01-01", text: "special release" };
+  assert.deepEqual(buildResultViewModel({ q: "dragon" }, structured, matchesResearch).activeItems.map((item) => item.itemId), [structured.items[0].itemId]);
+  assert.deepEqual(buildResultViewModel({ q: "card shop" }, structured, matchesResearch).activeItems.map((item) => item.itemId), [structured.items[0].itemId]);
+
   const withRarity = structuredClone(fixture.catalogue);
   (withRarity.items[0] as Record<string, unknown>).rarity = { display: "secret-only-label" };
   const rarityResult = buildResultViewModel({ q: "secret-only-label" }, withRarity, matchesResearch);
