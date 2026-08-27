@@ -76,8 +76,7 @@ function renderBrowseNavigation(container: HTMLElement, catalogue: CatalogueSnap
   const details = text("details", undefined, "browse-details") as HTMLDetailsElement;
   details.open = true;
   details.append(text("summary", "Browse sets"));
-  const nav = text("nav", undefined, "browse-tree");
-  nav.setAttribute("aria-label", "Locality, set and edition hierarchy");
+  const tree = text("div", undefined, "browse-tree");
   const localities = text("ul", undefined, "link-list");
   const localizations = new Map(catalogue.localizations.map((localization) => [localization.localizationId, localization] as const));
   const setsByLocality = new Map<string, SnapshotLocalSet[]>();
@@ -112,8 +111,8 @@ function renderBrowseNavigation(container: HTMLElement, catalogue: CatalogueSnap
     localityItem.append(setList);
     localities.append(localityItem);
   }
-  nav.append(localities);
-  details.append(nav);
+  tree.append(localities);
+  details.append(tree);
   container.replaceChildren(details);
 }
 
