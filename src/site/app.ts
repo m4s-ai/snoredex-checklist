@@ -481,6 +481,7 @@ const STATUS_OPTIONS = [
   ["have", "Have"],
   ["skip", "Skip"],
 ] as const;
+const MAX_NOTE_CODE_POINTS = 2_000;
 
 function renderCollectionControls(item: SnapshotItem, controller: CollectionStateController, registerCleanup?: (cleanup: Cleanup) => void): HTMLElement {
   const record = controller.record(item.itemId);
@@ -588,7 +589,6 @@ function renderCollectionControls(item: SnapshotItem, controller: CollectionStat
   noteButton.hidden = record?.note !== undefined;
   const textarea = document.createElement("textarea");
   textarea.rows = 3;
-  textarea.maxLength = 2_000;
   textarea.placeholder = "Private note";
   textarea.value = record?.note ?? "";
   textarea.hidden = record?.note === undefined;
@@ -600,6 +600,8 @@ function renderCollectionControls(item: SnapshotItem, controller: CollectionStat
   };
   noteButton.addEventListener("click", openNote);
   textarea.addEventListener("input", () => {
+    const codePoints = [...textarea.value];
+    if (codePoints.length > MAX_NOTE_CODE_POINTS) textarea.value = codePoints.slice(0, MAX_NOTE_CODE_POINTS).join("");
     retryAction = () => controller.flushNote();
     retry.hidden = true;
     const scheduled = controller.scheduleNote(item.itemId, textarea.value);

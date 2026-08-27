@@ -299,8 +299,12 @@ export class BrowserCollectionStateController implements CollectionStateControll
     if (generation !== this.latestImmediateSaveGeneration) return false;
     if (result.ok && result.skipped) return true;
     const itemIds = new Set(this.supersededImmediateItemIds);
-    this.supersededImmediateItemIds.clear();
     itemIds.add(itemId);
+    if (result.ok) this.supersededImmediateItemIds.clear();
+    else {
+      this.supersededImmediateItemIds.clear();
+      for (const pendingItemId of itemIds) this.supersededImmediateItemIds.add(pendingItemId);
+    }
     for (const pendingItemId of itemIds) this.notifySave(pendingItemId, result);
     return true;
   }

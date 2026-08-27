@@ -10,10 +10,11 @@ function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value
   return { promise, resolve };
 }
 
-test("settles superseded immediate edits with the encompassing save", async () => {
-  type Store = ConstructorParameters<typeof BrowserCollectionStateController>[0];
-  type Domain = ConstructorParameters<typeof BrowserCollectionStateController>[1];
-  const saves: Array<ReturnType<typeof deferred<{ ok: true; value: { skipped?: boolean } }>>> = [];
+type Store = ConstructorParameters<typeof BrowserCollectionStateController>[0];
+type Domain = ConstructorParameters<typeof BrowserCollectionStateController>[1];
+type SaveOutcome = { readonly ok: true; readonly value: { readonly skipped?: boolean } } | { readonly ok: false; readonly error: string };
+
+function makeController(saves: Array<ReturnType<typeof deferred<SaveOutcome>>>): BrowserCollectionStateController {
   const store = {
     read: () => ({ ok: true, value: undefined }),
     unsaved: () => undefined,
@@ -21,7 +22,7 @@ test("settles superseded immediate edits with the encompassing save", async () =
     discardUnsavedDraft: () => undefined,
     hasPendingNote: () => false,
     saveImmediate: () => {
-      const save = deferred<{ ok: true; value: { skipped?: boolean } }>();
+      const save = deferred<SaveOutcome>();
       saves.push(save);
       return save.promise;
     },
@@ -36,7 +37,12 @@ test("settles superseded immediate edits with the encompassing save", async () =
     applyQuantityEdit: () => ({ ok: true, value: undefined }),
     applyNoteEdit: () => ({ ok: true, value: undefined }),
   } as Domain;
-  const controller = new BrowserCollectionStateController(store, domain, 1_000, FINGERPRINT, undefined);
+  return new BrowserCollectionStateController(store, domain, 1_000, FINGERPRINT, undefined);
+}
+
+test("settles superseded immediate edits with the encompassing save", async () => {
+  const saves: Array<ReturnType<typeof deferred<SaveOutcome>>> = [];
+  const controller = makeController(saves);
   const events: string[] = [];
   controller.onSave((itemId, result) => events.push(`${itemId}:${result.ok ? (result.skipped ? "skipped" : "saved") : "failed"}`));
 
@@ -50,4 +56,23 @@ test("settles superseded immediate edits with the encompassing save", async () =
   assert.deepEqual(firstResult, { ok: true, skipped: true, deferred: true });
   assert.deepEqual(secondResult, { ok: true, skipped: undefined });
   assert.deepEqual(events, ["item-a:saved", "item-b:saved"]);
+});
+
+test("retains failed immediate edit owners until a later save succeeds", async () => {
+  const saves: Array<ReturnType<typeof deferred<SaveOutcome>>> = [];
+  const controller = makeController(saves);
+  const events: string[] = [];
+  controller.onSave((itemId, result) => events.push(`${itemId}:${result.ok ? "saved" : "failed"}`));
+
+  const first = controller.setStatus("item-a", "have");
+  const second = controller.setStatus("item-b", "have");
+  saves[0].resolve({ ok: true, value: { skipped: true } });
+  saves[1].resolve({ ok: false, error: "STORAGE_COMMIT_UNCERTAIN" });
+  await Promise.all([first, second]);
+  assert.deepEqual(events, ["item-a:failed", "item-b:failed"]);
+
+  const retry = controller.setStatus("item-a", "have");
+  saves[2].resolve({ ok: true, value: {} });
+  await retry;
+  assert.deepEqual(events, ["item-a:failed", "item-b:failed", "item-a:saved", "item-b:saved"]);
 });
