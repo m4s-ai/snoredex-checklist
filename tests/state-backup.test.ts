@@ -161,6 +161,106 @@ test("preview exposes only safe aggregates and blocks unknown fingerprints", () 
   });
 });
 
+test("gates older imports through the shared reconciliation chain", () => {
+  const storage = new FakeStorage();
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision,
+    now: () => exportedAt,
+    reconciliation: {
+      migrations: [{
+        fromFingerprint: otherFingerprint,
+        toFingerprint: fingerprint,
+        transitions: [{
+          fromItemId: itemA,
+          toItemIds: [itemA],
+          changeKind: "retained",
+          automaticStateAction: "preserve",
+          reconciliation: "identity-retained",
+        }],
+      }],
+    },
+  });
+  const imported = createPortableBackup(state("older", otherFingerprint), { appRevision, exportedAt });
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  const plan = lifecycle.prepareImport(imported.value.bytes, fingerprint, knownItemIds);
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.equal(plan.value.candidate.catalogueFingerprint, fingerprint);
+  assert.equal(plan.value.preview.reconciliation?.conservationSatisfied, true);
+  assert.equal(plan.value.reconciliation?.report.accounting.migrated, 0);
+  assert.deepEqual(plan.value.candidate.items, [{
+    itemId: itemA,
+    status: "have",
+    quantityOwned: 2,
+    quantityOrdered: 1,
+    note: "older",
+  }]);
+});
+
+test("never previews or writes a conflicting migration", () => {
+  const storage = new FakeStorage();
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision,
+    reconciliation: {
+      migrations: [{
+        fromFingerprint: otherFingerprint,
+        toFingerprint: fingerprint,
+        transitions: [{
+          fromItemId: itemA,
+          toItemIds: [itemA, "item-00000000-0000-0000-0000-00000000000b"],
+          changeKind: "split-1:N",
+          automaticStateAction: "none",
+          reconciliation: "requires-user-resolution",
+        }],
+      }],
+    },
+  });
+  const imported = createPortableBackup(state("older", otherFingerprint), { appRevision, exportedAt });
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  assert.deepEqual(lifecycle.prepareImport(imported.value.bytes, fingerprint, new Set([
+    itemA,
+    "item-00000000-0000-0000-0000-00000000000b",
+  ])), {
+    ok: false,
+    error: "STATE_RECONCILIATION_BLOCKED",
+  });
+  assert.equal(storage.values.size, 0);
+});
+
+test("rechecks the same reconciliation before committing an import", async () => {
+  const storage = new FakeStorage();
+  const transitions = [{
+    fromItemId: itemA,
+    toItemIds: [itemA],
+    changeKind: "retained",
+    automaticStateAction: "preserve",
+    reconciliation: "identity-retained",
+  }];
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision,
+    reconciliation: {
+      migrations: [{ fromFingerprint: otherFingerprint, toFingerprint: fingerprint, transitions }],
+    },
+  });
+  const imported = createPortableBackup(state("older", otherFingerprint), { appRevision, exportedAt });
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  const plan = lifecycle.prepareImport(imported.value.bytes, fingerprint, knownItemIds);
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  (transitions[0] as { toItemIds: readonly string[] }).toItemIds = [
+    itemA,
+    "item-00000000-0000-0000-0000-00000000000b",
+  ];
+  assert.deepEqual(await lifecycle.commitImport(plan.value, true), {
+    ok: false,
+    error: "STATE_RECONCILIATION_BLOCKED",
+  });
+  assert.equal(storage.values.size, 0);
+});
+
 test("replacement keeps a validated recovery copy and ordinary saves preserve it", async () => {
   const storage = new FakeStorage();
   const old = state("old private note");

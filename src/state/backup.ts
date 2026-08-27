@@ -12,6 +12,12 @@ import {
   type AuthorityReadResult,
 } from "./authority.ts";
 import { PRIVATE_STATE_RECOVERY_STORAGE_KEY, PRIVATE_STATE_STORAGE_KEY, type StorageLike } from "./storage.ts";
+import {
+  reconcilePrivateState,
+  type ReconciliationContext,
+  type ReconciliationReport,
+  type ReconciliationSuccess,
+} from "./reconciliation.ts";
 
 export const MAX_PORTABLE_BYTES = 16 * 1024 * 1024;
 export const PRIVATE_BACKUP_SUFFIX = ".snoredex-private.json";
@@ -70,12 +76,18 @@ export interface ImportPreview {
   readonly quantityOrdered: number;
   readonly noteCount: number;
   readonly recordsToReplace: number;
+  readonly reconciliation?: ReconciliationReport["accounting"];
 }
 
 export interface ImportPlan {
   readonly candidate: PrivateState;
   readonly preview: ImportPreview;
   readonly expectedRaw: AuthorityRawSnapshot;
+  readonly reconciliation?: ReconciliationSuccess;
+  /** In-memory source and gate inputs used to repeat reconciliation at commit time. */
+  readonly reconciliationSource?: PrivateState;
+  readonly reconciliationTargetFingerprint?: string;
+  readonly reconciliationKnownItemIds?: ReadonlySet<string>;
 }
 
 interface AuthorityRawSnapshot {
@@ -219,6 +231,7 @@ export function buildImportPreview(
   state: PrivateState,
   current: PrivateState | undefined,
   targetFingerprint: string | undefined,
+  reconciliation?: ReconciliationReport,
 ): BackupResult<ImportPreview> {
   if (typeof targetFingerprint !== "string" || state.catalogueFingerprint !== targetFingerprint) {
     return fail("STATE_FINGERPRINT_UNSUPPORTED");
@@ -231,6 +244,7 @@ export function buildImportPreview(
     schemaVersion: state.schemaVersion,
     ...totals,
     recordsToReplace: current?.items.length ?? 0,
+    ...(reconciliation === undefined ? {} : { reconciliation: reconciliation.accounting }),
   });
 }
 
@@ -386,11 +400,17 @@ export class PrivateStateLifecycle {
   private readonly storage: StorageLike;
   private readonly appRevision: string;
   private readonly now: () => string;
+  private readonly reconciliation?: ReconciliationContext;
 
-  public constructor(storage: StorageLike, options: { readonly appRevision: string; readonly now?: () => string }) {
+  public constructor(storage: StorageLike, options: {
+    readonly appRevision: string;
+    readonly now?: () => string;
+    readonly reconciliation?: ReconciliationContext;
+  }) {
     this.storage = storage;
     this.appRevision = options.appRevision;
     this.now = options.now ?? (() => new Date().toISOString());
+    this.reconciliation = options.reconciliation;
   }
 
   public read(): BackupResult<{ readonly active: PrivateState | undefined; readonly recovery: PrivateState | undefined }> {
@@ -419,7 +439,10 @@ export class PrivateStateLifecycle {
   ): BackupResult<ImportPlan> {
     const current = readAuthority(this.storage);
     if (!current.ok) return current;
-    const parsed = parsePortableBackup(bytes, knownItemIds);
+    // Parse the source envelope without target membership filtering. Older
+    // catalogue IDs must reach the shared reconciliation gate instead of
+    // being mistaken for malformed input and silently discarded.
+    const parsed = parsePortableBackup(bytes);
     if (!parsed.ok) return parsed;
     // Imported diagnostic metadata is intentionally not persisted as local
     // collection state. The next export gets fresh appRevision/exportedAt.
@@ -430,9 +453,37 @@ export class PrivateStateLifecycle {
       catalogueFingerprint: parsed.value.state.catalogueFingerprint,
       items: parsed.value.state.items,
     };
-    const preview = buildImportPreview(candidate, current.value.authority.active, targetFingerprint);
+    let reconciliation: ReconciliationSuccess | undefined;
+    let reconciledCandidate = candidate;
+    if (candidate.catalogueFingerprint === targetFingerprint) {
+      const checked = validatePrivateState(candidate, knownItemIds);
+      if (!checked.ok) return fail(mapStateError(checked.error));
+    } else {
+      if (this.reconciliation === undefined) return fail("STATE_FINGERPRINT_UNSUPPORTED");
+      const result = reconcilePrivateState(candidate, targetFingerprint, {
+        ...this.reconciliation,
+        knownTargetItemIds: knownItemIds,
+      });
+      if (!result.ok) return fail(result.error);
+      reconciliation = result.value;
+      reconciledCandidate = result.value.state;
+    }
+    const preview = buildImportPreview(
+      reconciledCandidate,
+      current.value.authority.active,
+      targetFingerprint,
+      reconciliation?.report,
+    );
     if (!preview.ok) return preview;
-    return ok({ candidate, preview: preview.value, expectedRaw: current.value.raw });
+    return ok({
+      candidate: reconciledCandidate,
+      preview: preview.value,
+      expectedRaw: current.value.raw,
+      ...(reconciliation === undefined ? {} : { reconciliation }),
+      reconciliationSource: candidate,
+      reconciliationTargetFingerprint: targetFingerprint,
+      reconciliationKnownItemIds: new Set(knownItemIds),
+    });
   }
 
   public async commitImport(plan: ImportPlan, confirmed: boolean): Promise<LifecycleResult> {
@@ -440,10 +491,35 @@ export class PrivateStateLifecycle {
     return exclusive(this.storage, () => {
       const current = readAuthority(this.storage);
       if (!current.ok) return current;
+      let candidate = plan.candidate;
+      if (plan.reconciliationSource !== undefined
+        && plan.reconciliationTargetFingerprint !== undefined
+        && plan.reconciliationKnownItemIds !== undefined) {
+        const source = validatePrivateState(plan.reconciliationSource);
+        if (!source.ok) return fail(mapStateError(source.error));
+        if (source.value.catalogueFingerprint === plan.reconciliationTargetFingerprint) {
+          const checked = validatePrivateState(source.value, plan.reconciliationKnownItemIds);
+          if (!checked.ok) return fail(mapStateError(checked.error));
+          candidate = checked.value;
+        } else {
+          if (this.reconciliation === undefined) return fail("STATE_FINGERPRINT_UNSUPPORTED");
+          const result = reconcilePrivateState(source.value, plan.reconciliationTargetFingerprint, {
+            ...this.reconciliation,
+            knownTargetItemIds: plan.reconciliationKnownItemIds,
+          });
+          if (!result.ok) return fail(result.error);
+          candidate = result.value.state;
+        }
+        const planned = serializePrivateState(plan.candidate);
+        const rerun = serializePrivateState(candidate);
+        if (!planned.ok || !rerun.ok || planned.value !== rerun.value) {
+          return fail("STATE_RECONCILIATION_BLOCKED");
+        }
+      }
       const recovery = current.value.authority.active?.items.length
         ? current.value.authority.active
         : current.value.authority.recovery;
-      return writeAuthority(this.storage, plan.expectedRaw, plan.candidate, recovery);
+      return writeAuthority(this.storage, plan.expectedRaw, candidate, recovery);
     });
   }
 
@@ -472,16 +548,27 @@ export class PrivateStateLifecycle {
       if (!current.ok) return current;
       const recovery = current.value.authority.recovery;
       if (recovery === undefined) return fail("EXPORT_FAILED");
-      const validatedRecovery = validatePrivateState(recovery, knownItemIds);
+      const validatedRecovery = validatePrivateState(recovery);
       if (!validatedRecovery.ok) return fail(mapStateError(validatedRecovery.error));
-      if (typeof targetFingerprint !== "string" || validatedRecovery.value.catalogueFingerprint !== targetFingerprint) {
-        return fail("STATE_FINGERPRINT_UNSUPPORTED");
+      let candidate = validatedRecovery.value;
+      if (candidate.catalogueFingerprint === targetFingerprint) {
+        const checked = validatePrivateState(candidate, knownItemIds);
+        if (!checked.ok) return fail(mapStateError(checked.error));
+        candidate = checked.value;
+      } else {
+        if (this.reconciliation === undefined) return fail("STATE_FINGERPRINT_UNSUPPORTED");
+        const result = reconcilePrivateState(candidate, targetFingerprint, {
+          ...this.reconciliation,
+          knownTargetItemIds: knownItemIds,
+        });
+        if (!result.ok) return fail(result.error);
+        candidate = result.value.state;
       }
       const active = current.value.authority.active;
       if (active === undefined || active.items.length === 0) {
-        return promoteRecovery(this.storage, current.value.raw, validatedRecovery.value);
+        return promoteRecovery(this.storage, current.value.raw, candidate);
       }
-      return writeAuthority(this.storage, current.value.raw, validatedRecovery.value, active);
+      return writeAuthority(this.storage, current.value.raw, candidate, active);
     });
   }
 }
