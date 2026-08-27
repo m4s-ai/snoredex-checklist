@@ -350,8 +350,10 @@ export class OrderedStateStore {
 
   public read(): PersistenceResult<PrivateState | undefined> {
     let raw: string | null;
+    let recoveryRaw: string | null;
     try {
       raw = this.storage.getItem(PRIVATE_STATE_STORAGE_KEY);
+      recoveryRaw = this.storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY);
     } catch {
       return error("STORAGE_UNAVAILABLE");
     }
@@ -362,7 +364,7 @@ export class OrderedStateStore {
       this.restorePendingNoteDraft();
       return success(undefined);
     }
-    const authority = readStateAuthority(raw);
+    const authority = readStateAuthority(raw, recoveryRaw);
     if (!authority.ok) {
       this.restorePendingNoteDraft(false);
       return error(authority.error);
