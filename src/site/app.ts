@@ -164,6 +164,13 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
     for (const control of controls) control.disabled = false;
     input.disabled = false;
   });
+  if (criteria.edition) {
+    const edition = document.createElement("input");
+    edition.type = "hidden";
+    edition.name = "edition";
+    edition.value = criteria.edition;
+    form.append(edition);
+  }
   form.append(localization, query, status, kind, research, submit);
   container.replaceChildren(form);
 }
@@ -313,7 +320,10 @@ async function renderCollection(catalogue: CatalogueSnapshot): Promise<void> {
       return;
     }
   }
-  const state = await readPrivateState(catalogue.meta.catalogueFingerprint);
+  const knownTrackableItemIds = new Set(catalogue.items
+    .filter((item) => item.active && item.progressClass === "current-known")
+    .map((item) => item.itemId));
+  const state = await readPrivateState(catalogue.meta.catalogueFingerprint, knownTrackableItemIds);
   renderQueryForm($("[data-query]"), parsed.criteria, catalogue);
   renderResults($("[data-view]"), parsed.criteria, catalogue, state);
 }
