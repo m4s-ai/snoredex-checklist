@@ -96,6 +96,8 @@ export type ReconciliationResult =
 interface WorkingRecord {
   readonly state: PrivateItemState;
   readonly itemId: string;
+  /** Original identity used to make source-fingerprint recovery replayable. */
+  readonly sourceItemId: string;
 }
 
 interface ClassifiedRecord {
@@ -409,7 +411,11 @@ export function reconcilePrivateState(
   if (chain === "ambiguous") return blockedSource(state, targetFingerprint, "STATE_RECONCILIATION_BLOCKED", "ambiguous-chain");
   if (chain === undefined || chain.length === 0) return unsupportedSource(state, targetFingerprint);
 
-  let working = new Map<string, WorkingRecord>(state.items.map((item) => [item.itemId, { state: cloneItem(item), itemId: item.itemId }]));
+  let working = new Map<string, WorkingRecord>(state.items.map((item) => [item.itemId, {
+    state: cloneItem(item),
+    itemId: item.itemId,
+    sourceItemId: item.itemId,
+  }]));
   const orphaned: PrivateItemState[] = [];
   const conflicted: PrivateItemState[] = [];
   const reports: ReconciliationRecord[] = [];
@@ -464,11 +470,18 @@ export function reconcilePrivateState(
           blocked = true;
           continue;
         }
-        next.set(targetId, { state: cloneItem(current.state, targetId), itemId: targetId });
+        next.set(targetId, {
+          state: cloneItem(current.state, targetId),
+          itemId: targetId,
+          sourceItemId: current.sourceItemId,
+        });
       } else if (kind === "orphan") {
-        orphaned.push(cloneItem(current.state));
+        // Recovery keeps the source catalogue fingerprint. Keep the original
+        // source identity too, otherwise a later restore cannot replay the
+        // chain after one or more preceding 1:1 hops.
+        orphaned.push(cloneItem(current.state, current.sourceItemId));
       } else {
-        conflicted.push(cloneItem(current.state));
+        conflicted.push(cloneItem(current.state, current.sourceItemId));
         blocked = true;
       }
     }

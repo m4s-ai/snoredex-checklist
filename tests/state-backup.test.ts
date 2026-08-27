@@ -25,7 +25,9 @@ import {
 
 const fingerprint = "sha256:" + "a".repeat(64);
 const otherFingerprint = "sha256:" + "b".repeat(64);
+const finalFingerprint = "sha256:" + "c".repeat(64);
 const itemA = "item-00000000-0000-0000-0000-00000000000a";
+const itemB = "item-00000000-0000-0000-0000-00000000000b";
 const knownItemIds = new Set([itemA]);
 
 function state(note?: string, catalogueFingerprint = fingerprint): PrivateState {
@@ -482,6 +484,55 @@ test("restore preserves retired orphans in the recovery slot", async () => {
   const storedRecovery = JSON.parse(storage.values.get(PRIVATE_STATE_RECOVERY_STORAGE_KEY) ?? "null") as PrivateState;
   assert.equal(storedRecovery.catalogueFingerprint, otherFingerprint);
   assert.equal(storedRecovery.items[0]?.itemId, itemA);
+});
+
+test("restore keeps the original source identity through a retired chain", async () => {
+  const storage = new FakeStorage();
+  const retired = state("retired", otherFingerprint);
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state(undefined, finalFingerprint)));
+  storage.values.set(PRIVATE_STATE_RECOVERY_STORAGE_KEY, JSON.stringify(retired));
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision,
+    now: () => exportedAt,
+    reconciliation: {
+      migrations: [
+        {
+          fromFingerprint: otherFingerprint,
+          toFingerprint: fingerprint,
+          transitions: [{
+            fromItemId: itemA,
+            toItemIds: [itemB],
+            changeKind: "rekey-1:1",
+            automaticStateAction: "preserve",
+            reconciliation: "one-to-one-preserve",
+          }],
+        },
+        {
+          fromFingerprint: fingerprint,
+          toFingerprint: finalFingerprint,
+          transitions: [{
+            fromItemId: itemB,
+            toItemIds: [],
+            changeKind: "retired-1:0",
+            automaticStateAction: "none",
+            reconciliation: "retire-to-orphan",
+          }],
+        },
+      ],
+    },
+  });
+
+  const restored = await lifecycle.restore(true, finalFingerprint, new Set());
+  assert.equal(restored.ok, true);
+  if (!restored.ok) return;
+  assert.deepEqual(restored.value.active?.items, []);
+  assert.equal(restored.value.recovery?.items[0]?.itemId, itemA);
+
+  const replayed = await lifecycle.restore(true, fingerprint, new Set([itemB]));
+  assert.equal(replayed.ok, true);
+  if (!replayed.ok) return;
+  assert.equal(replayed.value.active?.items[0]?.itemId, itemB);
+  assert.equal(replayed.value.recovery, undefined);
 });
 
 test("import preserves retired orphans in the recovery slot", async () => {

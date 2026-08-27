@@ -89,6 +89,29 @@ test("preserves retired records as private orphan candidates", () => {
   assert.equal(result.value.report.accounting.retiredOrphans, 1);
 });
 
+test("preserves the original identity through a multi-step retired chain", () => {
+  const source = state(oldFingerprint, [{ itemId: oldA, status: "have", quantityOwned: 2, quantityOrdered: 0, note: "private" }]);
+  const result = reconcilePrivateState(source, targetFingerprint, {
+    migrations: [
+      migration(oldFingerprint, middleFingerprint, [
+        transition(oldA, [oldB], "rekey-1:1", "preserve", "one-to-one-preserve"),
+      ]),
+      migration(middleFingerprint, targetFingerprint, [
+        transition(oldB, [], "retired-1:0", "none", "retire-to-orphan"),
+      ]),
+    ],
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.value.orphans, [{
+    itemId: oldA,
+    status: "have",
+    quantityOwned: 2,
+    quantityOrdered: 0,
+    note: "private",
+  }]);
+});
+
 test("fails closed for split, merge, unresolved and unaccounted records", () => {
   const split = reconcilePrivateState(state(oldFingerprint, [{ itemId: oldA, status: "have", quantityOwned: 1, quantityOrdered: 0 }]), targetFingerprint, {
     migrations: [migration(oldFingerprint, targetFingerprint, [transition(oldA, [targetA, targetB], "split-1:N", "none", "requires-user-resolution")])],
