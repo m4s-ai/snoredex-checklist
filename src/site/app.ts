@@ -157,12 +157,18 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
     editionInput.name = "edition";
     editionInput.value = editionId ?? "";
   }
+  let localizationChanged = false;
   const syncEditionScope = (): void => {
     if (editionInput === undefined || !(localizationSelect instanceof HTMLSelectElement)) return;
+    const explicitScopeChange = localizationChanged &&
+      (criteria.localization !== undefined || localizationSelect.value !== "");
     editionInput.disabled = selectedEdition?.localizationId !== undefined &&
-      localizationSelect.value !== "" && localizationSelect.value !== selectedEdition.localizationId;
+      explicitScopeChange && localizationSelect.value !== selectedEdition.localizationId;
   };
-  localizationSelect?.addEventListener("change", syncEditionScope);
+  localizationSelect?.addEventListener("change", () => {
+    localizationChanged = true;
+    syncEditionScope();
+  });
   const query = text("label", "Search public catalogue text") as HTMLLabelElement;
   const input = document.createElement("input");
   input.type = "search"; input.name = "q"; input.maxLength = 120; input.value = criteria.q ?? "";
