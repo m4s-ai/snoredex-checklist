@@ -28,7 +28,6 @@ try {
   const siteAssets = await import(pathToFileURL(resolve(assets, "assets.js")));
   const placeholderAssets = Object.values(siteAssets.PLACEHOLDER_ASSETS ?? {});
   if (placeholderAssets.length === 0) throw new Error("site image manifest has no placeholders");
-  await cp(resolve(root, "site-src/assets/images"), resolve(assets, "images"), { recursive: true });
   const imageManifest = [];
   for (const asset of placeholderAssets) {
     if (typeof asset.path !== "string" || !asset.path.startsWith("images/") || asset.path.includes("..") ||
@@ -39,9 +38,13 @@ try {
         asset.attribution.licenceRef !== "LICENSE.md" || asset.attribution.noticeRef !== "THIRD_PARTY_NOTICES.md") {
       throw new Error(`unsafe site image path for ${asset.assetId}`);
     }
-    const bytes = await readFile(resolve(assets, asset.path));
+    const source = resolve(root, "site-src/assets", asset.path);
+    const bytes = await readFile(source);
     const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
     if (digest !== asset.sha256) throw new Error(`site image digest mismatch for ${asset.assetId}`);
+    const destination = resolve(assets, asset.path);
+    await mkdir(dirname(destination), { recursive: true });
+    await cp(source, destination);
     imageManifest.push(asset);
   }
   await writeFile(resolve(assets, "image-manifest.json"), `${JSON.stringify({
