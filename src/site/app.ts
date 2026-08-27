@@ -1,0 +1,201 @@
+import { localizationLabel, validateProvenance, validateSnapshot, type CatalogueSnapshot, type SnapshotItem, type SnapshotLocalization } from "./catalogue.js";
+import { matchesResearch } from "./filter.js";
+import { parseQuery, serializeQuery, type QueryCriteria } from "./query.js";
+import { buildResultViewModel } from "./results.js";
+import snapshot, { provenance } from "./snapshot.js";
+
+const $ = <T extends Element>(selector: string): T => {
+  const element = document.querySelector<T>(selector);
+  if (!element) throw new Error(`Missing ${selector}`);
+  return element;
+};
+
+function text(tag: string, value?: unknown, className?: string): HTMLElement {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (value !== undefined && value !== null) element.textContent = String(value);
+  return element;
+}
+
+function link(href: string, label: string, className?: string): HTMLAnchorElement {
+  const element = text("a", label, className) as HTMLAnchorElement;
+  element.href = href;
+  return element;
+}
+
+function enableThemeControl(): void {
+  const button = document.querySelector<HTMLButtonElement>("[data-theme-toggle]");
+  if (!button) return;
+  const update = (): void => {
+    const theme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+    button.textContent = "Dark theme";
+    button.setAttribute("aria-pressed", String(theme === "dark"));
+  };
+  button.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("snoredex-theme", next); } catch { /* private state stays local */ }
+    update();
+  });
+  update();
+}
+
+function renderProvenance(container: HTMLElement, catalogue: CatalogueSnapshot): void {
+  const dl = text("dl", undefined, "provenance");
+  const fields: readonly [string, unknown][] = [
+    ["Data as of", catalogue.meta.dataAsOf ?? "Unknown"],
+    ["Source", catalogue.meta.sourceRepository ?? "Unknown"],
+    ["Contract", catalogue.meta.schemaVersion],
+    ["Catalogue fingerprint", catalogue.meta.catalogueFingerprint],
+    ["Build input", "synthetic-fixture"],
+  ];
+  for (const [label, value] of fields) {
+    dl.append(text("dt", label), text("dd", value));
+  }
+  container.replaceChildren(dl);
+}
+
+function sortedLocalizations(catalogue: CatalogueSnapshot): SnapshotLocalization[] {
+  return [...catalogue.localizations].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+}
+
+function renderLocalizationLinks(container: HTMLElement, catalogue: CatalogueSnapshot, hrefPrefix = "collection/"): void {
+  const list = text("ul", undefined, "link-list");
+  for (const localization of sortedLocalizations(catalogue)) {
+    const name = localizationLabel(localization);
+    const suffix = localization.locality ? ` (${localization.locality})` : "";
+    const li = text("li");
+    li.append(link(`${hrefPrefix}${serializeQuery({ localization: localization.localizationId })}`, `${name}${suffix}`));
+    list.append(li);
+  }
+  container.replaceChildren(list);
+}
+
+function renderIndex(catalogue: CatalogueSnapshot): void {
+  renderProvenance($("[data-provenance]"), catalogue);
+  renderLocalizationLinks($("[data-localizations]"), catalogue);
+}
+
+function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalogue: CatalogueSnapshot): void {
+  const form = text("form", undefined, "query-form") as HTMLFormElement;
+  form.method = "get";
+  form.action = "./";
+  const localization = text("label", "Localization") as HTMLLabelElement;
+  const select = document.createElement("select");
+  select.name = "localization";
+  const home = text("option", "All localizations") as HTMLOptionElement;
+  home.value = ""; select.append(home);
+  for (const row of sortedLocalizations(catalogue)) {
+    const option = text("option", localizationLabel(row)) as HTMLOptionElement;
+    option.value = row.localizationId; option.selected = row.localizationId === criteria.localization; select.append(option);
+  }
+  localization.append(select);
+  const query = text("label", "Search public catalogue text") as HTMLLabelElement;
+  const input = document.createElement("input");
+  input.type = "search"; input.name = "q"; input.maxLength = 120; input.value = criteria.q ?? "";
+  query.append(input);
+  for (const [name, value] of [["status", criteria.status], ["kind", criteria.kind], ["research", criteria.research]] as const) {
+    if (!value) continue;
+    const hidden = document.createElement("input");
+    hidden.type = "hidden"; hidden.name = name; hidden.value = value;
+    form.append(hidden);
+  }
+  const submit = text("button", "Apply criteria") as HTMLButtonElement; submit.type = "submit";
+  form.addEventListener("submit", () => {
+    // Empty optional controls are omitted; explicit empty URL values remain invalid.
+    select.disabled = select.value === "";
+    input.disabled = input.value === "";
+  });
+  window.addEventListener("pageshow", () => {
+    // bfcache can restore the submitted DOM; controls must remain editable on Back.
+    select.disabled = false;
+    input.disabled = false;
+  });
+  form.append(localization, query, submit);
+  container.replaceChildren(form);
+}
+
+function renderInvalid(container: HTMLElement, recoverableLocalization?: string, failClosed = false): void {
+  if (failClosed) {
+    for (const element of document.querySelectorAll<HTMLElement>("[data-catalogue-dependent]")) element.hidden = true;
+  }
+  container.hidden = false;
+  const section = text("section", undefined, "state-panel");
+  section.setAttribute("aria-live", "polite");
+  const stateMessage = failClosed
+    ? "The complete link could not be validated. No catalogue or private collection state was read."
+    : "The complete link could not be validated. No private collection state was read.";
+  section.append(text("h2", "Invalid checklist link"), text("p", stateMessage));
+  const actions = text("p");
+  if (recoverableLocalization || window.location.search) {
+    actions.append(link(recoverableLocalization ? `./${serializeQuery({ localization: recoverableLocalization })}` : "./", "Clear invalid criteria"));
+  }
+  const homeHref = document.body.dataset.page === "collection" ? "../" : "./";
+  if (actions.childElementCount > 0) actions.append(" · ");
+  actions.append(link(homeHref, "Home"));
+  section.append(actions); container.replaceChildren(section);
+}
+
+function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogue: CatalogueSnapshot): void {
+  if (criteria.status) {
+    const deferred = text("section", undefined, "state-panel");
+    deferred.setAttribute("aria-live", "polite");
+    deferred.append(text("h2", "Status filter pending"), text("p", "This public criterion is preserved in the link, but private progress is not available to the static shell yet. The collection state layer will apply it without exposing private values in the URL."));
+    container.replaceChildren(deferred);
+    return;
+  }
+  if (!criteria.localization) {
+    const summary = text("div", undefined, "state-panel");
+    summary.append(text("h2", "Choose a localization"), text("p", "The home view shows public summaries only. Choose a localization to open its checklist and keep the URL shareable."));
+    container.replaceChildren(summary);
+    return;
+  }
+  const model = buildResultViewModel(criteria, catalogue, matchesResearch);
+  const { activeItems: items, inactiveItems } = model;
+  const list = text("ul", undefined, "item-list");
+  for (const item of items) {
+    const row = text("li", undefined, "item-row");
+    row.append(text("strong", item.cardName ?? "Unnamed item"), text("span", ` · ${item.localSetCode ?? "Unknown set"} ${item.collectorNumber ?? ""}`));
+    if (item.localCardName) row.append(text("span", ` · ${item.localCardName}`));
+    list.append(row);
+  }
+  const content: Node[] = [text("p", model.activeSummary), list];
+  if (inactiveItems.length > 0) {
+    const inactive = text("section", undefined, "state-panel");
+    inactive.append(text("h2", model.inactiveHeading), text("p", model.inactiveSummary));
+    const inactiveList = text("ul", undefined, "item-list");
+    for (const item of inactiveItems) {
+      const row = text("li", undefined, "item-row");
+      row.append(text("strong", item.cardName), text("span", ` · ${item.localSetCode ?? "Unknown set"} ${item.collectorNumber ?? ""}`));
+      inactiveList.append(row);
+    }
+    inactive.append(inactiveList);
+    content.push(inactive);
+  }
+  container.replaceChildren(...content);
+}
+
+function renderCollection(catalogue: CatalogueSnapshot): void {
+  const ids = new Set(sortedLocalizations(catalogue).map((row) => row.localizationId));
+  const parsed = parseQuery(window.location.search, ids);
+  renderProvenance($("[data-provenance]"), catalogue);
+  renderLocalizationLinks($("[data-localizations]"), catalogue, "");
+  if (!parsed.ok) {
+    renderInvalid($("[data-view]"), parsed.recoverableLocalization);
+    return;
+  }
+  renderQueryForm($("[data-query]"), parsed.criteria, catalogue);
+  renderResults($("[data-view]"), parsed.criteria, catalogue);
+}
+
+enableThemeControl();
+const validated = await validateSnapshot(snapshot);
+if (!validated.ok) {
+  renderInvalid($("[data-view]"), undefined, true);
+} else if (!validateProvenance(provenance, validated.snapshot)) {
+  renderInvalid($("[data-view]"), undefined, true);
+} else if (document.body.dataset.page === "collection") {
+  renderCollection(validated.snapshot);
+} else {
+  renderIndex(validated.snapshot);
+}

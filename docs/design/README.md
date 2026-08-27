@@ -17,8 +17,10 @@ The public site has two static entry pages:
 - `/` is a compact, marketing-capable project index.
 - `/collection/` is the collection application.
 
-Only the collection page carries canonical public search and filter parameters. Private status,
-quantity, notes, result membership, orphan/conflict data and backups never enter either URL.
+Only the collection page carries canonical public search and filter parameters. A `status` value in
+that query is a public criterion reserved for the collection-state layer; the static shell defers it
+visibly until that layer is mounted. Actual private status values, quantities, notes, result
+membership, orphan/conflict data and backups never enter either URL.
 This two-page decision supersedes the earlier single-entry route comments in issue [#9], while
 retaining static GitHub Pages delivery without a client router or rewrite fallback.
 

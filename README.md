@@ -55,8 +55,13 @@ npm ci
 npm run check
 ```
 
-`npm run check` type-checks the repository and runs the deterministic toolchain smoke check. It
-does not fetch producer catalogue data or build an application artifact. Follow
+`npm run build:site` assembles the static Pages artifact in `dist/site/` from the reviewed
+synthetic fixture. The generated directory is ignored; production catalogue adoption and
+publication remain issue-backed gates.
+
+`npm run check` type-checks the repository, runs the deterministic toolchain smoke check and
+assembles the synthetic static shell. It does not fetch producer catalogue data or adopt a
+production snapshot. Follow
 [`CONTRIBUTING.md`](CONTRIBUTING.md) and the owning issue before adding implementation commands.
 
 ### Issue-backed catalogue sync
