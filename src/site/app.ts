@@ -1,5 +1,6 @@
 import { localizationLabel, validateProvenance, validateSnapshot, type CatalogueSnapshot, type SnapshotItem, type SnapshotLocalSet, type SnapshotLocalization } from "./catalogue.js";
 import { imageAssetUrl, resolveImageAsset } from "./assets.js";
+import { createCollectionStateController, type CollectionEditResult, type CollectionStateController } from "./collection-state.js";
 import { matchesResearch } from "./filter.js";
 import { collectorNumberLabel, evidenceCueLabel, imageScopeLabel, itemCueLabel, linkValues, presentText, safeExternalUrl } from "./item-presentation.js";
 import { readPrivateState, type PrivateStateRead } from "./private-state.js";
@@ -12,6 +13,9 @@ const $ = <T extends Element>(selector: string): T => {
   if (!element) throw new Error(`Missing ${selector}`);
   return element;
 };
+
+type Cleanup = () => void;
+const resultCleanups = new WeakMap<HTMLElement, Set<Cleanup>>();
 
 function text(tag: string, value?: unknown, className?: string): HTMLElement {
   const element = document.createElement(tag);
@@ -296,6 +300,7 @@ function renderProgress(catalogue: CatalogueSnapshot, localizationId: string | u
     (!localizationId || item.localizationId === localizationId) && (!editionId || item.setEditionId === editionId));
   const progress = buildProgressViewModel(scope, state.readable ? state.statuses : undefined);
   const section = text("section", undefined, "progress-panel");
+  section.tabIndex = -1;
   const heading = text("h2", "Current-known progress");
   heading.id = "progress-title";
   section.setAttribute("aria-labelledby", heading.id);
@@ -471,7 +476,224 @@ function renderItemImage(item: SnapshotItem, catalogue: CatalogueSnapshot): HTML
   return figure;
 }
 
-function renderItemRow(item: SnapshotItem, catalogue: CatalogueSnapshot, inactive = false, ownerLabel?: string, setIdentity?: string): HTMLLIElement {
+const STATUS_OPTIONS = [
+  ["need", "Need"],
+  ["ordered", "Ordered"],
+  ["have", "Have"],
+  ["skip", "Skip"],
+] as const;
+const MAX_NOTE_CODE_POINTS = 2_000;
+
+function renderCollectionControls(item: SnapshotItem, controller: CollectionStateController, registerCleanup?: (cleanup: Cleanup) => void): HTMLElement {
+  const record = controller.record(item.itemId);
+  const wrapper = text("div", undefined, "collection-controls");
+  const feedback = text("span", undefined, "state-feedback");
+  feedback.setAttribute("role", "status");
+  feedback.setAttribute("aria-live", "polite");
+  const retry = text("button", "Retry save", "state-retry") as HTMLButtonElement;
+  retry.type = "button";
+  retry.hidden = true;
+  let retryAction: (() => Promise<CollectionEditResult>) | undefined;
+  const showResult = (result: CollectionEditResult): void => {
+    if (result.deferred) return;
+    retry.textContent = "Retry save";
+    if (result.ok && !result.skipped) {
+      feedback.textContent = "Saved";
+      retry.hidden = true;
+    } else if (result.ok) {
+      feedback.textContent = "Saving…";
+      retry.hidden = true;
+    } else if (result.error === "STORAGE_COMMIT_UNCERTAIN") {
+      feedback.textContent = "Save conflict detected. Reload to reconcile your collection.";
+      retry.textContent = "Reload to recover";
+      retryAction = () => {
+        globalThis.location?.reload();
+        return Promise.resolve({ ok: true, skipped: true });
+      };
+      retry.hidden = false;
+    } else {
+      feedback.textContent = "Save failed. Your draft is still visible; retry when ready.";
+      retry.hidden = false;
+    }
+  };
+  const runSave = (action: () => Promise<CollectionEditResult>): void => {
+    retryAction = action;
+    retry.hidden = true;
+    feedback.textContent = "Saving…";
+    void action().then(showResult);
+  };
+  retry.addEventListener("click", () => {
+    if (retryAction !== undefined) runSave(retryAction);
+  });
+  const stopSaveListener = controller.onSave((itemId, result) => {
+    if (itemId === item.itemId) showResult(result);
+  });
+  registerCleanup?.(stopSaveListener);
+
+  const fieldset = text("fieldset", undefined, "status-controls") as HTMLFieldSetElement;
+  fieldset.append(text("legend", "Collection status"));
+  const statusName = `status-${item.itemId}`;
+  const statusInputs = new Map<string, HTMLInputElement>();
+  for (const [value, label] of STATUS_OPTIONS) {
+    const labelElement = text("label", undefined, "status-option");
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = statusName;
+    input.value = value;
+    input.checked = (record?.status ?? "need") === value;
+    statusInputs.set(value, input);
+    input.addEventListener("change", () => {
+      runSave(() => controller.setStatus(item.itemId, value));
+    });
+    labelElement.append(input, text("span", label));
+    fieldset.append(labelElement);
+  }
+
+  const quantity = text("div", undefined, "quantity-controls");
+  const quantityHeading = text("span", "Quantities", "control-heading");
+  const ownedLabel = text("label", "Owned");
+  const owned = document.createElement("input");
+  owned.type = "number";
+  owned.min = "0";
+  owned.max = "9999";
+  owned.step = "1";
+  owned.value = String(record?.quantityOwned ?? 0);
+  owned.setAttribute("inputmode", "numeric");
+  ownedLabel.append(owned);
+  const orderedLabel = text("label", "Ordered");
+  const ordered = document.createElement("input");
+  ordered.type = "number";
+  ordered.min = "0";
+  ordered.max = "9999";
+  ordered.step = "1";
+  ordered.value = String(record?.quantityOrdered ?? 0);
+  ordered.setAttribute("inputmode", "numeric");
+  orderedLabel.append(ordered);
+  const stopChangeListener = controller.onChange(() => {
+    const latest = controller.record(item.itemId);
+    const latestStatus = latest?.status ?? "need";
+    for (const [value, input] of statusInputs) input.checked = value === latestStatus;
+    if (document.activeElement !== owned) owned.value = String(latest?.quantityOwned ?? 0);
+    if (document.activeElement !== ordered) ordered.value = String(latest?.quantityOrdered ?? 0);
+  });
+  registerCleanup?.(stopChangeListener);
+  const saveQuantities = (): void => {
+    runSave(() => controller.setQuantities(item.itemId, Number(owned.value), Number(ordered.value)));
+  };
+  owned.addEventListener("change", saveQuantities);
+  ordered.addEventListener("change", saveQuantities);
+  quantity.append(quantityHeading, ownedLabel, orderedLabel);
+
+  const note = text("div", undefined, "note-control");
+  const noteButton = text("button", "Add note") as HTMLButtonElement;
+  noteButton.type = "button";
+  noteButton.hidden = record?.note !== undefined;
+  const textarea = document.createElement("textarea");
+  textarea.rows = 3;
+  textarea.placeholder = "Private note";
+  textarea.value = record?.note ?? "";
+  textarea.hidden = record?.note === undefined;
+  textarea.setAttribute("aria-label", `Private note for ${itemCardLabel(item)}`);
+  const openNote = (): void => {
+    textarea.hidden = false;
+    noteButton.hidden = true;
+    textarea.focus();
+  };
+  noteButton.addEventListener("click", openNote);
+  textarea.addEventListener("input", () => {
+    const codePoints = [...textarea.value];
+    if (codePoints.length > MAX_NOTE_CODE_POINTS) textarea.value = codePoints.slice(0, MAX_NOTE_CODE_POINTS).join("");
+    retryAction = () => controller.flushNote();
+    retry.hidden = true;
+    const scheduled = controller.scheduleNote(item.itemId, textarea.value);
+    if (!scheduled.ok) showResult(scheduled);
+    else feedback.textContent = "Saving…";
+  });
+  textarea.addEventListener("focusout", () => { void controller.flushNote(); });
+  note.append(noteButton, textarea);
+  wrapper.append(fieldset, quantity, note, feedback, retry);
+  return wrapper;
+}
+
+function statusKey(state: PrivateStateRead): string {
+  return [...state.statuses.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([itemId, status]) => `${itemId}:${status}`).join("|");
+}
+
+function renderRecoveryPanel(controller: CollectionStateController, onResolved?: (announcement: string) => void, registerCleanup?: (cleanup: Cleanup) => void): HTMLElement | undefined {
+  const recovery = controller.recovery;
+  if (recovery === undefined) return undefined;
+  const panel = text("section", undefined, "state-panel recovery-panel");
+  const feedback = text("p", undefined, "state-feedback");
+  feedback.setAttribute("role", "status");
+  feedback.setAttribute("aria-live", "polite");
+  const actions = text("div", undefined, "recovery-actions");
+  const adopt = text("button", "Adopt recovered changes") as HTMLButtonElement;
+  adopt.type = "button";
+  const discard = text("button", "Discard recovered changes") as HTMLButtonElement;
+  discard.type = "button";
+  const reload = text("button", "Reload to reconcile") as HTMLButtonElement;
+  reload.type = "button";
+  reload.hidden = true;
+  reload.addEventListener("click", () => { globalThis.location?.reload(); });
+  let completionAnnouncement = "Collection recovery updated.";
+  const run = (action: () => Promise<CollectionEditResult>): void => {
+    adopt.disabled = true;
+    discard.disabled = true;
+    reload.hidden = true;
+    feedback.textContent = "Saving…";
+    void action().then((result) => {
+      if (result.ok) {
+        feedback.textContent = "Recovered changes saved.";
+        onResolved?.(completionAnnouncement);
+      }
+      else {
+        if (result.error === "STORAGE_COMMIT_UNCERTAIN") {
+          feedback.textContent = "Recovery conflict detected. Reload to reconcile your collection.";
+          reload.hidden = false;
+        } else {
+          feedback.textContent = "Recovery action failed. The recovered draft is still available; retry when ready.";
+        }
+        adopt.disabled = false;
+        discard.disabled = false;
+      }
+    });
+  };
+  adopt.addEventListener("click", () => {
+    completionAnnouncement = "Recovered changes saved.";
+    run(() => controller.adoptRecovery());
+  });
+  discard.addEventListener("click", () => {
+    completionAnnouncement = "Recovered changes discarded.";
+    run(async () => controller.discardRecovery());
+  });
+  actions.append(adopt, discard, reload);
+  panel.append(
+    text("h2", "Recovered unsaved collection changes"),
+    text("p", `A private draft from an interrupted save is available (${recovery.itemIds.length} item${recovery.itemIds.length === 1 ? "" : "s"}${recovery.noteItemIds.length > 0 ? `, including ${recovery.noteItemIds.length} note${recovery.noteItemIds.length === 1 ? "" : "s"}` : ""}). Choose whether to adopt or discard it before editing.`),
+    actions,
+    feedback,
+  );
+  let stop: (() => void) | undefined;
+  stop = controller.onChange(() => {
+    if (controller.recovery === undefined) {
+      stop?.();
+      panel.remove();
+    }
+  });
+  registerCleanup?.(() => stop?.());
+  return panel;
+}
+
+function announceRecoveryResult(container: HTMLElement, announcement: string): void {
+  const status = text("p", announcement, "recovery-announcement");
+  status.setAttribute("role", "status");
+  container.prepend(status);
+  const target = container.querySelector<HTMLElement>(".progress-panel, h2") ?? container;
+  target.tabIndex = -1;
+  target.focus();
+}
+
+function renderItemRow(item: SnapshotItem, catalogue: CatalogueSnapshot, inactive = false, ownerLabel?: string, setIdentity?: string, stateController?: CollectionStateController, registerCleanup?: (cleanup: Cleanup) => void): HTMLLIElement {
   const row = text("li", undefined, "item-row") as HTMLLIElement;
   row.dataset.itemId = item.itemId;
   if (item.progressClass === "research") row.classList.add("item-row-research");
@@ -500,30 +722,68 @@ function renderItemRow(item: SnapshotItem, catalogue: CatalogueSnapshot, inactiv
   const evidence = evidenceCueLabel(item);
   if (evidence) tags.append(text("span", evidence, "item-cue"));
   if (inactive) tags.append(text("span", "Inactive", "item-cue"));
-  content.append(tags, renderItemDetails(item, catalogue, scopeLabel));
+  content.append(tags);
+  if (!inactive && item.active && item.progressClass === "current-known" && stateController !== undefined && stateController.recovery === undefined) {
+    content.append(renderCollectionControls(item, stateController, registerCleanup));
+  }
+  content.append(renderItemDetails(item, catalogue, scopeLabel));
   row.append(content);
   return row;
 }
 
-function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogue: CatalogueSnapshot, state: PrivateStateRead): void {
+function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogue: CatalogueSnapshot, state: PrivateStateRead, stateController?: CollectionStateController): void {
+  resultCleanups.get(container)?.forEach((cleanup) => cleanup());
+  const cleanups = new Set<Cleanup>();
+  resultCleanups.set(container, cleanups);
+  const registerCleanup = (cleanup: Cleanup): void => { cleanups.add(cleanup); };
+  const recoveryPanel = stateController === undefined
+    ? undefined
+    : renderRecoveryPanel(stateController, (announcement) => {
+      renderResults(container, criteria, catalogue, stateController.state, stateController);
+      announceRecoveryResult(container, announcement);
+    }, registerCleanup);
   if (criteria.status && !state.readable) {
     const deferred = text("section", undefined, "state-panel");
     deferred.setAttribute("aria-live", "polite");
     deferred.append(text("h2", "Status filter unavailable"), text("p", "The local collection state could not be read, so this status filter was not applied. Reload the page or restore a valid local collection and try again."));
-    container.replaceChildren(deferred);
+    container.replaceChildren(...(recoveryPanel === undefined ? [deferred] : [recoveryPanel, deferred]));
     return;
   }
   const hasFilter = Boolean(criteria.edition || criteria.q || criteria.kind || criteria.research || criteria.status);
   if (!criteria.localization && !hasFilter) {
     const summary = text("div", undefined, "state-panel");
     summary.append(text("h2", "Choose a localization or search"), text("p", "Browse one localization or search the public catalogue across set groups. The owning localization and set remain labelled on every result."));
-    container.replaceChildren(summary);
+    container.replaceChildren(...(recoveryPanel === undefined ? [summary] : [recoveryPanel, summary]));
     return;
   }
   const progress = renderProgress(catalogue, criteria.localization, criteria.edition, state);
+  let previousProgressStatusKey = stateController === undefined ? "" : statusKey(stateController.state);
+  const stopProgressListener = stateController?.onChange(() => {
+    const nextStatusKey = statusKey(stateController.state);
+    if (nextStatusKey === previousProgressStatusKey) return;
+    previousProgressStatusKey = nextStatusKey;
+    const updated = renderProgress(catalogue, criteria.localization, criteria.edition, stateController.state);
+    progress.replaceChildren(...updated.childNodes);
+  });
+  if (stopProgressListener !== undefined) registerCleanup(stopProgressListener);
+  if (criteria.status && stateController !== undefined) {
+    let previousStatusKey = statusKey(stateController.state);
+    let stopStatusListener: (() => void) | undefined;
+    stopStatusListener = stateController.onSave((_itemId, result) => {
+      if (!result.ok || result.skipped) return;
+      const nextStatusKey = statusKey(stateController.state);
+      if (nextStatusKey === previousStatusKey) return;
+      previousStatusKey = nextStatusKey;
+      stopStatusListener?.();
+      renderResults(container, criteria, catalogue, stateController.state, stateController);
+    });
+    registerCleanup(() => stopStatusListener?.());
+  }
   const model = buildResultViewModel(criteria, catalogue, matchesResearch, state.readable ? state.statuses : undefined);
   const { activeItems: items, inactiveItems } = model;
-  const content: Node[] = [progress, text("p", model.activeSummary)];
+  const content: Node[] = [];
+  if (recoveryPanel !== undefined) content.push(recoveryPanel);
+  content.push(progress, text("p", model.activeSummary));
   const groups = buildBrowseHierarchy(criteria, catalogue, matchesResearch, state.readable ? state.statuses : undefined);
   const grouped = text("div", undefined, "browse-results");
   const localizationLabelCounts = new Map<string, number>();
@@ -568,7 +828,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
           candidate.setEditionId === edition.edition.setEditionId && candidate.active && candidate.progressClass !== "research"));
         for (const item of currentItems) {
           const itemIdentity = (currentCollisionCounts.get(itemRowCollisionKey(item)) ?? 0) > 1 ? item.itemId : undefined;
-          list.append(renderItemRow(item, catalogue, false, undefined, itemIdentity));
+          list.append(renderItemRow(item, catalogue, false, undefined, itemIdentity, stateController, registerCleanup));
         }
         if (list.childElementCount > 0) editionSection.append(list);
         const research = edition.items.filter((item) => item.active && item.progressClass === "research");
@@ -580,7 +840,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
             candidate.setEditionId === edition.edition.setEditionId && candidate.active && candidate.progressClass === "research"));
           for (const item of research) {
             const itemIdentity = (researchCollisionCounts.get(itemRowCollisionKey(item)) ?? 0) > 1 ? item.itemId : undefined;
-            researchList.append(renderItemRow(item, catalogue, false, undefined, itemIdentity));
+            researchList.append(renderItemRow(item, catalogue, false, undefined, itemIdentity, stateController, registerCleanup));
           }
           researchSection.append(researchList);
           editionSection.append(researchSection);
@@ -622,7 +882,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
         : (inactiveSetIdentityCounts.get(setKey)?.size ?? 0) > 1 ? item.setEditionId : undefined;
       const itemIdentity = (inactiveCollisionCounts.get(itemRowCollisionKey(item, false)) ?? 0) > 1 ? item.itemId : undefined;
       const identitySuffix = [setIdentity, itemIdentity].filter(Boolean).join(" · ") || undefined;
-      inactiveList.append(renderItemRow(item, catalogue, true, ownerLabel, identitySuffix));
+      inactiveList.append(renderItemRow(item, catalogue, true, ownerLabel, identitySuffix, stateController, registerCleanup));
     }
     inactive.append(inactiveList);
     content.push(inactive);
@@ -651,8 +911,10 @@ async function renderCollection(catalogue: CatalogueSnapshot): Promise<void> {
     .filter((item) => item.active && item.progressClass === "current-known")
     .map((item) => item.itemId));
   const state = await readPrivateState(catalogue.meta.catalogueFingerprint, knownTrackableItemIds);
+  const stateController = await createCollectionStateController(catalogue.meta.catalogueFingerprint, knownTrackableItemIds);
+  const renderState = stateController?.state.readable === true ? stateController.state : state;
   renderQueryForm($("[data-query]"), parsed.criteria, catalogue);
-  renderResults($("[data-view]"), parsed.criteria, catalogue, state);
+  renderResults($("[data-view]"), parsed.criteria, catalogue, renderState, stateController);
 }
 
 enableThemeControl();

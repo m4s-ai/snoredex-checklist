@@ -7,5 +7,5 @@
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true
   },
-  "include": ["src/state/domain.ts", "src/state/authority.ts"]
+  "include": ["src/state/domain.ts", "src/state/authority.ts", "src/state/storage.ts"]
 }
