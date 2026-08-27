@@ -160,7 +160,7 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
   const syncEditionScope = (): void => {
     if (editionInput === undefined || !(localizationSelect instanceof HTMLSelectElement)) return;
     editionInput.disabled = selectedEdition?.localizationId !== undefined &&
-      localizationSelect.value !== selectedEdition.localizationId;
+      localizationSelect.value !== "" && localizationSelect.value !== selectedEdition.localizationId;
   };
   localizationSelect?.addEventListener("change", syncEditionScope);
   const query = text("label", "Search public catalogue text") as HTMLLabelElement;
