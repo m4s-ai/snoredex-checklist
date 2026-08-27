@@ -16,6 +16,13 @@ test("accepts the reviewed browser snapshot shape", async () => {
   assert.equal((await validateSnapshot(fixture.catalogue)).ok, true);
 });
 
+test("accepts schema-valid empty sort keys", async () => {
+  const emptySortKeys = structuredClone(fixture.catalogue);
+  emptySortKeys.localSets[0].sortKey = "";
+  emptySortKeys.setEditions[0].sortKey = "";
+  assert.equal((await validateSnapshot(reseal(emptySortKeys))).ok, true);
+});
+
 test("validates generated provenance and keeps localization labels nonempty", () => {
   const valid = {
     mode: "synthetic-fixture",

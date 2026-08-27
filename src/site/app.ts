@@ -96,12 +96,20 @@ function renderBrowseNavigation(container: HTMLElement, catalogue: CatalogueSnap
       setItem.append(text("span", setLabel));
       const editionList = text("ul", undefined, "browse-nested");
       const editions = catalogue.setEditions.filter((edition) => edition.localSetId === set.localSetId);
-      for (const edition of editions.sort((left, right) =>
-        String(left.sortKey ?? "").localeCompare(String(right.sortKey ?? ""), "en", { numeric: true }) || left.setEditionId.localeCompare(right.setEditionId))) {
+      const editionEntries = editions
+        .sort((left, right) =>
+          String(left.sortKey ?? "").localeCompare(String(right.sortKey ?? ""), "en", { numeric: true }) || left.setEditionId.localeCompare(right.setEditionId))
+        .map((edition) => {
+          const editionLabel = [edition.localSetCode, edition.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || edition.setEditionId;
+          const localization = localizations.get(edition.localizationId);
+          const label = localization ? `${editionLabel} · ${localizationLabel(localization)}` : editionLabel;
+          return { edition, label };
+        });
+      const labelCounts = new Map<string, number>();
+      for (const { label } of editionEntries) labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
+      for (const { edition, label } of editionEntries) {
         const editionItem = text("li", undefined, "browse-edition");
-        const editionLabel = [edition.localSetCode, edition.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || edition.setEditionId;
-        const localization = localizations.get(edition.localizationId);
-        const projectionLabel = localization ? `${editionLabel} · ${localizationLabel(localization)}` : editionLabel;
+        const projectionLabel = (labelCounts.get(label) ?? 0) > 1 ? `${label} · ${edition.setEditionId}` : label;
         editionItem.append(link(`./${serializeQuery({ localization: edition.localizationId, edition: edition.setEditionId })}`, projectionLabel));
         editionList.append(editionItem);
       }
@@ -243,13 +251,14 @@ function renderProgress(catalogue: CatalogueSnapshot, localizationId: string | u
   return section;
 }
 
-function renderItemRow(item: SnapshotItem, inactive = false): HTMLLIElement {
+function renderItemRow(item: SnapshotItem, inactive = false, ownerLabel?: string): HTMLLIElement {
   const row = text("li", undefined, "item-row") as HTMLLIElement;
   const identity = text("div", undefined, "item-identity");
   identity.append(text("strong", item.cardName ?? "Unnamed item"));
   if (item.localCardName && item.localCardName !== item.cardName) identity.append(text("span", ` · ${item.localCardName}`));
   const set = [item.localSetCode, item.localSetName, item.collectorNumber].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ");
   if (set) identity.append(text("span", ` · ${set}`));
+  if (ownerLabel) identity.append(text("span", ` · ${ownerLabel}`));
   row.append(identity);
   const cue = item.progressClass === "research"
     ? "Research · read-only"
@@ -315,7 +324,13 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
     const inactive = text("section", undefined, "state-panel");
     inactive.append(text("h2", model.inactiveHeading), text("p", model.inactiveSummary));
     const inactiveList = text("ul", undefined, "item-list");
-    for (const item of inactiveItems) inactiveList.append(renderItemRow(item, true));
+    for (const item of inactiveItems) {
+      const localization = catalogue.localizations.find((candidate) => candidate.localizationId === item.localizationId);
+      const ownerLabel = localization
+        ? `${localizationLabel(localization)}${localization.locality ? ` (${localization.locality})` : ""}`
+        : item.localizationId;
+      inactiveList.append(renderItemRow(item, true, ownerLabel));
+    }
     inactive.append(inactiveList);
     content.push(inactive);
   }

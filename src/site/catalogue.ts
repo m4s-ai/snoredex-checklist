@@ -201,10 +201,10 @@ export async function validateSnapshot(value: unknown): Promise<SnapshotValidati
   if (localizations.some((row) => !isString(row.locality) || !isString(row.languageTag) ||
       typeof row.displayName !== "string" || typeof row.displayOrder !== "number" || !Number.isInteger(row.displayOrder)) ||
       localSets.some((row) => !isString(row.localSetId) || !isString(row.locality) ||
-        !isNullableText(row.localSetCode) || !isNullableText(row.localSetName) || !isString(row.sortKey)) ||
+        !isNullableText(row.localSetCode) || !isNullableText(row.localSetName) || typeof row.sortKey !== "string") ||
       setEditions.some((row) => !isString(row.setEditionId) || !isString(row.localSetId) ||
         !isString(row.localizationId) || !isNullableText(row.localSetCode) ||
-        !isNullableText(row.localSetName) || !isString(row.sortKey)) ||
+        !isNullableText(row.localSetName) || typeof row.sortKey !== "string") ||
       assets.some((row) => !isString(row.imageScope))) {
     return { ok: false, reason: "invalid" };
   }
