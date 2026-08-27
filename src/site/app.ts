@@ -184,12 +184,23 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
   const query = text("label", "Search public catalogue text") as HTMLLabelElement;
   const input = document.createElement("input");
   input.type = "search"; input.name = "q"; input.maxLength = 120; input.value = criteria.q ?? "";
+  const syncSearchValidity = (): void => {
+    const terms = input.value.trim().split(/\s+/u).filter(Boolean);
+    input.setCustomValidity(terms.length > 12 ? "Use at most 12 search terms." : "");
+  };
+  input.addEventListener("input", syncSearchValidity);
+  syncSearchValidity();
   query.append(input);
   const status = makeSelect("Status", "status", [["", "All statuses"], ["need", "Need"], ["ordered", "Ordered"], ["have", "Have"], ["skip", "Skip"]], criteria.status);
   const kind = makeSelect("Item class", "kind", [["", "All item classes"], ["verified-printing", "Verified printing"], ["finish-candidate", "Finish candidate"], ["research-placeholder", "Research placeholder"]], criteria.kind);
   const research = makeSelect("Research", "research", [["", "Current and research"], ["false", "Current-known only"], ["true", "Research only"]], criteria.research);
   const submit = text("button", "Apply criteria") as HTMLButtonElement; submit.type = "submit";
-  form.addEventListener("submit", () => {
+  form.addEventListener("submit", (event) => {
+    syncSearchValidity();
+    if (!input.checkValidity()) {
+      event.preventDefault();
+      return;
+    }
     // Empty optional controls are omitted; explicit empty URL values remain invalid.
     for (const control of controls) control.disabled = control.value === "";
     input.disabled = input.value.trim() === "";
