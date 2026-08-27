@@ -54,20 +54,14 @@ const PLACEHOLDER_ASSET_VALUES = {
 
 export const PLACEHOLDER_ASSETS = Object.freeze(PLACEHOLDER_ASSET_VALUES);
 
-const PRODUCER_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
-const PLACEHOLDER_SCOPES = new Set<PlaceholderScope>(["exact-printing", "card-release"]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function isString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
 function isSafeLocalPath(value: unknown): value is string {
   return isString(value) && value.startsWith("images/") && !value.startsWith("/") &&
-    !value.includes("\\") && !value.split("/").includes("..") && !value.includes("//");
+    !value.includes("\\") && !value.split("/").includes("..") && !value.includes("//") &&
+    !/%(?:2e|2f|5c)/i.test(value);
 }
 
 function placeholderScope(item: SnapshotItem): PlaceholderScope {
@@ -78,56 +72,13 @@ function placeholderFor(item: SnapshotItem): SiteImageAsset {
   return PLACEHOLDER_ASSETS[`placeholder-${placeholderScope(item)}`];
 }
 
-function safeProducerAsset(value: unknown, item: SnapshotItem, assetBaseUrl: unknown): SiteImageAsset | undefined {
-  if (!isRecord(value) || !isString(value.assetId) || !isSafeLocalPath(value.path) ||
-      !isString(value.url) || !isString(assetBaseUrl) ||
-      !isString(value.mimeType) || !PRODUCER_IMAGE_MIME_TYPES.has(value.mimeType) ||
-      !isString(value.imageScope) || !PLACEHOLDER_SCOPES.has(value.imageScope as PlaceholderScope) ||
-      value.imageScope !== item.imageScope || !isString(value.altTextBasis) ||
-      !isString(value.sha256) || !/^sha256:[0-9a-f]{64}$/.test(value.sha256) || !isRecord(value.attribution)) {
-    return undefined;
-  }
-  try {
-    const base = new URL(assetBaseUrl);
-    const resolved = new URL(value.path, base);
-    if (base.protocol !== "https:" || !base.pathname.endsWith("/") || base.search || base.hash ||
-        resolved.href !== value.url || !resolved.href.startsWith(base.href)) {
-      return undefined;
-    }
-  } catch {
-    return undefined;
-  }
-  const attribution = value.attribution;
-  if (attribution.rightsStatus !== "third-party-rights-excluded-from-project-grants" ||
-      attribution.licenceRef !== "LICENSE.md" || attribution.noticeRef !== "THIRD_PARTY_NOTICES.md") {
-    return undefined;
-  }
-  return {
-    assetId: value.assetId,
-    path: value.path,
-    mimeType: value.mimeType,
-    imageScope: value.imageScope as PlaceholderScope,
-    altTextBasis: value.altTextBasis,
-    attribution: {
-      rightsStatus: attribution.rightsStatus,
-      licenceRef: attribution.licenceRef,
-      noticeRef: attribution.noticeRef,
-    },
-    placeholder: false,
-    sha256: value.sha256,
-  };
-}
-
 /**
- * Resolve only local, scope-matching producer assets. Every other case is a deterministic
- * authored placeholder; no remote URL is returned and no runtime fetch is required.
+ * Resolve the current interim asset policy: every catalogue reference is a deterministic
+ * authored placeholder until producer bytes have been approved, vendored and digest-checked
+ * through the issue-backed sync/build path. No remote URL is returned and no runtime fetch is
+ * required.
  */
-export function resolveImageAsset(catalogue: CatalogueSnapshot, item: SnapshotItem): SiteImageAsset {
-  if (item.imageAssetId !== null) {
-    const candidate = catalogue.assets.find((asset) => isRecord(asset) && asset.assetId === item.imageAssetId);
-    const producerAsset = safeProducerAsset(candidate, item, catalogue.meta.assetBaseUrl);
-    if (producerAsset) return producerAsset;
-  }
+export function resolveImageAsset(_catalogue: CatalogueSnapshot, item: SnapshotItem): SiteImageAsset {
   return placeholderFor(item);
 }
 

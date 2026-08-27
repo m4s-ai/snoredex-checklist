@@ -59,7 +59,7 @@ test("falls back locally without claiming a missing or remote image", () => {
   assert.equal(resolvedUnapproved.placeholder, true);
 });
 
-test("accepts only a local scope-matching producer asset", () => {
+test("retains the placeholder until producer bytes are vendored", () => {
   const catalogue = structuredClone(fixture.catalogue) as any;
   catalogue.assets.push({
     assetId: "local-asset",
@@ -75,11 +75,12 @@ test("accepts only a local scope-matching producer asset", () => {
   item.imageAssetId = "local-asset";
   item.imageScope = "exact-printing";
   const resolved = resolveImageAsset(catalogue, item);
-  assert.equal(resolved.assetId, "local-asset");
-  assert.equal(resolved.placeholder, false);
-  assert.equal(imageAssetUrl(resolved, "https://example.test/snoredex/assets.js"), "https://example.test/snoredex/images/card.webp");
+  assert.equal(resolved.assetId, "placeholder-exact-printing");
+  assert.equal(resolved.placeholder, true);
 });
 
 test("never emits a URL for an unsafe path", () => {
   assert.equal(imageAssetUrl({ path: "../remote.webp" }, "https://example.test/snoredex/assets.js"), "https://example.test/snoredex/images/placeholders/card-release.svg");
+  assert.equal(imageAssetUrl({ path: "images/%2e%2e/%2e%2e/secret.webp" }, "https://example.test/snoredex/assets.js"), "https://example.test/snoredex/images/placeholders/card-release.svg");
+  assert.equal(imageAssetUrl({ path: "images/%2fsecret.webp" }, "https://example.test/snoredex/assets.js"), "https://example.test/snoredex/images/placeholders/card-release.svg");
 });
