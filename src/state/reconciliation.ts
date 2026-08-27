@@ -53,7 +53,7 @@ export interface ReconciliationRecord {
   readonly changeKind: string;
   readonly automaticStateAction: string;
   readonly resolution: "identity-retained" | "one-to-one-preserve" | "retire-to-orphan" | "requires-user-resolution";
-  readonly disposition: "active" | "migrated" | "orphan" | "orphan-and-conflict";
+  readonly disposition: "active" | "migrated" | "orphan" | "orphan-and-conflict" | "orphans-and-conflict";
 }
 
 export interface ReconciliationAccounting {
@@ -221,11 +221,17 @@ function expectedForTransition(
 ): ClassifiedRecord["kind"] | undefined {
   const fromIds = transitionSources(transition);
   const targetCount = transition.toItemIds.length;
-  if (fromIds.length === 1 && targetCount === 1
-    && transition.automaticStateAction === "preserve"
-    && (transition.changeKind === "retained" || transition.changeKind === "rekey-1:1")
-    && (transition.reconciliation === "identity-retained" || transition.reconciliation === "one-to-one-preserve")) {
-    return "active";
+  if (fromIds.length === 1 && targetCount === 1 && transition.automaticStateAction === "preserve") {
+    if (transition.changeKind === "retained"
+      && transition.reconciliation === "identity-retained"
+      && fromIds[0] === transition.toItemIds[0]) {
+      return "active";
+    }
+    if (transition.changeKind === "rekey-1:1"
+      && transition.reconciliation === "one-to-one-preserve") {
+      return "active";
+    }
+    return undefined;
   }
   if (fromIds.length === 1 && targetCount === 0
     && transition.automaticStateAction === "none"
@@ -254,7 +260,7 @@ function reportFor(
   const retained = records.filter((record) => record.resolution === "identity-retained").length;
   const migrated = records.filter((record) => record.resolution === "one-to-one-preserve").length;
   const retiredOrphans = records.filter((record) => record.resolution === "retire-to-orphan").length;
-  const conflicts = records.filter((record) => record.disposition === "orphan-and-conflict").length;
+  const conflicts = records.filter((record) => record.disposition === "orphan-and-conflict" || record.disposition === "orphans-and-conflict").length;
   const unresolved = records.filter((record) => record.resolution === "requires-user-resolution").length;
   let newCurrentKnown = 0;
   let newResearch = 0;
@@ -300,7 +306,7 @@ function transitionRecord(
     : kind === "orphan" ? "retire-to-orphan" : "requires-user-resolution";
   const disposition = kind === "active"
     ? (resolution === "identity-retained" ? "active" : "migrated")
-    : kind === "orphan" ? "orphan" : "orphan-and-conflict";
+    : kind === "orphan" ? "orphan" : fromIds.length > 1 ? "orphans-and-conflict" : "orphan-and-conflict";
   return {
     record: {
       fromItemIds: fromIds,
@@ -315,25 +321,42 @@ function transitionRecord(
   };
 }
 
-function unsupportedSource(state: PrivateState, targetFingerprint: string): ReconciliationResult {
-  return fail("STATE_FINGERPRINT_UNSUPPORTED", {
+function blockedSource(
+  state: PrivateState,
+  targetFingerprint: string,
+  error: ReconciliationErrorCode,
+  changeKind: string,
+): ReconciliationResult {
+  const records: ReconciliationRecord[] = state.items.map((item) => ({
+    fromItemIds: [item.itemId],
+    toItemIds: [],
+    changeKind,
+    automaticStateAction: "none",
+    resolution: "requires-user-resolution",
+    disposition: "orphan-and-conflict",
+  }));
+  return fail(error, {
     sourceFingerprint: state.catalogueFingerprint,
     targetFingerprint,
     steps: 0,
-    records: [],
+    records,
     accounting: {
       oldExplicitRecords: state.items.length,
       retained: 0,
       migrated: 0,
       retiredOrphans: 0,
-      conflicts: 0,
-      unresolved: 0,
+      conflicts: records.length,
+      unresolved: records.length,
       newCurrentKnown: 0,
       newResearch: 0,
-      accountedOldRecords: 0,
-      conservationSatisfied: state.items.length === 0,
+      accountedOldRecords: records.length,
+      conservationSatisfied: state.items.length === records.length,
     },
   });
+}
+
+function unsupportedSource(state: PrivateState, targetFingerprint: string): ReconciliationResult {
+  return blockedSource(state, targetFingerprint, "STATE_FINGERPRINT_UNSUPPORTED", "missing-chain");
 }
 
 /**
@@ -380,7 +403,7 @@ export function reconcilePrivateState(
     return fail("STATE_RECONCILIATION_BLOCKED");
   }
   const chain = findChain(state.catalogueFingerprint, targetFingerprint, migrations);
-  if (chain === "ambiguous") return fail("STATE_RECONCILIATION_BLOCKED");
+  if (chain === "ambiguous") return blockedSource(state, targetFingerprint, "STATE_RECONCILIATION_BLOCKED", "ambiguous-chain");
   if (chain === undefined || chain.length === 0) return unsupportedSource(state, targetFingerprint);
 
   let working = new Map<string, WorkingRecord>(state.items.map((item) => [item.itemId, { state: cloneItem(item), itemId: item.itemId }]));

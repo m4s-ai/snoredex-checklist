@@ -239,7 +239,7 @@ export function buildImportPreview(
   const totals = aggregate(state);
   return ok({
     mode: current === undefined || current.items.length === 0 ? "create" : "replace",
-    sourceFingerprint: state.catalogueFingerprint,
+    sourceFingerprint: reconciliation?.sourceFingerprint ?? state.catalogueFingerprint,
     targetFingerprint,
     schemaVersion: state.schemaVersion,
     ...totals,
@@ -337,6 +337,7 @@ function promoteRecovery(
   storage: StorageLike,
   expectedRaw: AuthorityRawSnapshot,
   active: PrivateState,
+  recovery: PrivateState | undefined,
 ): BackupResult<LifecycleSuccess> {
   const current = readAuthority(storage);
   if (!current.ok) return current;
@@ -359,9 +360,12 @@ function promoteRecovery(
     }
     return fail("STORAGE_COMMIT_UNCERTAIN");
   }
+  const serializedRecovery = recovery === undefined ? "null" : serializePrivateState(recovery);
+  if (typeof serializedRecovery !== "string" && !serializedRecovery.ok) return fail("STORAGE_WRITE_FAILED");
+  const recoveryText = typeof serializedRecovery === "string" ? serializedRecovery : serializedRecovery.value;
   try {
-    storage.setItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY, "null");
-    if (storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY) !== "null") {
+    storage.setItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY, recoveryText);
+    if (storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY) !== recoveryText) {
       restoreRaw(storage, PRIVATE_STATE_RECOVERY_STORAGE_KEY, expectedRaw.recovery);
       return fail("STORAGE_COMMIT_UNCERTAIN");
     }
@@ -377,10 +381,10 @@ function promoteRecovery(
     return fail("STORAGE_COMMIT_UNCERTAIN");
   }
   const after = readAuthority(storage);
-  if (!after.ok || after.value.raw.active !== serializedActive.value || after.value.raw.recovery !== "null") {
+  if (!after.ok || after.value.raw.active !== serializedActive.value || after.value.raw.recovery !== recoveryText) {
     return fail("STORAGE_COMMIT_UNCERTAIN");
   }
-  return ok({ active: after.value.authority.active, recovery: undefined, changed: true });
+  return ok({ active: after.value.authority.active, recovery: after.value.authority.recovery, changed: true });
 }
 
 async function exclusive<T>(storage: StorageLike, callback: () => T): Promise<T> {
@@ -550,7 +554,9 @@ export class PrivateStateLifecycle {
       if (recovery === undefined) return fail("EXPORT_FAILED");
       const validatedRecovery = validatePrivateState(recovery);
       if (!validatedRecovery.ok) return fail(mapStateError(validatedRecovery.error));
+      const active = current.value.authority.active;
       let candidate = validatedRecovery.value;
+      let preservedRecovery: PrivateState | undefined;
       if (candidate.catalogueFingerprint === targetFingerprint) {
         const checked = validatePrivateState(candidate, knownItemIds);
         if (!checked.ok) return fail(mapStateError(checked.error));
@@ -562,13 +568,16 @@ export class PrivateStateLifecycle {
           knownTargetItemIds: knownItemIds,
         });
         if (!result.ok) return fail(result.error);
+        const preservedItems = [...result.value.orphans, ...result.value.conflicts];
+        preservedRecovery = preservedItems.length === 0
+          ? undefined
+          : { ...validatedRecovery.value, items: preservedItems };
         candidate = result.value.state;
       }
-      const active = current.value.authority.active;
       if (active === undefined || active.items.length === 0) {
-        return promoteRecovery(this.storage, current.value.raw, candidate);
+        return promoteRecovery(this.storage, current.value.raw, candidate, preservedRecovery);
       }
-      return writeAuthority(this.storage, current.value.raw, candidate, active);
+      return writeAuthority(this.storage, current.value.raw, candidate, preservedRecovery ?? active);
     });
   }
 }

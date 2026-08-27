@@ -109,6 +109,7 @@ test("fails closed for split, merge, unresolved and unaccounted records", () => 
     assert.equal(merge.error, "STATE_RECONCILIATION_BLOCKED");
     assert.equal(merge.report?.accounting.conflicts, 2);
     assert.equal(merge.report?.accounting.conservationSatisfied, true);
+    assert.equal(merge.report?.records[0]?.disposition, "orphans-and-conflict");
   }
 
   const unaccounted = reconcilePrivateState(state(oldFingerprint, [{ itemId: oldC, status: "skip", quantityOwned: 0, quantityOrdered: 0 }]), targetFingerprint, {
@@ -123,7 +124,11 @@ test("rejects unknown, future and incomplete chains before mutation", () => {
     migrations: [],
   });
   assert.equal(unsupported.ok, false);
-  if (!unsupported.ok) assert.equal(unsupported.error, "STATE_FINGERPRINT_UNSUPPORTED");
+  if (!unsupported.ok) {
+    assert.equal(unsupported.error, "STATE_FINGERPRINT_UNSUPPORTED");
+    assert.equal(unsupported.report?.records.length, 1);
+    assert.equal(unsupported.report?.accounting.conservationSatisfied, true);
+  }
 
   const malformed = reconcilePrivateState(state(oldFingerprint), targetFingerprint, {
     migrations: [migration(oldFingerprint, targetFingerprint, [{
@@ -137,15 +142,46 @@ test("rejects unknown, future and incomplete chains before mutation", () => {
   assert.equal(malformed.ok, false);
   if (!malformed.ok) assert.equal(malformed.error, "STATE_RECONCILIATION_BLOCKED");
 
+  const mismatchedRetained = reconcilePrivateState(state(oldFingerprint, [
+    { itemId: oldA, status: "have", quantityOwned: 1, quantityOrdered: 0 },
+  ]), targetFingerprint, {
+    migrations: [migration(oldFingerprint, targetFingerprint, [
+      transition(oldA, [targetA], "retained", "preserve", "identity-retained"),
+    ])],
+  });
+  assert.equal(mismatchedRetained.ok, false);
+  if (!mismatchedRetained.ok) assert.equal(mismatchedRetained.error, "STATE_RECONCILIATION_BLOCKED");
+
+  const crossedRetainedMetadata = reconcilePrivateState(state(oldFingerprint), targetFingerprint, {
+    migrations: [migration(oldFingerprint, targetFingerprint, [
+      transition(oldA, [oldA], "retained", "preserve", "one-to-one-preserve"),
+    ])],
+  });
+  assert.equal(crossedRetainedMetadata.ok, false);
+  if (!crossedRetainedMetadata.ok) assert.equal(crossedRetainedMetadata.error, "STATE_RECONCILIATION_BLOCKED");
+
+  const crossedRekeyMetadata = reconcilePrivateState(state(oldFingerprint), targetFingerprint, {
+    migrations: [migration(oldFingerprint, targetFingerprint, [
+      transition(oldA, [targetA], "rekey-1:1", "preserve", "identity-retained"),
+    ])],
+  });
+  assert.equal(crossedRekeyMetadata.ok, false);
+  if (!crossedRekeyMetadata.ok) assert.equal(crossedRekeyMetadata.error, "STATE_RECONCILIATION_BLOCKED");
+
   const ambiguous = reconcilePrivateState(state(oldFingerprint, [{ itemId: oldA, status: "skip", quantityOwned: 0, quantityOrdered: 0 }]), targetFingerprint, {
     migrations: [
-      migration(oldFingerprint, targetFingerprint, [transition(oldA, [targetA], "retained", "preserve", "identity-retained")]),
+      migration(oldFingerprint, targetFingerprint, [transition(oldA, [oldA], "retained", "preserve", "identity-retained")]),
       migration(oldFingerprint, middleFingerprint, [transition(oldA, [oldB], "rekey-1:1", "preserve", "one-to-one-preserve")]),
       migration(middleFingerprint, targetFingerprint, [transition(oldB, [targetA], "rekey-1:1", "preserve", "one-to-one-preserve")]),
     ],
-    knownTargetItemIds: new Set([targetA]),
+    knownTargetItemIds: new Set([oldA, targetA]),
   });
-  assert.deepEqual(ambiguous, { ok: false, error: "STATE_RECONCILIATION_BLOCKED" });
+  assert.equal(ambiguous.ok, false);
+  if (!ambiguous.ok) {
+    assert.equal(ambiguous.error, "STATE_RECONCILIATION_BLOCKED");
+    assert.equal(ambiguous.report?.records.length, 1);
+    assert.equal(ambiguous.report?.accounting.conservationSatisfied, true);
+  }
 
   const emptyStep = reconcilePrivateState(state(oldFingerprint), targetFingerprint, {
     migrations: [{ fromFingerprint: oldFingerprint, toFingerprint: targetFingerprint, transitions: [] }],

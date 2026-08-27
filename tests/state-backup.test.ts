@@ -187,6 +187,7 @@ test("gates older imports through the shared reconciliation chain", () => {
   assert.equal(plan.ok, true);
   if (!plan.ok) return;
   assert.equal(plan.value.candidate.catalogueFingerprint, fingerprint);
+  assert.equal(plan.value.preview.sourceFingerprint, otherFingerprint);
   assert.equal(plan.value.preview.reconciliation?.conservationSatisfied, true);
   assert.equal(plan.value.reconciliation?.report.accounting.migrated, 0);
   assert.deepEqual(plan.value.candidate.items, [{
@@ -447,6 +448,40 @@ test("clear and restore use one recoverable slot and swap without merging", asyn
   if (!restored.ok) return;
   assert.equal(restored.value.active?.items[0]?.note, "keep me");
   assert.equal(restored.value.recovery, undefined);
+});
+
+test("restore preserves retired orphans in the recovery slot", async () => {
+  const storage = new FakeStorage();
+  const retired = state("retired", otherFingerprint);
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state(undefined, fingerprint)));
+  storage.values.set(PRIVATE_STATE_RECOVERY_STORAGE_KEY, JSON.stringify(retired));
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision,
+    now: () => exportedAt,
+    reconciliation: {
+      migrations: [{
+        fromFingerprint: otherFingerprint,
+        toFingerprint: fingerprint,
+        transitions: [{
+          fromItemId: itemA,
+          toItemIds: [],
+          changeKind: "retired-1:0",
+          automaticStateAction: "none",
+          reconciliation: "retire-to-orphan",
+        }],
+      }],
+    },
+  });
+
+  const restored = await lifecycle.restore(true, fingerprint, new Set());
+  assert.equal(restored.ok, true);
+  if (!restored.ok) return;
+  assert.deepEqual(restored.value.active?.items, []);
+  assert.equal(restored.value.recovery?.catalogueFingerprint, otherFingerprint);
+  assert.equal(restored.value.recovery?.items[0]?.note, "retired");
+  const storedRecovery = JSON.parse(storage.values.get(PRIVATE_STATE_RECOVERY_STORAGE_KEY) ?? "null") as PrivateState;
+  assert.equal(storedRecovery.catalogueFingerprint, otherFingerprint);
+  assert.equal(storedRecovery.items[0]?.itemId, itemA);
 });
 
 test("restore fails closed when recovery is not valid for the active catalogue", async () => {
