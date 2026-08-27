@@ -43,7 +43,7 @@ export interface BrowseLocalizationViewModel {
 }
 
 function publicSearchValue(value: unknown): string {
-  if (typeof value === "string") return value;
+  if (typeof value === "string") return value.normalize("NFC");
   if (Array.isArray(value)) return value.map(publicSearchValue).filter(Boolean).join(" ");
   if (typeof value === "object" && value !== null) return Object.values(value).map(publicSearchValue).filter(Boolean).join(" ");
   return "";
@@ -62,11 +62,11 @@ function publicSearchText(item: SnapshotItem): string {
     item.markings,
     item.distribution,
     item.cardSize,
-  ].map(publicSearchValue).filter(Boolean).join(" ").toLowerCase();
+  ].map(publicSearchValue).filter(Boolean).join(" ").normalize("NFC").toLowerCase();
 }
 
 function searchTerms(query: string | undefined): string[] {
-  return query?.trim().split(/\s+/u).filter(Boolean).map((term) => term.toLowerCase()) ?? [];
+  return query?.trim().split(/\s+/u).filter(Boolean).map((term) => term.normalize("NFC").toLowerCase()) ?? [];
 }
 
 function sortKey(value: unknown): string {

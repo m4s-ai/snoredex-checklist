@@ -67,6 +67,13 @@ test("searches public fields with AND terms and never rarity metadata", () => {
   assert.equal(rarityResult.activeItems.length, 0);
 });
 
+test("matches canonically equivalent Unicode search text", () => {
+  const decomposed = structuredClone(fixture.catalogue);
+  decomposed.items[0].cardName = "Poke\u0301mon";
+  const result = buildResultViewModel({ q: "Pokémon" }, decomposed, matchesResearch);
+  assert.deepEqual(result.activeItems.map((item) => item.itemId), [decomposed.items[0].itemId]);
+});
+
 test("keeps research separate from current-known progress", () => {
   const itemId = fixture.catalogue.items[0].itemId;
   const need = buildProgressViewModel(fixture.catalogue.items);

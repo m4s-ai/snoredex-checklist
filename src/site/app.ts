@@ -34,6 +34,30 @@ function presentationLabel(values: readonly (string | null | undefined)[], fallb
   return parts.join(" · ") || fallback;
 }
 
+function itemFinishCue(item: SnapshotItem): string | undefined {
+  const finish = typeof item.finish === "string" ? presentationLabel([item.finish], "") : "";
+  const family = typeof item.finishFamily === "string" ? presentationLabel([item.finishFamily], "") : "";
+  if (finish && family && finish !== family) return `Finish: ${finish} · Finish family: ${family}`;
+  if (finish) return `Finish: ${finish}`;
+  if (family) return `Finish family: ${family}`;
+  return undefined;
+}
+
+function itemRowCollisionKey(item: SnapshotItem): string {
+  const card = presentationLabel([item.cardName, item.localCardName], item.itemId);
+  const set = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
+  return [card, set, itemFinishCue(item) ?? ""].join("\u0000");
+}
+
+function itemRowCollisionCounts(items: readonly SnapshotItem[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const key = itemRowCollisionKey(item);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
 function enableThemeControl(): void {
   const button = document.querySelector<HTMLButtonElement>("[data-theme-toggle]");
   if (!button) return;
@@ -298,6 +322,8 @@ function renderItemRow(item: SnapshotItem, inactive = false, ownerLabel?: string
   const set = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
   const setDisplay = [set, setIdentity].filter(Boolean).join(" · ");
   if (setDisplay) identity.append(text("span", ` · ${setDisplay}`));
+  const finishCue = itemFinishCue(item);
+  if (finishCue) identity.append(text("span", ` · ${finishCue}`));
   if (ownerLabel) identity.append(text("span", ` · ${ownerLabel}`));
   row.append(identity);
   const cue = item.progressClass === "research"
@@ -366,14 +392,23 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
         const headingLabel = (siblingEditionLabelCounts.get(editionLabel) ?? 0) > 1 ? `${editionLabel} · ${edition.edition.setEditionId}` : editionLabel;
         editionSection.append(text("h4", headingLabel));
         const list = text("ul", undefined, "item-list");
-        for (const item of edition.items.filter((candidate) => candidate.active && candidate.progressClass !== "research")) list.append(renderItemRow(item));
+        const currentItems = edition.items.filter((candidate) => candidate.active && candidate.progressClass !== "research");
+        const currentCollisionCounts = itemRowCollisionCounts(currentItems);
+        for (const item of currentItems) {
+          const itemIdentity = (currentCollisionCounts.get(itemRowCollisionKey(item)) ?? 0) > 1 ? item.itemId : undefined;
+          list.append(renderItemRow(item, false, undefined, itemIdentity));
+        }
         if (list.childElementCount > 0) editionSection.append(list);
         const research = edition.items.filter((item) => item.active && item.progressClass === "research");
         if (research.length > 0) {
           const researchSection = text("section", undefined, "research-section");
           researchSection.append(text("h5", "Research (read-only)"));
           const researchList = text("ul", undefined, "item-list");
-          for (const item of research) researchList.append(renderItemRow(item));
+          const researchCollisionCounts = itemRowCollisionCounts(research);
+          for (const item of research) {
+            const itemIdentity = (researchCollisionCounts.get(itemRowCollisionKey(item)) ?? 0) > 1 ? item.itemId : undefined;
+            researchList.append(renderItemRow(item, false, undefined, itemIdentity));
+          }
           researchSection.append(researchList);
           editionSection.append(researchSection);
         }
@@ -397,6 +432,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
       identities.add(item.setEditionId ?? item.itemId);
       inactiveSetIdentityCounts.set(key, identities);
     }
+    const inactiveCollisionCounts = itemRowCollisionCounts(inactiveItems);
     for (const item of inactiveItems) {
       const localization = catalogue.localizations.find((candidate) => candidate.localizationId === item.localizationId);
       let ownerLabel = item.localizationId;
@@ -411,7 +447,9 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
       const setIdentity = !setLabel
         ? (item.setEditionId ?? item.itemId)
         : (inactiveSetIdentityCounts.get(setKey)?.size ?? 0) > 1 ? item.setEditionId : undefined;
-      inactiveList.append(renderItemRow(item, true, ownerLabel, setIdentity));
+      const itemIdentity = (inactiveCollisionCounts.get(itemRowCollisionKey(item)) ?? 0) > 1 ? item.itemId : undefined;
+      const identitySuffix = [setIdentity, itemIdentity].filter(Boolean).join(" · ") || undefined;
+      inactiveList.append(renderItemRow(item, true, ownerLabel, identitySuffix));
     }
     inactive.append(inactiveList);
     content.push(inactive);
