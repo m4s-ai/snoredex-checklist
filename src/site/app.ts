@@ -408,7 +408,9 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
       }
       const setLabel = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
       const setKey = `${item.localizationId}\u0000${setLabel}`;
-      const setIdentity = (inactiveSetIdentityCounts.get(setKey)?.size ?? 0) > 1 ? item.setEditionId : undefined;
+      const setIdentity = !setLabel
+        ? (item.setEditionId ?? item.itemId)
+        : (inactiveSetIdentityCounts.get(setKey)?.size ?? 0) > 1 ? item.setEditionId : undefined;
       inactiveList.append(renderItemRow(item, true, ownerLabel, setIdentity));
     }
     inactive.append(inactiveList);

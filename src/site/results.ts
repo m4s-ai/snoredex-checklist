@@ -147,7 +147,7 @@ export function buildResultViewModel(
   const activeItems: SnapshotItem[] = [];
   const inactiveItems: SnapshotItem[] = [];
   for (const item of filteredItems) (item.active ? activeItems : inactiveItems).push(item);
-  const activeSummary = `${activeItems.length} public catalogue item${activeItems.length === 1 ? "" : "s"}.`;
+  const activeSummary = `${activeItems.length} active public catalogue item${activeItems.length === 1 ? "" : "s"}.`;
   return inactiveItems.length === 0
     ? { activeItems, inactiveItems, activeSummary }
     : {

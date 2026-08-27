@@ -46,7 +46,7 @@ test("keeps inactive items separate from active results", async () => {
   const model = buildResultViewModel({ localization: inactive.items[0].localizationId }, validation.snapshot, matchesResearch);
   assert.equal(model.activeItems.some((item) => item.itemId === inactive.items[0].itemId), false);
   assert.equal(model.inactiveItems.some((item) => item.itemId === inactive.items[0].itemId), true);
-  assert.equal(model.activeSummary.startsWith("0 public catalogue items."), true);
+  assert.equal(model.activeSummary.startsWith("0 active public catalogue items."), true);
   assert.equal(model.inactiveHeading, "Inactive catalogue items");
   assert.match(model.inactiveSummary ?? "", /inactive and excluded from the active checklist/);
 });
