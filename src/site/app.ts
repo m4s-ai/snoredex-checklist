@@ -386,9 +386,13 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
     const inactiveList = text("ul", undefined, "item-list");
     for (const item of inactiveItems) {
       const localization = catalogue.localizations.find((candidate) => candidate.localizationId === item.localizationId);
-      const ownerLabel = localization
-        ? `${localizationLabel(localization)}${localization.locality ? ` (${localization.locality})` : ""}`
-        : item.localizationId;
+      let ownerLabel = item.localizationId;
+      if (localization) {
+        const label = localizationLabel(localization);
+        const key = `${localization.locality ?? ""}\u0000${label}`;
+        const displayLabel = (localizationLabelCounts.get(key) ?? 0) > 1 ? `${label} · ${localization.localizationId}` : label;
+        ownerLabel = `${displayLabel}${localization.locality ? ` (${localization.locality})` : ""}`;
+      }
       inactiveList.append(renderItemRow(item, true, ownerLabel));
     }
     inactive.append(inactiveList);
