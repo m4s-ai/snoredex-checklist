@@ -315,9 +315,20 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
   const content: Node[] = [progress, text("p", model.activeSummary)];
   const groups = buildBrowseHierarchy(criteria, catalogue, matchesResearch, state.readable ? state.statuses : undefined);
   const grouped = text("div", undefined, "browse-results");
+  const localizationLabelCounts = new Map<string, number>();
+  for (const group of groups) {
+    const label = localizationLabel(group.localization);
+    const key = `${group.localization.locality ?? ""}\u0000${label}`;
+    localizationLabelCounts.set(key, (localizationLabelCounts.get(key) ?? 0) + 1);
+  }
   for (const localization of groups) {
     const localizationSection = text("section", undefined, "result-localization");
-    localizationSection.append(text("h2", `${localizationLabel(localization.localization)}${localization.localization.locality ? ` (${localization.localization.locality})` : ""}`));
+    const localizationLabelValue = localizationLabel(localization.localization);
+    const localizationKey = `${localization.localization.locality ?? ""}\u0000${localizationLabelValue}`;
+    const displayLocalizationLabel = (localizationLabelCounts.get(localizationKey) ?? 0) > 1
+      ? `${localizationLabelValue} · ${localization.localization.localizationId}`
+      : localizationLabelValue;
+    localizationSection.append(text("h2", `${displayLocalizationLabel}${localization.localization.locality ? ` (${localization.localization.locality})` : ""}`));
     const setLabelCounts = new Map<string, number>();
     for (const candidate of catalogue.localSets) {
       if (localization.localization.locality !== undefined && candidate.locality !== localization.localization.locality) continue;

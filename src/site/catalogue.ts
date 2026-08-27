@@ -79,9 +79,10 @@ export function validateProvenance(value: unknown, catalogue: CatalogueSnapshot)
 }
 
 export function localizationLabel(localization: SnapshotLocalization): string {
-  const displayName = localization.displayName?.trim();
+  const normalize = (value: string): string => value.normalize("NFC").trim().replace(/\s+/gu, " ");
+  const displayName = typeof localization.displayName === "string" ? normalize(localization.displayName) : undefined;
   if (displayName) return displayName;
-  const languageTag = localization.languageTag?.trim();
+  const languageTag = typeof localization.languageTag === "string" ? normalize(localization.languageTag) : undefined;
   return languageTag || localization.localizationId;
 }
 
