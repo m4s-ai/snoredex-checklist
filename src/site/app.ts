@@ -24,6 +24,16 @@ function link(href: string, label: string, className?: string): HTMLAnchorElemen
   return element;
 }
 
+function presentationLabel(values: readonly (string | null | undefined)[], fallback: string): string {
+  const parts: string[] = [];
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed) parts.push(trimmed);
+  }
+  return parts.join(" · ") || fallback;
+}
+
 function enableThemeControl(): void {
   const button = document.querySelector<HTMLButtonElement>("[data-theme-toggle]");
   if (!button) return;
@@ -91,13 +101,13 @@ function renderBrowseNavigation(container: HTMLElement, catalogue: CatalogueSnap
     const setList = text("ul", undefined, "link-list browse-nested");
     const setLabelCounts = new Map<string, number>();
     for (const set of localitySets) {
-      const setLabel = [set.localSetCode, set.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || set.localSetId;
+      const setLabel = presentationLabel([set.localSetCode, set.localSetName], set.localSetId);
       setLabelCounts.set(setLabel, (setLabelCounts.get(setLabel) ?? 0) + 1);
     }
     for (const set of localitySets.sort((left, right) =>
       String(left.sortKey ?? "").localeCompare(String(right.sortKey ?? ""), "en", { numeric: true }) || left.localSetId.localeCompare(right.localSetId))) {
       const setItem = text("li", undefined, "browse-set");
-      const setLabel = [set.localSetCode, set.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || set.localSetId;
+      const setLabel = presentationLabel([set.localSetCode, set.localSetName], set.localSetId);
       const displaySetLabel = (setLabelCounts.get(setLabel) ?? 0) > 1 ? `${setLabel} · ${set.localSetId}` : setLabel;
       setItem.append(text("span", displaySetLabel));
       const editionList = text("ul", undefined, "browse-nested");
@@ -106,7 +116,7 @@ function renderBrowseNavigation(container: HTMLElement, catalogue: CatalogueSnap
         .sort((left, right) =>
           String(left.sortKey ?? "").localeCompare(String(right.sortKey ?? ""), "en", { numeric: true }) || left.setEditionId.localeCompare(right.setEditionId))
         .map((edition) => {
-          const editionLabel = [edition.localSetCode, edition.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || edition.setEditionId;
+          const editionLabel = presentationLabel([edition.localSetCode, edition.localSetName], edition.setEditionId);
           const localization = localizations.get(edition.localizationId);
           const label = localization ? `${editionLabel} · ${localizationLabel(localization)}` : editionLabel;
           return { edition, label };
@@ -272,7 +282,7 @@ function renderItemRow(item: SnapshotItem, inactive = false, ownerLabel?: string
   const identity = text("div", undefined, "item-identity");
   identity.append(text("strong", item.cardName ?? "Unnamed item"));
   if (item.localCardName && item.localCardName !== item.cardName) identity.append(text("span", ` · ${item.localCardName}`));
-  const set = [item.localSetCode, item.localSetName, item.collectorNumber].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ");
+  const set = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
   if (set) identity.append(text("span", ` · ${set}`));
   if (ownerLabel) identity.append(text("span", ` · ${ownerLabel}`));
   row.append(identity);
@@ -311,23 +321,23 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
     const setLabelCounts = new Map<string, number>();
     for (const candidate of catalogue.localSets) {
       if (localization.localization.locality !== undefined && candidate.locality !== localization.localization.locality) continue;
-      const setLabel = [candidate.localSetCode, candidate.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || candidate.localSetId;
+      const setLabel = presentationLabel([candidate.localSetCode, candidate.localSetName], candidate.localSetId);
       setLabelCounts.set(setLabel, (setLabelCounts.get(setLabel) ?? 0) + 1);
     }
     for (const set of localization.sets) {
       const setSection = text("section", undefined, "result-set");
-      const setLabel = [set.set.localSetCode, set.set.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || set.set.localSetId;
+      const setLabel = presentationLabel([set.set.localSetCode, set.set.localSetName], set.set.localSetId);
       const displaySetLabel = (setLabelCounts.get(setLabel) ?? 0) > 1 ? `${setLabel} · ${set.set.localSetId}` : setLabel;
       setSection.append(text("h3", displaySetLabel));
       const siblingEditionLabelCounts = new Map<string, number>();
       for (const sibling of catalogue.setEditions) {
         if (sibling.localSetId !== set.set.localSetId || sibling.localizationId !== localization.localization.localizationId) continue;
-        const siblingLabel = [sibling.localSetCode, sibling.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || sibling.setEditionId;
+        const siblingLabel = presentationLabel([sibling.localSetCode, sibling.localSetName], sibling.setEditionId);
         siblingEditionLabelCounts.set(siblingLabel, (siblingEditionLabelCounts.get(siblingLabel) ?? 0) + 1);
       }
       for (const edition of set.editions) {
         const editionSection = text("section", undefined, "result-edition");
-        const editionLabel = [edition.edition.localSetCode, edition.edition.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || edition.edition.setEditionId;
+        const editionLabel = presentationLabel([edition.edition.localSetCode, edition.edition.localSetName], edition.edition.setEditionId);
         const headingLabel = (siblingEditionLabelCounts.get(editionLabel) ?? 0) > 1 ? `${editionLabel} · ${edition.edition.setEditionId}` : editionLabel;
         editionSection.append(text("h4", headingLabel));
         const list = text("ul", undefined, "item-list");
