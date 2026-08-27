@@ -300,6 +300,7 @@ function renderProgress(catalogue: CatalogueSnapshot, localizationId: string | u
     (!localizationId || item.localizationId === localizationId) && (!editionId || item.setEditionId === editionId));
   const progress = buildProgressViewModel(scope, state.readable ? state.statuses : undefined);
   const section = text("section", undefined, "progress-panel");
+  section.tabIndex = -1;
   const heading = text("h2", "Current-known progress");
   heading.id = "progress-title";
   section.setAttribute("aria-labelledby", heading.id);
@@ -618,7 +619,7 @@ function statusKey(state: PrivateStateRead): string {
   return [...state.statuses.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([itemId, status]) => `${itemId}:${status}`).join("|");
 }
 
-function renderRecoveryPanel(controller: CollectionStateController, onResolved?: () => void, registerCleanup?: (cleanup: Cleanup) => void): HTMLElement | undefined {
+function renderRecoveryPanel(controller: CollectionStateController, onResolved?: (announcement: string) => void, registerCleanup?: (cleanup: Cleanup) => void): HTMLElement | undefined {
   const recovery = controller.recovery;
   if (recovery === undefined) return undefined;
   const panel = text("section", undefined, "state-panel recovery-panel");
@@ -630,22 +631,42 @@ function renderRecoveryPanel(controller: CollectionStateController, onResolved?:
   adopt.type = "button";
   const discard = text("button", "Discard recovered changes") as HTMLButtonElement;
   discard.type = "button";
+  const reload = text("button", "Reload to reconcile") as HTMLButtonElement;
+  reload.type = "button";
+  reload.hidden = true;
+  reload.addEventListener("click", () => { globalThis.location?.reload(); });
+  let completionAnnouncement = "Collection recovery updated.";
   const run = (action: () => Promise<CollectionEditResult>): void => {
     adopt.disabled = true;
     discard.disabled = true;
+    reload.hidden = true;
     feedback.textContent = "Saving…";
     void action().then((result) => {
-      if (result.ok) feedback.textContent = "Recovered changes saved.";
+      if (result.ok) {
+        feedback.textContent = "Recovered changes saved.";
+        onResolved?.(completionAnnouncement);
+      }
       else {
-        feedback.textContent = "Recovery action failed. The recovered draft is still available; retry when ready.";
+        if (result.error === "STORAGE_COMMIT_UNCERTAIN") {
+          feedback.textContent = "Recovery conflict detected. Reload to reconcile your collection.";
+          reload.hidden = false;
+        } else {
+          feedback.textContent = "Recovery action failed. The recovered draft is still available; retry when ready.";
+        }
         adopt.disabled = false;
         discard.disabled = false;
       }
     });
   };
-  adopt.addEventListener("click", () => run(() => controller.adoptRecovery()));
-  discard.addEventListener("click", () => run(async () => controller.discardRecovery()));
-  actions.append(adopt, discard);
+  adopt.addEventListener("click", () => {
+    completionAnnouncement = "Recovered changes saved.";
+    run(() => controller.adoptRecovery());
+  });
+  discard.addEventListener("click", () => {
+    completionAnnouncement = "Recovered changes discarded.";
+    run(async () => controller.discardRecovery());
+  });
+  actions.append(adopt, discard, reload);
   panel.append(
     text("h2", "Recovered unsaved collection changes"),
     text("p", `A private draft from an interrupted save is available (${recovery.itemIds.length} item${recovery.itemIds.length === 1 ? "" : "s"}${recovery.noteItemIds.length > 0 ? `, including ${recovery.noteItemIds.length} note${recovery.noteItemIds.length === 1 ? "" : "s"}` : ""}). Choose whether to adopt or discard it before editing.`),
@@ -657,11 +678,19 @@ function renderRecoveryPanel(controller: CollectionStateController, onResolved?:
     if (controller.recovery === undefined) {
       stop?.();
       panel.remove();
-      onResolved?.();
     }
   });
   registerCleanup?.(() => stop?.());
   return panel;
+}
+
+function announceRecoveryResult(container: HTMLElement, announcement: string): void {
+  const status = text("p", announcement, "recovery-announcement");
+  status.setAttribute("role", "status");
+  container.prepend(status);
+  const target = container.querySelector<HTMLElement>(".progress-panel, h2") ?? container;
+  target.tabIndex = -1;
+  target.focus();
 }
 
 function renderItemRow(item: SnapshotItem, catalogue: CatalogueSnapshot, inactive = false, ownerLabel?: string, setIdentity?: string, stateController?: CollectionStateController, registerCleanup?: (cleanup: Cleanup) => void): HTMLLIElement {
@@ -709,7 +738,10 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
   const registerCleanup = (cleanup: Cleanup): void => { cleanups.add(cleanup); };
   const recoveryPanel = stateController === undefined
     ? undefined
-    : renderRecoveryPanel(stateController, () => renderResults(container, criteria, catalogue, stateController.state, stateController), registerCleanup);
+    : renderRecoveryPanel(stateController, (announcement) => {
+      renderResults(container, criteria, catalogue, stateController.state, stateController);
+      announceRecoveryResult(container, announcement);
+    }, registerCleanup);
   if (criteria.status && !state.readable) {
     const deferred = text("section", undefined, "state-panel");
     deferred.setAttribute("aria-live", "polite");
@@ -725,7 +757,11 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
     return;
   }
   const progress = renderProgress(catalogue, criteria.localization, criteria.edition, state);
+  let previousProgressStatusKey = stateController === undefined ? "" : statusKey(stateController.state);
   const stopProgressListener = stateController?.onChange(() => {
+    const nextStatusKey = statusKey(stateController.state);
+    if (nextStatusKey === previousProgressStatusKey) return;
+    previousProgressStatusKey = nextStatusKey;
     const updated = renderProgress(catalogue, criteria.localization, criteria.edition, stateController.state);
     progress.replaceChildren(...updated.childNodes);
   });
