@@ -283,7 +283,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
   const grouped = text("div", undefined, "browse-results");
   for (const localization of groups) {
     const localizationSection = text("section", undefined, "result-localization");
-    localizationSection.append(text("h2", `${localization.localization.displayName ?? localization.localization.localizationId}${localization.localization.locality ? ` (${localization.localization.locality})` : ""}`));
+    localizationSection.append(text("h2", `${localizationLabel(localization.localization)}${localization.localization.locality ? ` (${localization.localization.locality})` : ""}`));
     for (const set of localization.sets) {
       const setSection = text("section", undefined, "result-set");
       const setLabel = [set.set.localSetCode, set.set.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || set.set.localSetId;
