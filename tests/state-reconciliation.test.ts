@@ -168,6 +168,30 @@ test("rejects unknown, future and incomplete chains before mutation", () => {
   assert.equal(crossedRekeyMetadata.ok, false);
   if (!crossedRekeyMetadata.ok) assert.equal(crossedRekeyMetadata.error, "STATE_RECONCILIATION_BLOCKED");
 
+  const malformedSplitMetadata = reconcilePrivateState(state(oldFingerprint), targetFingerprint, {
+    migrations: [migration(oldFingerprint, targetFingerprint, [
+      transition(oldA, [targetA, targetB], "split-1:N", "none", "one-to-one-preserve"),
+    ])],
+  });
+  assert.equal(malformedSplitMetadata.ok, false);
+  if (!malformedSplitMetadata.ok) assert.equal(malformedSplitMetadata.error, "STATE_RECONCILIATION_BLOCKED");
+
+  const malformedMergeMetadata = reconcilePrivateState(state(oldFingerprint), targetFingerprint, {
+    migrations: [migration(oldFingerprint, targetFingerprint, [
+      transition(oldA, [targetA], "merge-N:1", "none", "identity-retained", [oldA, oldB]),
+    ])],
+  });
+  assert.equal(malformedMergeMetadata.ok, false);
+  if (!malformedMergeMetadata.ok) assert.equal(malformedMergeMetadata.error, "STATE_RECONCILIATION_BLOCKED");
+
+  const malformedUnresolvedMetadata = reconcilePrivateState(state(oldFingerprint), targetFingerprint, {
+    migrations: [migration(oldFingerprint, targetFingerprint, [
+      transition(oldA, [], "unresolved", "none", "retire-to-orphan"),
+    ])],
+  });
+  assert.equal(malformedUnresolvedMetadata.ok, false);
+  if (!malformedUnresolvedMetadata.ok) assert.equal(malformedUnresolvedMetadata.error, "STATE_RECONCILIATION_BLOCKED");
+
   const ambiguous = reconcilePrivateState(state(oldFingerprint, [{ itemId: oldA, status: "skip", quantityOwned: 0, quantityOrdered: 0 }]), targetFingerprint, {
     migrations: [
       migration(oldFingerprint, targetFingerprint, [transition(oldA, [oldA], "retained", "preserve", "identity-retained")]),

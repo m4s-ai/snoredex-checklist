@@ -88,6 +88,8 @@ export interface ImportPlan {
   readonly reconciliationSource?: PrivateState;
   readonly reconciliationTargetFingerprint?: string;
   readonly reconciliationKnownItemIds?: ReadonlySet<string>;
+  /** Private orphan records that must remain recoverable after an import. */
+  readonly reconciliationRecovery?: PrivateState;
 }
 
 interface AuthorityRawSnapshot {
@@ -279,6 +281,14 @@ function restoreRaw(storage: StorageLike, key: string, raw: string | null): bool
   }
 }
 
+function preservedRecovery(
+  source: PrivateState,
+  reconciliation: ReconciliationSuccess,
+): PrivateState | undefined {
+  const items = [...reconciliation.orphans, ...reconciliation.conflicts];
+  return items.length === 0 ? undefined : { ...source, items };
+}
+
 function writeAuthority(
   storage: StorageLike,
   expectedRaw: AuthorityRawSnapshot,
@@ -458,6 +468,7 @@ export class PrivateStateLifecycle {
       items: parsed.value.state.items,
     };
     let reconciliation: ReconciliationSuccess | undefined;
+    let reconciliationRecovery: PrivateState | undefined;
     let reconciledCandidate = candidate;
     if (candidate.catalogueFingerprint === targetFingerprint) {
       const checked = validatePrivateState(candidate, knownItemIds);
@@ -470,6 +481,7 @@ export class PrivateStateLifecycle {
       });
       if (!result.ok) return fail(result.error);
       reconciliation = result.value;
+      reconciliationRecovery = preservedRecovery(candidate, result.value);
       reconciledCandidate = result.value.state;
     }
     const preview = buildImportPreview(
@@ -487,6 +499,7 @@ export class PrivateStateLifecycle {
       reconciliationSource: candidate,
       reconciliationTargetFingerprint: targetFingerprint,
       reconciliationKnownItemIds: new Set(knownItemIds),
+      ...(reconciliationRecovery === undefined ? {} : { reconciliationRecovery }),
     });
   }
 
@@ -496,6 +509,7 @@ export class PrivateStateLifecycle {
       const current = readAuthority(this.storage);
       if (!current.ok) return current;
       let candidate = plan.candidate;
+      let reconciliationRecovery = plan.reconciliationRecovery;
       if (plan.reconciliationSource !== undefined
         && plan.reconciliationTargetFingerprint !== undefined
         && plan.reconciliationKnownItemIds !== undefined) {
@@ -513,16 +527,32 @@ export class PrivateStateLifecycle {
           });
           if (!result.ok) return fail(result.error);
           candidate = result.value.state;
+          reconciliationRecovery = preservedRecovery(source.value, result.value);
         }
         const planned = serializePrivateState(plan.candidate);
         const rerun = serializePrivateState(candidate);
-        if (!planned.ok || !rerun.ok || planned.value !== rerun.value) {
+        const plannedRecovery = plan.reconciliationRecovery === undefined
+          ? "null"
+          : serializePrivateState(plan.reconciliationRecovery);
+        const rerunRecovery = reconciliationRecovery === undefined
+          ? "null"
+          : serializePrivateState(reconciliationRecovery);
+        if (!planned.ok || !rerun.ok
+          || typeof plannedRecovery !== "string" && !plannedRecovery.ok
+          || typeof rerunRecovery !== "string" && !rerunRecovery.ok
+          || planned.value !== rerun.value
+          || (typeof plannedRecovery === "string" ? plannedRecovery : plannedRecovery.value)
+            !== (typeof rerunRecovery === "string" ? rerunRecovery : rerunRecovery.value)) {
           return fail("STATE_RECONCILIATION_BLOCKED");
         }
       }
-      const recovery = current.value.authority.active?.items.length
+      const existingRecovery = current.value.authority.active?.items.length
         ? current.value.authority.active
         : current.value.authority.recovery;
+      if (reconciliationRecovery !== undefined && existingRecovery !== undefined) {
+        return fail("STATE_RECONCILIATION_BLOCKED");
+      }
+      const recovery = reconciliationRecovery ?? existingRecovery;
       return writeAuthority(this.storage, plan.expectedRaw, candidate, recovery);
     });
   }
@@ -577,6 +607,7 @@ export class PrivateStateLifecycle {
       if (active === undefined || active.items.length === 0) {
         return promoteRecovery(this.storage, current.value.raw, candidate, preservedRecovery);
       }
+      if (preservedRecovery !== undefined) return fail("STATE_RECONCILIATION_BLOCKED");
       return writeAuthority(this.storage, current.value.raw, candidate, preservedRecovery ?? active);
     });
   }

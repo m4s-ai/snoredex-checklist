@@ -240,10 +240,13 @@ function expectedForTransition(
     return "orphan";
   }
   if (transition.automaticStateAction === "none"
-    && ((fromIds.length === 1 && targetCount > 1)
-      || (fromIds.length > 1 && targetCount === 1)
-      || transition.changeKind === "unresolved")) {
-    return "conflict";
+    && transition.reconciliation === "requires-user-resolution") {
+    if (transition.changeKind === "split-1:N"
+      && fromIds.length === 1 && targetCount > 1) return "conflict";
+    if (transition.changeKind === "merge-N:1"
+      && fromIds.length > 1 && targetCount === 1) return "conflict";
+    if (transition.changeKind === "unresolved"
+      && fromIds.length > 0 && targetCount === 0) return "conflict";
   }
   return undefined;
 }

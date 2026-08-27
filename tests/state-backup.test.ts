@@ -484,6 +484,75 @@ test("restore preserves retired orphans in the recovery slot", async () => {
   assert.equal(storedRecovery.items[0]?.itemId, itemA);
 });
 
+test("import preserves retired orphans in the recovery slot", async () => {
+  const storage = new FakeStorage();
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision,
+    now: () => exportedAt,
+    reconciliation: {
+      migrations: [{
+        fromFingerprint: otherFingerprint,
+        toFingerprint: fingerprint,
+        transitions: [{
+          fromItemId: itemA,
+          toItemIds: [],
+          changeKind: "retired-1:0",
+          automaticStateAction: "none",
+          reconciliation: "retire-to-orphan",
+        }],
+      }],
+    },
+  });
+  const imported = createPortableBackup(state("retired", otherFingerprint), { appRevision, exportedAt });
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  const plan = lifecycle.prepareImport(imported.value.bytes, fingerprint, new Set());
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  const committed = await lifecycle.commitImport(plan.value, true);
+  assert.equal(committed.ok, true);
+  if (!committed.ok) return;
+  assert.deepEqual(committed.value.active?.items, []);
+  assert.equal(committed.value.recovery?.catalogueFingerprint, otherFingerprint);
+  assert.equal(committed.value.recovery?.items[0]?.note, "retired");
+});
+
+test("restore fails closed when an orphan would displace the active snapshot", async () => {
+  const storage = new FakeStorage();
+  const active = state("active", fingerprint);
+  const retired = state("retired", otherFingerprint);
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(active));
+  storage.values.set(PRIVATE_STATE_RECOVERY_STORAGE_KEY, JSON.stringify(retired));
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision,
+    now: () => exportedAt,
+    reconciliation: {
+      migrations: [{
+        fromFingerprint: otherFingerprint,
+        toFingerprint: fingerprint,
+        transitions: [{
+          fromItemId: itemA,
+          toItemIds: [],
+          changeKind: "retired-1:0",
+          automaticStateAction: "none",
+          reconciliation: "retire-to-orphan",
+        }],
+      }],
+    },
+  });
+
+  assert.deepEqual(await lifecycle.restore(true, fingerprint, new Set()), {
+    ok: false,
+    error: "STATE_RECONCILIATION_BLOCKED",
+  });
+  const current = lifecycle.read();
+  assert.equal(current.ok, true);
+  if (current.ok) {
+    assert.equal(current.value.active?.items[0]?.note, "active");
+    assert.equal(current.value.recovery?.items[0]?.note, "retired");
+  }
+});
+
 test("restore fails closed when recovery is not valid for the active catalogue", async () => {
   const storage = new FakeStorage();
   const storedRecovery = state("keep me");
