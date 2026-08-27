@@ -96,6 +96,14 @@ test("applies private status criteria only to current-known items", () => {
   assert.deepEqual(need.activeItems, []);
 });
 
+test("excludes inactive items from private status criteria", () => {
+  const inactive = structuredClone(fixture.catalogue);
+  inactive.items[0].active = false;
+  const need = buildResultViewModel({ status: "need" }, inactive, matchesResearch);
+  assert.deepEqual(need.activeItems, []);
+  assert.deepEqual(need.inactiveItems, []);
+});
+
 test("scopes selected-edition results and progress by opaque edition ID", () => {
   const editionId = fixture.catalogue.items[0].setEditionId;
   const model = buildResultViewModel({ edition: editionId }, fixture.catalogue, matchesResearch);

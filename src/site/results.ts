@@ -96,7 +96,7 @@ function matchesCriteria(
     (terms.length === 0 || terms.every((term) => publicSearchText(item).includes(term))) &&
     (!criteria.kind || item.itemKind === criteria.kind) &&
     (!criteria.research || matchesResearch(item.progressClass ?? "", criteria.research)) &&
-    (!criteria.status || (item.progressClass === "current-known" && status === criteria.status));
+    (!criteria.status || (item.active && item.progressClass === "current-known" && status === criteria.status));
 }
 
 export function filterCatalogueItems(

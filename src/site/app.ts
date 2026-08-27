@@ -146,6 +146,23 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
     localizationOptions.push([row.localizationId, `${localizationLabel(row)}${row.locality ? ` (${row.locality})` : ""}`]);
   }
   const localization = makeSelect("Localization", "localization", localizationOptions, criteria.localization);
+  const localizationSelect = localization.querySelector("select");
+  const editionId = criteria.edition;
+  const selectedEdition = editionId === undefined
+    ? undefined
+    : catalogue.setEditions.find((edition) => edition.setEditionId === editionId);
+  const editionInput = editionId === undefined ? undefined : document.createElement("input");
+  if (editionInput !== undefined) {
+    editionInput.type = "hidden";
+    editionInput.name = "edition";
+    editionInput.value = editionId ?? "";
+  }
+  const syncEditionScope = (): void => {
+    if (editionInput === undefined || !(localizationSelect instanceof HTMLSelectElement)) return;
+    editionInput.disabled = selectedEdition?.localizationId !== undefined &&
+      localizationSelect.value !== selectedEdition.localizationId;
+  };
+  localizationSelect?.addEventListener("change", syncEditionScope);
   const query = text("label", "Search public catalogue text") as HTMLLabelElement;
   const input = document.createElement("input");
   input.type = "search"; input.name = "q"; input.maxLength = 120; input.value = criteria.q ?? "";
@@ -158,19 +175,16 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
     // Empty optional controls are omitted; explicit empty URL values remain invalid.
     for (const control of controls) control.disabled = control.value === "";
     input.disabled = input.value === "";
+    syncEditionScope();
   });
   window.addEventListener("pageshow", () => {
     // bfcache can restore the submitted DOM; controls must remain editable on Back.
     for (const control of controls) control.disabled = false;
     input.disabled = false;
+    syncEditionScope();
   });
-  if (criteria.edition) {
-    const edition = document.createElement("input");
-    edition.type = "hidden";
-    edition.name = "edition";
-    edition.value = criteria.edition;
-    form.append(edition);
-  }
+  if (editionInput !== undefined) form.append(editionInput);
+  syncEditionScope();
   form.append(localization, query, status, kind, research, submit);
   container.replaceChildren(form);
 }
