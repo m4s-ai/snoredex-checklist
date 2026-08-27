@@ -3,7 +3,7 @@ import test from "node:test";
 
 import fixture from "./fixtures/collector-catalogue.fixture.json" with { type: "json" };
 import { semanticFingerprint } from "../src/catalogue/validate.ts";
-import { localizationLabel, validateProvenance, validateSnapshot } from "../src/site/catalogue.ts";
+import { localizationLabel, partitionByActivity, validateProvenance, validateSnapshot } from "../src/site/catalogue.ts";
 
 function reseal(value: any): any {
   value.meta.catalogueFingerprint = semanticFingerprint(value);
@@ -24,7 +24,19 @@ test("validates generated provenance and keeps localization labels nonempty", ()
   assert.equal(validateProvenance(valid, fixture.catalogue), true);
   assert.equal(validateProvenance({ ...valid, contractVersion: "0.0.0" }, fixture.catalogue), false);
   assert.equal(validateProvenance({ ...valid, mode: {} }, fixture.catalogue), false);
-  assert.equal(localizationLabel({ localizationId: "loc-1", displayName: "", languageTag: "en" }), "en");
+  assert.equal(localizationLabel({ localizationId: "loc-1", displayName: "  ", languageTag: " en " }), "en");
+  assert.equal(localizationLabel({ localizationId: "loc-2", displayName: "  Spanish  ", languageTag: "en" }), "Spanish");
+});
+
+test("keeps inactive items separate from active results", async () => {
+  const inactive = structuredClone(fixture.catalogue);
+  inactive.items[0].active = false;
+  const validation = await validateSnapshot(reseal(inactive));
+  assert.equal(validation.ok, true);
+  if (!validation.ok) return;
+  const partition = partitionByActivity(validation.snapshot.items);
+  assert.equal(partition.active.some((item) => item.itemId === inactive.items[0].itemId), false);
+  assert.equal(partition.inactive.some((item) => item.itemId === inactive.items[0].itemId), true);
 });
 
 test("fails closed on invalid provenance metadata", async () => {

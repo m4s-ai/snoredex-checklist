@@ -20,6 +20,7 @@ export interface SnapshotLocalization {
 export interface SnapshotItem {
   readonly itemId: string;
   readonly localizationId: string;
+  readonly active: boolean;
   readonly setEditionId?: string;
   readonly itemKind?: string;
   readonly progressClass?: string;
@@ -59,7 +60,17 @@ export function validateProvenance(value: unknown, catalogue: CatalogueSnapshot)
 }
 
 export function localizationLabel(localization: SnapshotLocalization): string {
-  return localization.displayName || localization.languageTag || localization.localizationId;
+  const displayName = localization.displayName?.trim();
+  if (displayName) return displayName;
+  const languageTag = localization.languageTag?.trim();
+  return languageTag || localization.localizationId;
+}
+
+export function partitionByActivity(items: readonly SnapshotItem[]): { active: SnapshotItem[]; inactive: SnapshotItem[] } {
+  const active: SnapshotItem[] = [];
+  const inactive: SnapshotItem[] = [];
+  for (const item of items) (item.active ? active : inactive).push(item);
+  return { active, inactive };
 }
 
 function isString(value: unknown): value is string {
@@ -202,7 +213,7 @@ export async function validateSnapshot(value: unknown): Promise<SnapshotValidati
   const physicalPrintingIds = new Set<string>();
 
   for (const item of items) {
-    if (!isString(item.itemId) || !isString(item.localizationId) || !isString(item.setEditionId) ||
+    if (!isString(item.itemId) || typeof item.active !== "boolean" || !isString(item.localizationId) || !isString(item.setEditionId) ||
         !isString(item.localSetId) || !isString(item.cardReleaseId) || !isString(item.itemKind) ||
         !isString(item.progressClass) || !isString(item.workMappingState) ||
         !isString(item.cardName) ||

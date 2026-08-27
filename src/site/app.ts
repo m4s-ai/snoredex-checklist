@@ -1,4 +1,4 @@
-import { localizationLabel, validateProvenance, validateSnapshot, type CatalogueSnapshot, type SnapshotItem, type SnapshotLocalization } from "./catalogue.js";
+import { localizationLabel, partitionByActivity, validateProvenance, validateSnapshot, type CatalogueSnapshot, type SnapshotItem, type SnapshotLocalization } from "./catalogue.js";
 import { matchesResearch } from "./filter.js";
 import { parseQuery, serializeQuery, type QueryCriteria } from "./query.js";
 import snapshot, { provenance } from "./snapshot.js";
@@ -156,9 +156,10 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
   }
   const localizationIds = criteria.localization ? new Set([criteria.localization]) : undefined;
   const query = criteria.q?.toLowerCase();
-  const items = catalogue.items.filter((item) => (!localizationIds || localizationIds.has(item.localizationId)) &&
+  const filteredItems = catalogue.items.filter((item) => (!localizationIds || localizationIds.has(item.localizationId)) &&
     (!query || publicSearchText(item).includes(query)) && (!criteria.kind || item.itemKind === criteria.kind) &&
     matchesResearch(item.progressClass ?? "", criteria.research));
+  const { active: items, inactive: inactiveItems } = partitionByActivity(filteredItems);
   const list = text("ul", undefined, "item-list");
   for (const item of items) {
     const row = text("li", undefined, "item-row");
@@ -166,7 +167,20 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
     if (item.localCardName) row.append(text("span", ` · ${item.localCardName}`));
     list.append(row);
   }
-  container.replaceChildren(text("p", `${items.length} public catalogue item${items.length === 1 ? "" : "s"}. Private progress is intentionally not part of this shell.`), list);
+  const content: Node[] = [text("p", `${items.length} public catalogue item${items.length === 1 ? "" : "s"}. Private progress is intentionally not part of this shell.`), list];
+  if (inactiveItems.length > 0) {
+    const inactive = text("section", undefined, "state-panel");
+    inactive.append(text("h2", "Inactive catalogue items"), text("p", `${inactiveItems.length} catalogue item${inactiveItems.length === 1 ? " is" : "s are"} inactive and excluded from the active checklist.`));
+    const inactiveList = text("ul", undefined, "item-list");
+    for (const item of inactiveItems) {
+      const row = text("li", undefined, "item-row");
+      row.append(text("strong", item.cardName), text("span", ` · ${item.localSetCode ?? "Unknown set"} ${item.collectorNumber ?? ""}`));
+      inactiveList.append(row);
+    }
+    inactive.append(inactiveList);
+    content.push(inactive);
+  }
+  container.replaceChildren(...content);
 }
 
 function renderCollection(catalogue: CatalogueSnapshot): void {
