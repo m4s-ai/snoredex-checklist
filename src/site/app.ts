@@ -165,8 +165,17 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
     return label;
   };
   const localizationOptions: [string, string][] = [["", "All localizations"]];
+  const localizationLabelCounts = new Map<string, number>();
+  for (const row of catalogue.localizations) {
+    const label = localizationLabel(row);
+    const key = `${row.locality ?? ""}\u0000${label}`;
+    localizationLabelCounts.set(key, (localizationLabelCounts.get(key) ?? 0) + 1);
+  }
   for (const row of sortedLocalizations(catalogue)) {
-    localizationOptions.push([row.localizationId, `${localizationLabel(row)}${row.locality ? ` (${row.locality})` : ""}`]);
+    const label = localizationLabel(row);
+    const key = `${row.locality ?? ""}\u0000${label}`;
+    const displayLabel = (localizationLabelCounts.get(key) ?? 0) > 1 ? `${label} · ${row.localizationId}` : label;
+    localizationOptions.push([row.localizationId, `${displayLabel}${row.locality ? ` (${row.locality})` : ""}`]);
   }
   const localization = makeSelect("Localization", "localization", localizationOptions, criteria.localization);
   const localizationSelect = localization.querySelector("select");
