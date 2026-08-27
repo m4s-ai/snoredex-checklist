@@ -28,7 +28,7 @@ function presentationLabel(values: readonly (string | null | undefined)[], fallb
   const parts: string[] = [];
   for (const value of values) {
     if (typeof value !== "string") continue;
-    const trimmed = value.trim();
+    const trimmed = value.trim().replace(/\s+/gu, " ");
     if (trimmed) parts.push(trimmed);
   }
   return parts.join(" · ") || fallback;
