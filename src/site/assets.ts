@@ -78,13 +78,23 @@ function placeholderFor(item: SnapshotItem): SiteImageAsset {
   return PLACEHOLDER_ASSETS[`placeholder-${placeholderScope(item)}`];
 }
 
-function safeProducerAsset(value: unknown, item: SnapshotItem): SiteImageAsset | undefined {
+function safeProducerAsset(value: unknown, item: SnapshotItem, assetBaseUrl: unknown): SiteImageAsset | undefined {
   if (!isRecord(value) || !isString(value.assetId) || !isSafeLocalPath(value.path) ||
-      !isString(value.url) || value.url !== value.path ||
+      !isString(value.url) || !isString(assetBaseUrl) ||
       !isString(value.mimeType) || !PRODUCER_IMAGE_MIME_TYPES.has(value.mimeType) ||
       !isString(value.imageScope) || !PLACEHOLDER_SCOPES.has(value.imageScope as PlaceholderScope) ||
       value.imageScope !== item.imageScope || !isString(value.altTextBasis) ||
       !isString(value.sha256) || !/^sha256:[0-9a-f]{64}$/.test(value.sha256) || !isRecord(value.attribution)) {
+    return undefined;
+  }
+  try {
+    const base = new URL(assetBaseUrl);
+    const resolved = new URL(value.path, base);
+    if (base.protocol !== "https:" || !base.pathname.endsWith("/") || base.search || base.hash ||
+        resolved.href !== value.url || !resolved.href.startsWith(base.href)) {
+      return undefined;
+    }
+  } catch {
     return undefined;
   }
   const attribution = value.attribution;
@@ -115,7 +125,7 @@ function safeProducerAsset(value: unknown, item: SnapshotItem): SiteImageAsset |
 export function resolveImageAsset(catalogue: CatalogueSnapshot, item: SnapshotItem): SiteImageAsset {
   if (item.imageAssetId !== null) {
     const candidate = catalogue.assets.find((asset) => isRecord(asset) && asset.assetId === item.imageAssetId);
-    const producerAsset = safeProducerAsset(candidate, item);
+    const producerAsset = safeProducerAsset(candidate, item, catalogue.meta.assetBaseUrl);
     if (producerAsset) return producerAsset;
   }
   return placeholderFor(item);
@@ -123,10 +133,11 @@ export function resolveImageAsset(catalogue: CatalogueSnapshot, item: SnapshotIt
 
 /** Resolve an asset path relative to the compiled site module, preserving Pages subpaths. */
 export function imageAssetUrl(asset: Pick<SiteImageAsset, "path">, moduleUrl: string = import.meta.url): string {
-  if (!isSafeLocalPath(asset.path)) return PLACEHOLDER_ASSETS["placeholder-card-release"].path;
+  const fallbackPath = PLACEHOLDER_ASSETS["placeholder-card-release"].path;
+  const path = isSafeLocalPath(asset.path) ? asset.path : fallbackPath;
   try {
-    return new URL(asset.path, moduleUrl).href;
+    return new URL(path, moduleUrl).href;
   } catch {
-    return PLACEHOLDER_ASSETS["placeholder-card-release"].path;
+    return fallbackPath;
   }
 }

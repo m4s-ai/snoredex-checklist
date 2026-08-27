@@ -64,7 +64,7 @@ test("accepts only a local scope-matching producer asset", () => {
   catalogue.assets.push({
     assetId: "local-asset",
     path: "images/card.webp",
-    url: "images/card.webp",
+    url: `${catalogue.meta.assetBaseUrl}images/card.webp`,
     mimeType: "image/webp",
     imageScope: "exact-printing",
     altTextBasis: "Producer-provided card image",
@@ -81,5 +81,5 @@ test("accepts only a local scope-matching producer asset", () => {
 });
 
 test("never emits a URL for an unsafe path", () => {
-  assert.equal(imageAssetUrl({ path: "../remote.webp" }, "https://example.test/snoredex/assets.js"), "images/placeholders/card-release.svg");
+  assert.equal(imageAssetUrl({ path: "../remote.webp" }, "https://example.test/snoredex/assets.js"), "https://example.test/snoredex/images/placeholders/card-release.svg");
 });
