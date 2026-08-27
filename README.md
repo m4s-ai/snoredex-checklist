@@ -59,6 +59,11 @@ npm run check
 synthetic fixture. The generated directory is ignored; production catalogue adoption and
 publication remain issue-backed gates.
 
+The build also copies the authored card-shaped placeholders from `site-src/assets/` into the
+same-origin `assets/images/` tree and writes a digest-pinned `assets/image-manifest.json`. The
+image resolver accepts only local, scope-matching producer assets; missing, invalid, remote or
+unapproved references stay on the placeholder path without a runtime fetch.
+
 `npm run check` type-checks the repository, runs the deterministic toolchain smoke check and
 assembles the synthetic static shell. It does not fetch producer catalogue data or adopt a
 production snapshot. Follow
