@@ -89,11 +89,17 @@ function renderBrowseNavigation(container: HTMLElement, catalogue: CatalogueSnap
     const localityItem = text("li", undefined, "browse-locality");
     localityItem.append(text("strong", locality));
     const setList = text("ul", undefined, "link-list browse-nested");
+    const setLabelCounts = new Map<string, number>();
+    for (const set of localitySets) {
+      const setLabel = [set.localSetCode, set.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || set.localSetId;
+      setLabelCounts.set(setLabel, (setLabelCounts.get(setLabel) ?? 0) + 1);
+    }
     for (const set of localitySets.sort((left, right) =>
       String(left.sortKey ?? "").localeCompare(String(right.sortKey ?? ""), "en", { numeric: true }) || left.localSetId.localeCompare(right.localSetId))) {
       const setItem = text("li", undefined, "browse-set");
       const setLabel = [set.localSetCode, set.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || set.localSetId;
-      setItem.append(text("span", setLabel));
+      const displaySetLabel = (setLabelCounts.get(setLabel) ?? 0) > 1 ? `${setLabel} · ${set.localSetId}` : setLabel;
+      setItem.append(text("span", displaySetLabel));
       const editionList = text("ul", undefined, "browse-nested");
       const editions = catalogue.setEditions.filter((edition) => edition.localSetId === set.localSetId);
       const editionEntries = editions
@@ -187,7 +193,7 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
   form.addEventListener("submit", () => {
     // Empty optional controls are omitted; explicit empty URL values remain invalid.
     for (const control of controls) control.disabled = control.value === "";
-    input.disabled = input.value === "";
+    input.disabled = input.value.trim() === "";
     syncEditionScope();
   });
   window.addEventListener("pageshow", () => {
@@ -292,10 +298,16 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
   for (const localization of groups) {
     const localizationSection = text("section", undefined, "result-localization");
     localizationSection.append(text("h2", `${localizationLabel(localization.localization)}${localization.localization.locality ? ` (${localization.localization.locality})` : ""}`));
+    const setLabelCounts = new Map<string, number>();
+    for (const set of localization.sets) {
+      const setLabel = [set.set.localSetCode, set.set.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || set.set.localSetId;
+      setLabelCounts.set(setLabel, (setLabelCounts.get(setLabel) ?? 0) + 1);
+    }
     for (const set of localization.sets) {
       const setSection = text("section", undefined, "result-set");
       const setLabel = [set.set.localSetCode, set.set.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || set.set.localSetId;
-      setSection.append(text("h3", setLabel));
+      const displaySetLabel = (setLabelCounts.get(setLabel) ?? 0) > 1 ? `${setLabel} · ${set.set.localSetId}` : setLabel;
+      setSection.append(text("h3", displaySetLabel));
       const siblingEditionLabelCounts = new Map<string, number>();
       for (const sibling of catalogue.setEditions) {
         if (sibling.localSetId !== set.set.localSetId || sibling.localizationId !== localization.localization.localizationId) continue;
