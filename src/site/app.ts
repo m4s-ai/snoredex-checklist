@@ -296,7 +296,8 @@ function renderItemRow(item: SnapshotItem, inactive = false, ownerLabel?: string
   identity.append(text("strong", item.cardName ?? "Unnamed item"));
   if (item.localCardName && item.localCardName !== item.cardName) identity.append(text("span", ` · ${item.localCardName}`));
   const set = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
-  if (set) identity.append(text("span", ` · ${set}${setIdentity ? ` · ${setIdentity}` : ""}`));
+  const setDisplay = [set, setIdentity].filter(Boolean).join(" · ");
+  if (setDisplay) identity.append(text("span", ` · ${setDisplay}`));
   if (ownerLabel) identity.append(text("span", ` · ${ownerLabel}`));
   row.append(identity);
   const cue = item.progressClass === "research"
