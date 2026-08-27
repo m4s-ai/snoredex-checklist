@@ -111,8 +111,12 @@ export class BrowserCollectionStateController implements CollectionStateControll
   private saveListeners = new Set<(itemId: string, result: CollectionEditResult) => void>();
   private noteFlushTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
   private noteFlushInFlight: Promise<CollectionEditResult> | undefined;
+  private noteFlushInFlightGeneration: number | undefined;
+  private noteFlushFollowUp: Promise<CollectionEditResult> | undefined;
   private pendingNoteItemId: string | undefined;
   private pendingNoteState: PrivateState | undefined;
+  private pendingNoteGeneration: number | undefined;
+  private noteGeneration = 0;
   private supersededNoteItemIds = new Set<string>();
   private immediateSaveGeneration = 0;
   private latestImmediateSaveGeneration = 0;
@@ -173,6 +177,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     this.cancelNoteTimer();
     this.pendingNoteItemId = undefined;
     this.pendingNoteState = undefined;
+    this.pendingNoteGeneration = undefined;
     this.supersededNoteItemIds.clear();
     const generation = this.beginImmediateSave(itemId, pendingItemIds);
     const outcome = persistenceError(await this.store.saveImmediate(this.stateForSave()));
@@ -189,6 +194,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     this.cancelNoteTimer();
     this.pendingNoteItemId = undefined;
     this.pendingNoteState = undefined;
+    this.pendingNoteGeneration = undefined;
     this.supersededNoteItemIds.clear();
     const generation = this.beginImmediateSave(itemId, pendingItemIds);
     const outcome = persistenceError(await this.store.saveImmediate(this.stateForSave()));
@@ -201,7 +207,9 @@ export class BrowserCollectionStateController implements CollectionStateControll
     if (!result.ok) return failure(result.error ?? "EDIT_INVALID_NOTE");
     if (this.pendingNoteItemId !== undefined) this.supersededNoteItemIds.add(this.pendingNoteItemId);
     this.setRecord(itemId, result.value);
+    const generation = ++this.noteGeneration;
     this.pendingNoteItemId = itemId;
+    this.pendingNoteGeneration = generation;
     const pendingState = this.stateForSave();
     this.pendingNoteState = pendingState;
     const scheduled = this.store.scheduleNoteSave(pendingState, false);
@@ -220,12 +228,36 @@ export class BrowserCollectionStateController implements CollectionStateControll
 
   public flushNote(): Promise<CollectionEditResult> {
     this.cancelNoteTimer();
-    if (this.noteFlushInFlight !== undefined) return this.noteFlushInFlight;
+    if (this.noteFlushInFlight !== undefined) {
+      if (this.noteFlushInFlightGeneration === this.pendingNoteGeneration || this.pendingNoteGeneration === undefined) {
+        return this.noteFlushInFlight;
+      }
+      if (this.noteFlushFollowUp === undefined) {
+        const inFlight = this.noteFlushInFlight;
+        this.noteFlushFollowUp = inFlight.then(() => {
+          this.noteFlushFollowUp = undefined;
+          return this.flushNote();
+        });
+      }
+      return this.noteFlushFollowUp;
+    }
+    const generation = this.pendingNoteGeneration;
     const operation = this.flushNoteInternal();
     this.noteFlushInFlight = operation;
+    this.noteFlushInFlightGeneration = generation;
     void operation.then(
-      () => { if (this.noteFlushInFlight === operation) this.noteFlushInFlight = undefined; },
-      () => { if (this.noteFlushInFlight === operation) this.noteFlushInFlight = undefined; },
+      () => {
+        if (this.noteFlushInFlight === operation) {
+          this.noteFlushInFlight = undefined;
+          this.noteFlushInFlightGeneration = undefined;
+        }
+      },
+      () => {
+        if (this.noteFlushInFlight === operation) {
+          this.noteFlushInFlight = undefined;
+          this.noteFlushInFlightGeneration = undefined;
+        }
+      },
     );
     return operation;
   }
@@ -252,6 +284,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
         this.supersededImmediateItemIds.clear();
         this.pendingNoteItemId = undefined;
         this.pendingNoteState = undefined;
+        this.pendingNoteGeneration = undefined;
       }
       if (itemId !== undefined) itemIds.add(itemId);
       for (const pendingItemId of itemIds) this.notifySave(pendingItemId, outcome);
@@ -273,6 +306,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     this.cancelNoteTimer();
     this.pendingNoteItemId = undefined;
     this.pendingNoteState = undefined;
+    this.pendingNoteGeneration = undefined;
     this.supersededNoteItemIds.clear();
     this.records = new Map(draft.items.map((record) => [record.itemId, record]));
     this.hasActiveState = this.records.size > 0;

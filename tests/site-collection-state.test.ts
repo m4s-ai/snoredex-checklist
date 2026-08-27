@@ -200,3 +200,22 @@ test("coalesces blur and timer note flushes while one save is in flight", async 
   noteFlush.resolve({ ok: true, value: {} });
   assert.deepEqual(await blurFlush, { ok: true, skipped: undefined });
 });
+
+test("flushes a newer note generation after an older flush is in flight", async () => {
+  const firstFlush = deferred<SaveOutcome>();
+  const secondFlush = deferred<SaveOutcome>();
+  const controller = makeController([], [firstFlush, secondFlush], undefined, [], [], true);
+
+  assert.deepEqual(controller.scheduleNote("item-a", "first"), { ok: true });
+  const first = controller.flushNote();
+  assert.deepEqual(controller.scheduleNote("item-a", "second"), { ok: true });
+  const second = controller.flushNote();
+  assert.notStrictEqual(second, first);
+
+  firstFlush.resolve({ ok: true, value: { skipped: true } });
+  await Promise.resolve();
+  secondFlush.resolve({ ok: true, value: {} });
+
+  assert.deepEqual(await first, { ok: true, skipped: true });
+  assert.deepEqual(await second, { ok: true, skipped: undefined });
+});
