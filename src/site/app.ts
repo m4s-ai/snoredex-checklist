@@ -49,17 +49,17 @@ function itemCardLabel(item: SnapshotItem): string {
   return localCardName && localCardName !== cardName ? `${cardName} · ${localCardName}` : cardName;
 }
 
-function itemRowCollisionKey(item: SnapshotItem): string {
+function itemRowCollisionKey(item: SnapshotItem, includeEdition = true): string {
   const card = itemCardLabel(item);
   const set = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
   const visibleIdentity = [card, set, itemFinishCue(item)].filter(Boolean).join(" · ");
-  return [item.localizationId, item.setEditionId ?? "", visibleIdentity].join("\u0000");
+  return [item.localizationId, includeEdition ? item.setEditionId ?? "" : "", visibleIdentity].join("\u0000");
 }
 
-function itemRowCollisionCounts(items: readonly SnapshotItem[]): Map<string, number> {
+function itemRowCollisionCounts(items: readonly SnapshotItem[], includeEdition = true): Map<string, number> {
   const counts = new Map<string, number>();
   for (const item of items) {
-    const key = itemRowCollisionKey(item);
+    const key = itemRowCollisionKey(item, includeEdition);
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return counts;
@@ -440,7 +440,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
       identities.add(item.setEditionId ?? item.itemId);
       inactiveSetIdentityCounts.set(key, identities);
     }
-    const inactiveCollisionCounts = itemRowCollisionCounts(catalogue.items.filter((candidate) => !candidate.active));
+    const inactiveCollisionCounts = itemRowCollisionCounts(catalogue.items.filter((candidate) => !candidate.active), false);
     for (const item of inactiveItems) {
       const localization = catalogue.localizations.find((candidate) => candidate.localizationId === item.localizationId);
       let ownerLabel = item.localizationId;
@@ -455,7 +455,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
       const setIdentity = !setLabel
         ? (item.setEditionId ?? item.itemId)
         : (inactiveSetIdentityCounts.get(setKey)?.size ?? 0) > 1 ? item.setEditionId : undefined;
-      const itemIdentity = (inactiveCollisionCounts.get(itemRowCollisionKey(item)) ?? 0) > 1 ? item.itemId : undefined;
+      const itemIdentity = (inactiveCollisionCounts.get(itemRowCollisionKey(item, false)) ?? 0) > 1 ? item.itemId : undefined;
       const identitySuffix = [setIdentity, itemIdentity].filter(Boolean).join(" · ") || undefined;
       inactiveList.append(renderItemRow(item, true, ownerLabel, identitySuffix));
     }
