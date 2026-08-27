@@ -83,7 +83,7 @@ export type SaveResult = PersistenceResult<SaveSuccess>;
 interface PendingNote {
   readonly state: PrivateState;
   readonly generation: number;
-  readonly timer: unknown;
+  readonly timer: unknown | undefined;
   readonly draftToken: number;
   readonly draftStorageReference: DraftReference | undefined;
   readonly supersededDraftReference: DraftReference | undefined;
@@ -593,7 +593,7 @@ export class OrderedStateStore {
     });
   }
 
-  public scheduleNoteSave(state: PrivateState): PersistenceResult<void> {
+  public scheduleNoteSave(state: PrivateState, scheduleFlush = true): PersistenceResult<void> {
     const generation = ++this.noteGeneration;
     this.cancelPendingNote();
     const previousDraft = this.activeDraftOwned ? this.activeDraftReference : undefined;
@@ -609,11 +609,13 @@ export class OrderedStateStore {
         this.rememberOwnedDraftRetirement(previousDraft);
       }
     }
-    const timer = this.clock.setTimeout(() => {
-      if (this.pendingNote?.generation === generation) {
-        void this.flushNoteForGeneration(generation);
-      }
-    }, NOTE_AUTOSAVE_DELAY_MS);
+    const timer = scheduleFlush
+      ? this.clock.setTimeout(() => {
+          if (this.pendingNote?.generation === generation) {
+            void this.flushNoteForGeneration(generation);
+          }
+        }, NOTE_AUTOSAVE_DELAY_MS)
+      : undefined;
     this.pendingNote = {
       state: cloneState(state),
       generation,
@@ -656,7 +658,7 @@ export class OrderedStateStore {
 
   private cancelPendingNote(keepDraftHeartbeat = false): void {
     if (this.pendingNote !== undefined) {
-      this.clock.clearTimeout(this.pendingNote.timer);
+      if (this.pendingNote.timer !== undefined) this.clock.clearTimeout(this.pendingNote.timer);
       this.pendingNote = undefined;
     }
     if (!keepDraftHeartbeat) {

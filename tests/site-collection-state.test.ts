@@ -14,22 +14,33 @@ type Store = ConstructorParameters<typeof BrowserCollectionStateController>[0];
 type Domain = ConstructorParameters<typeof BrowserCollectionStateController>[1];
 type SaveOutcome = { readonly ok: true; readonly value: { readonly skipped?: boolean } } | { readonly ok: false; readonly error: string };
 type DeferredSave = ReturnType<typeof deferred<SaveOutcome>>;
+type ScheduleOutcome = { readonly ok: true; readonly value: undefined } | { readonly ok: false; readonly error: string };
 
-function makeController(saves: DeferredSave[], noteFlushes: DeferredSave[] = [], scheduleNoteError?: string): BrowserCollectionStateController {
+function makeController(
+  saves: DeferredSave[],
+  noteFlushes: DeferredSave[] = [],
+  scheduleNoteError?: string,
+  scheduleNoteOutcomes: ScheduleOutcome[] = [],
+  scheduleFlushes: boolean[] = [],
+  pendingNote = false,
+): BrowserCollectionStateController {
   const store = {
     read: () => ({ ok: true, value: undefined }),
     unsaved: () => undefined,
     adoptUnsavedDraft: () => ({ ok: true, value: undefined }),
     discardUnsavedDraft: () => undefined,
-    hasPendingNote: () => false,
+    hasPendingNote: () => pendingNote,
     saveImmediate: () => {
       const save = deferred<SaveOutcome>();
       saves.push(save);
       return save.promise;
     },
-    scheduleNoteSave: () => scheduleNoteError === undefined
-      ? { ok: true, value: undefined }
-      : { ok: false, error: scheduleNoteError },
+    scheduleNoteSave: (_state: unknown, scheduleFlush = true) => {
+      scheduleFlushes.push(scheduleFlush);
+      return scheduleNoteOutcomes.shift() ?? (scheduleNoteError === undefined
+        ? { ok: true, value: undefined }
+        : { ok: false, error: scheduleNoteError });
+    },
     flushNote: () => noteFlushes.shift()?.promise ?? Promise.resolve({ ok: true, value: {} }),
   } as Store;
   const domain = {
@@ -132,4 +143,31 @@ test("retains a note owner when scheduling the durable draft fails", async () =>
   await status;
   assert.deepEqual(events, ["item-a:failed", "item-a:saved", "item-b:saved"]);
   await controller.flushNote();
+});
+
+test("settles superseded note owners after a later note save succeeds", async () => {
+  const controller = makeController(
+    [],
+    [],
+    undefined,
+    [{ ok: true, value: undefined }, { ok: false, error: "STORAGE_WRITE_FAILED" }],
+  );
+  const events: string[] = [];
+  controller.onSave((itemId, result) => events.push(`${itemId}:${result.ok ? "saved" : "failed"}`));
+
+  assert.deepEqual(controller.scheduleNote("item-a", "first"), { ok: true });
+  assert.deepEqual(controller.scheduleNote("item-b", "second"), { ok: false, error: "STORAGE_WRITE_FAILED" });
+  assert.deepEqual(events, ["item-b:failed", "item-a:failed"]);
+
+  await controller.flushNote();
+  assert.deepEqual(events, ["item-b:failed", "item-a:failed", "item-a:saved", "item-b:saved"]);
+});
+
+test("lets the controller own note autosave timing", async () => {
+  const scheduleFlushes: boolean[] = [];
+  const controller = makeController([], [], undefined, [], scheduleFlushes, true);
+
+  assert.deepEqual(controller.scheduleNote("item-a", "note"), { ok: true });
+  await controller.flushNote();
+  assert.deepEqual(scheduleFlushes, [false]);
 });

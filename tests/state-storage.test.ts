@@ -239,6 +239,22 @@ test("note autosave uses blur or three seconds of inactivity and resets its time
   assert.deepEqual(new OrderedStateStore(storage).read(), { ok: true, value: state(0, "blurred") });
 });
 
+test("can leave note autosave timing to the controller", async () => {
+  const storage = new FakeStorage();
+  const clock = new FakeClock();
+  const store = new OrderedStateStore(storage, clock);
+
+  assert.deepEqual(store.scheduleNoteSave(state(0, "controller-timed"), false), { ok: true, value: undefined });
+  clock.advance(NOTE_AUTOSAVE_DELAY_MS);
+  await Promise.resolve();
+  assert.equal(storage.writes, 0);
+  assert.deepEqual(await store.flushNote(), {
+    ok: true,
+    value: { state: state(0, "controller-timed") },
+  });
+  assert.equal(storage.writes, 1);
+});
+
 test("reports scheduled draft persistence failures instead of hiding them", async () => {
   const storage = new FakeStorage();
   const store = new OrderedStateStore(storage);

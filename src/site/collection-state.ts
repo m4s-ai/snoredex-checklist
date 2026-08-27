@@ -31,7 +31,7 @@ interface OrderedStateStoreLike {
   discardUnsavedDraft(): void;
   hasPendingNote(): boolean;
   saveImmediate(state: PrivateState): Promise<PersistenceResult<{ readonly skipped?: boolean }>>;
-  scheduleNoteSave(state: PrivateState): PersistenceResult<void>;
+  scheduleNoteSave(state: PrivateState, scheduleFlush?: boolean): PersistenceResult<void>;
   flushNote(): Promise<PersistenceResult<{ readonly skipped?: boolean }>>;
 }
 
@@ -203,7 +203,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     this.pendingNoteItemId = itemId;
     const pendingState = this.stateForSave();
     this.pendingNoteState = pendingState;
-    const scheduled = this.store.scheduleNoteSave(pendingState);
+    const scheduled = this.store.scheduleNoteSave(pendingState, false);
     if (!scheduled.ok) {
       const outcome = failure(scheduled.error ?? "STORAGE_WRITE_FAILED");
       this.notifySave(itemId, outcome);
@@ -222,7 +222,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     const itemId = this.pendingNoteItemId;
     const pendingState = this.pendingNoteState;
     if (this.pendingNoteState !== undefined && !this.store.hasPendingNote()) {
-      const scheduled = this.store.scheduleNoteSave(this.pendingNoteState);
+      const scheduled = this.store.scheduleNoteSave(this.pendingNoteState, false);
       if (!scheduled.ok) {
         const outcome = failure(scheduled.error ?? "STORAGE_WRITE_FAILED");
         if (itemId !== undefined) this.notifySave(itemId, outcome);
@@ -282,7 +282,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     for (const itemId of this.supersededNoteItemIds) {
       if (itemId !== excludedItemId) this.notifySave(itemId, result);
     }
-    this.supersededNoteItemIds.clear();
+    if (result.ok) this.supersededNoteItemIds.clear();
   }
 
   private beginImmediateSave(itemId: string, additionalItemIds: Iterable<string> = []): number {
