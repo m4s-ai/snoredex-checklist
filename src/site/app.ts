@@ -316,9 +316,9 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
   const groups = buildBrowseHierarchy(criteria, catalogue, matchesResearch, state.readable ? state.statuses : undefined);
   const grouped = text("div", undefined, "browse-results");
   const localizationLabelCounts = new Map<string, number>();
-  for (const group of groups) {
-    const label = localizationLabel(group.localization);
-    const key = `${group.localization.locality ?? ""}\u0000${label}`;
+  for (const candidate of catalogue.localizations) {
+    const label = localizationLabel(candidate);
+    const key = `${candidate.locality ?? ""}\u0000${label}`;
     localizationLabelCounts.set(key, (localizationLabelCounts.get(key) ?? 0) + 1);
   }
   for (const localization of groups) {
