@@ -3,7 +3,8 @@ import test from "node:test";
 
 import fixture from "./fixtures/collector-catalogue.fixture.json" with { type: "json" };
 import { semanticFingerprint } from "../src/catalogue/validate.ts";
-import { localizationLabel, partitionByActivity, validateProvenance, validateSnapshot } from "../src/site/catalogue.ts";
+import { localizationLabel, validateProvenance, validateSnapshot } from "../src/site/catalogue.ts";
+import { buildResultViewModel } from "../src/site/results.ts";
 
 function reseal(value: any): any {
   value.meta.catalogueFingerprint = semanticFingerprint(value);
@@ -34,9 +35,12 @@ test("keeps inactive items separate from active results", async () => {
   const validation = await validateSnapshot(reseal(inactive));
   assert.equal(validation.ok, true);
   if (!validation.ok) return;
-  const partition = partitionByActivity(validation.snapshot.items);
-  assert.equal(partition.active.some((item) => item.itemId === inactive.items[0].itemId), false);
-  assert.equal(partition.inactive.some((item) => item.itemId === inactive.items[0].itemId), true);
+  const model = buildResultViewModel({ localization: inactive.items[0].localizationId }, validation.snapshot);
+  assert.equal(model.activeItems.some((item) => item.itemId === inactive.items[0].itemId), false);
+  assert.equal(model.inactiveItems.some((item) => item.itemId === inactive.items[0].itemId), true);
+  assert.equal(model.activeSummary.startsWith("0 public catalogue items."), true);
+  assert.equal(model.inactiveHeading, "Inactive catalogue items");
+  assert.match(model.inactiveSummary ?? "", /inactive and excluded from the active checklist/);
 });
 
 test("fails closed on invalid provenance metadata", async () => {

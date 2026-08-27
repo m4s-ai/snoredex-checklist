@@ -1,6 +1,6 @@
-import { localizationLabel, partitionByActivity, validateProvenance, validateSnapshot, type CatalogueSnapshot, type SnapshotItem, type SnapshotLocalization } from "./catalogue.js";
-import { matchesResearch } from "./filter.js";
+import { localizationLabel, validateProvenance, validateSnapshot, type CatalogueSnapshot, type SnapshotItem, type SnapshotLocalization } from "./catalogue.js";
 import { parseQuery, serializeQuery, type QueryCriteria } from "./query.js";
+import { buildResultViewModel } from "./results.js";
 import snapshot, { provenance } from "./snapshot.js";
 
 const $ = <T extends Element>(selector: string): T => {
@@ -73,11 +73,6 @@ function renderLocalizationLinks(container: HTMLElement, catalogue: CatalogueSna
 function renderIndex(catalogue: CatalogueSnapshot): void {
   renderProvenance($("[data-provenance]"), catalogue);
   renderLocalizationLinks($("[data-localizations]"), catalogue);
-}
-
-function publicSearchText(item: SnapshotItem): string {
-  return [item.cardName, item.localCardName, item.localSetName, item.localSetCode, item.collectorNumber]
-    .filter((value): value is string => typeof value === "string").join(" ").toLowerCase();
 }
 
 function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalogue: CatalogueSnapshot): void {
@@ -154,12 +149,8 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
     container.replaceChildren(summary);
     return;
   }
-  const localizationIds = criteria.localization ? new Set([criteria.localization]) : undefined;
-  const query = criteria.q?.toLowerCase();
-  const filteredItems = catalogue.items.filter((item) => (!localizationIds || localizationIds.has(item.localizationId)) &&
-    (!query || publicSearchText(item).includes(query)) && (!criteria.kind || item.itemKind === criteria.kind) &&
-    matchesResearch(item.progressClass ?? "", criteria.research));
-  const { active: items, inactive: inactiveItems } = partitionByActivity(filteredItems);
+  const model = buildResultViewModel(criteria, catalogue);
+  const { activeItems: items, inactiveItems } = model;
   const list = text("ul", undefined, "item-list");
   for (const item of items) {
     const row = text("li", undefined, "item-row");
@@ -167,10 +158,10 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
     if (item.localCardName) row.append(text("span", ` · ${item.localCardName}`));
     list.append(row);
   }
-  const content: Node[] = [text("p", `${items.length} public catalogue item${items.length === 1 ? "" : "s"}. Private progress is intentionally not part of this shell.`), list];
+  const content: Node[] = [text("p", model.activeSummary), list];
   if (inactiveItems.length > 0) {
     const inactive = text("section", undefined, "state-panel");
-    inactive.append(text("h2", "Inactive catalogue items"), text("p", `${inactiveItems.length} catalogue item${inactiveItems.length === 1 ? " is" : "s are"} inactive and excluded from the active checklist.`));
+    inactive.append(text("h2", model.inactiveHeading), text("p", model.inactiveSummary));
     const inactiveList = text("ul", undefined, "item-list");
     for (const item of inactiveItems) {
       const row = text("li", undefined, "item-row");
