@@ -52,7 +52,8 @@ function itemCardLabel(item: SnapshotItem): string {
 function itemRowCollisionKey(item: SnapshotItem): string {
   const card = itemCardLabel(item);
   const set = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
-  return [item.localizationId, item.setEditionId ?? "", card, set, itemFinishCue(item) ?? ""].join("\u0000");
+  const visibleIdentity = [card, set, itemFinishCue(item)].filter(Boolean).join(" · ");
+  return [item.localizationId, item.setEditionId ?? "", visibleIdentity].join("\u0000");
 }
 
 function itemRowCollisionCounts(items: readonly SnapshotItem[]): Map<string, number> {
