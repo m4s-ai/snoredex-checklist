@@ -15,7 +15,7 @@ type Domain = ConstructorParameters<typeof BrowserCollectionStateController>[1];
 type SaveOutcome = { readonly ok: true; readonly value: { readonly skipped?: boolean } } | { readonly ok: false; readonly error: string };
 type DeferredSave = ReturnType<typeof deferred<SaveOutcome>>;
 
-function makeController(saves: DeferredSave[], noteFlushes: DeferredSave[] = []): BrowserCollectionStateController {
+function makeController(saves: DeferredSave[], noteFlushes: DeferredSave[] = [], scheduleNoteError?: string): BrowserCollectionStateController {
   const store = {
     read: () => ({ ok: true, value: undefined }),
     unsaved: () => undefined,
@@ -27,7 +27,9 @@ function makeController(saves: DeferredSave[], noteFlushes: DeferredSave[] = [])
       saves.push(save);
       return save.promise;
     },
-    scheduleNoteSave: () => ({ ok: true, value: undefined }),
+    scheduleNoteSave: () => scheduleNoteError === undefined
+      ? { ok: true, value: undefined }
+      : { ok: false, error: scheduleNoteError },
     flushNote: () => noteFlushes.shift()?.promise ?? Promise.resolve({ ok: true, value: {} }),
   } as Store;
   const domain = {
@@ -114,4 +116,20 @@ test("retains a failed note owner through a later immediate save", async () => {
   saves[0].resolve({ ok: true, value: {} });
   await status;
   assert.deepEqual(events, ["item-a:failed", "item-a:saved", "item-b:saved"]);
+});
+
+test("retains a note owner when scheduling the durable draft fails", async () => {
+  const saves: DeferredSave[] = [];
+  const controller = makeController(saves, [], "STORAGE_WRITE_FAILED");
+  const events: string[] = [];
+  controller.onSave((itemId, result) => events.push(`${itemId}:${result.ok ? "saved" : "failed"}`));
+
+  assert.deepEqual(controller.scheduleNote("item-a", "note"), { ok: false, error: "STORAGE_WRITE_FAILED" });
+  assert.deepEqual(events, ["item-a:failed"]);
+
+  const status = controller.setStatus("item-b", "have");
+  saves[0].resolve({ ok: true, value: {} });
+  await status;
+  assert.deepEqual(events, ["item-a:failed", "item-a:saved", "item-b:saved"]);
+  await controller.flushNote();
 });

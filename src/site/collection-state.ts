@@ -201,22 +201,20 @@ export class BrowserCollectionStateController implements CollectionStateControll
     if (this.pendingNoteItemId !== undefined) this.supersededNoteItemIds.add(this.pendingNoteItemId);
     this.setRecord(itemId, result.value);
     this.pendingNoteItemId = itemId;
-    const scheduled = this.store.scheduleNoteSave(this.stateForSave());
+    const pendingState = this.stateForSave();
+    this.pendingNoteState = pendingState;
+    const scheduled = this.store.scheduleNoteSave(pendingState);
     if (!scheduled.ok) {
-      this.pendingNoteItemId = undefined;
-      this.pendingNoteState = undefined;
       const outcome = failure(scheduled.error ?? "STORAGE_WRITE_FAILED");
       this.notifySave(itemId, outcome);
       this.notifySuperseded(outcome, itemId);
-      return outcome;
     }
-    this.pendingNoteState = this.stateForSave();
     this.cancelNoteTimer();
     this.noteFlushTimer = globalThis.setTimeout(() => {
       this.noteFlushTimer = undefined;
       void this.flushNote();
     }, this.noteAutosaveDelay + 10);
-    return { ok: true };
+    return scheduled.ok ? { ok: true } : failure(scheduled.error ?? "STORAGE_WRITE_FAILED");
   }
 
   public async flushNote(): Promise<CollectionEditResult> {
