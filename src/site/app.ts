@@ -1,5 +1,7 @@
 import { localizationLabel, validateProvenance, validateSnapshot, type CatalogueSnapshot, type SnapshotItem, type SnapshotLocalSet, type SnapshotLocalization } from "./catalogue.js";
+import { imageAssetUrl, resolveImageAsset } from "./assets.js";
 import { matchesResearch } from "./filter.js";
+import { collectorNumberLabel, evidenceCueLabel, imageScopeLabel, itemCueLabel, linkValues, presentText, safeExternalUrl } from "./item-presentation.js";
 import { readPrivateState, type PrivateStateRead } from "./private-state.js";
 import { parseQuery, serializeQuery, type QueryCriteria } from "./query.js";
 import { buildBrowseHierarchy, buildProgressViewModel, buildResultViewModel } from "./results.js";
@@ -321,22 +323,185 @@ function renderProgress(catalogue: CatalogueSnapshot, localizationId: string | u
   return section;
 }
 
-function renderItemRow(item: SnapshotItem, inactive = false, ownerLabel?: string, setIdentity?: string): HTMLLIElement {
+function externalLink(href: unknown, label: string): HTMLAnchorElement | undefined {
+  const safeHref = safeExternalUrl(href);
+  if (!safeHref) return undefined;
+  const anchor = link(safeHref, `${label} ↗`, "external-link");
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  anchor.setAttribute("aria-label", `${label} (external site)`);
+  return anchor;
+}
+
+function detailValue(value: unknown, fallback = "Not recorded"): string {
+  const normalized = presentText(value);
+  if (normalized) return normalized;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return fallback;
+}
+
+function appendDetail(dl: HTMLElement, label: string, value: unknown, fallback = "Not recorded"): void {
+  dl.append(text("dt", label), text("dd", detailValue(value, fallback)));
+}
+
+function appendLinkDetails(dl: HTMLElement, label: string, values: unknown): void {
+  const list = text("ul", undefined, "item-detail-links");
+  for (const [index, value] of linkValues(values).entries()) {
+    const anchor = externalLink(value, `${label} ${index + 1}`);
+    if (!anchor) continue;
+    const li = text("li");
+    li.append(anchor);
+    list.append(li);
+  }
+  const dd = text("dd");
+  dd.append(list.childElementCount > 0 ? list : text("span", "No published links."));
+  dl.append(text("dt", label), dd);
+}
+
+function appendMarkingDetails(dl: HTMLElement, item: SnapshotItem): void {
+  const markings = Array.isArray(item.markings) ? item.markings : [];
+  const values = markings.map((marking) => {
+    if (typeof marking !== "object" || marking === null) return undefined;
+    const row = marking as Record<string, unknown>;
+    const kind = detailValue(row.kind, "Unknown marking");
+    const role = detailValue(row.role, "Unknown role");
+    const value = detailValue(row.text, "Unspecified marking");
+    return `${kind} · ${role}: ${value}`;
+  }).filter((value): value is string => value !== undefined);
+  appendDetail(dl, "Markings", values.length > 0 ? values.join("; ") : undefined, "None recorded");
+}
+
+function renderItemDetails(item: SnapshotItem, catalogue: CatalogueSnapshot, scopeLabel: string): HTMLDetailsElement {
+  const details = text("details", undefined, "item-details") as HTMLDetailsElement;
+  details.append(text("summary", "Details, evidence and sources"));
+  const dl = text("dl", undefined, "item-detail-list");
+  const localization = catalogue.localizations.find((candidate) => candidate.localizationId === item.localizationId);
+  appendDetail(dl, "Item ID", item.itemId);
+  appendDetail(dl, "Set edition ID", item.setEditionId);
+  appendDetail(dl, "Local set ID", item.localSetId);
+  appendDetail(dl, "Card release ID", item.cardReleaseId);
+  appendDetail(dl, "Work ID", item.workId, "No work mapping asserted");
+  appendDetail(dl, "Physical printing ID", item.physicalPrintingId, "Not assigned; this row does not assert a verified printing");
+  appendDetail(dl, "Source printing ID", item.sourcePrintingId, "Not recorded");
+  appendDetail(dl, "Finish unit ID", item.finishUnitId, "Not recorded");
+  appendDetail(dl, "Locality", localization?.locality ?? item.localizationId);
+  appendDetail(dl, "Language", localization?.languageTag ?? "Not recorded");
+  appendDetail(dl, "Image scope", scopeLabel);
+  appendDetail(dl, "Item class", item.itemKind);
+  appendDetail(dl, "Producer evidence", item.finishVerificationStatus);
+  appendDetail(dl, "Completeness", item.completenessStatus);
+  appendDetail(dl, "Technical finish", item.finish, "Not recorded");
+  appendDetail(dl, "Finish family", item.finishFamily, "Not recorded");
+  appendDetail(dl, "Foil pattern", item.foilPattern, "Not recorded");
+  appendMarkingDetails(dl, item);
+  const distribution = item.distribution;
+  if (typeof distribution === "object" && distribution !== null) {
+    const row = distribution as Record<string, unknown>;
+    appendDetail(dl, "Distribution", [row.kind, row.name, row.region, row.date, row.text]
+      .map((value) => presentText(value)).filter((value): value is string => value !== undefined).join(" · "), "Not recorded");
+  } else {
+    appendDetail(dl, "Distribution", undefined);
+  }
+  const releaseDate = detailValue(item.releaseDate, "Not recorded");
+  const precision = presentText(item.releaseDatePrecision);
+  appendDetail(dl, "Release date", precision ? `${releaseDate} (${precision}${item.releaseApproximate === true ? ", approximate" : ""})` : releaseDate);
+  appendLinkDetails(dl, "Source", item.sourceLinks);
+  appendLinkDetails(dl, "Evidence", item.evidenceLinks);
+  const correction = externalLink(item.correctionLink, "Submit evidence or correction");
+  const correctionDd = text("dd");
+  correctionDd.append(correction ?? text("span", "Correction link unavailable."));
+  dl.append(text("dt", "Producer correction"), correctionDd);
+  details.append(dl);
+  return details;
+}
+
+let imageDialogSequence = 0;
+
+function renderItemImage(item: SnapshotItem, catalogue: CatalogueSnapshot): HTMLElement {
+  const asset = resolveImageAsset(catalogue, item);
+  const scopeLabel = imageScopeLabel(item, asset.placeholder);
+  const alt = `${asset.placeholder ? "Authored placeholder" : "Catalogue image"} for ${itemCardLabel(item)} · ${scopeLabel}; no real card image is implied.`;
+  const figure = text("figure", undefined, "item-image");
+  const image = document.createElement("img");
+  image.src = imageAssetUrl(asset);
+  image.alt = alt;
+  image.loading = "lazy";
+  image.decoding = "async";
+  if (item.progressClass === "research") {
+    figure.classList.add("item-image-placeholder");
+    figure.append(image, text("figcaption", scopeLabel));
+    return figure;
+  }
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "image-button";
+  button.setAttribute("aria-label", `Inspect image for ${itemCardLabel(item)} (${scopeLabel})`);
+  button.append(image);
+  const dialog = document.createElement("dialog");
+  dialog.className = "image-dialog";
+  const dialogId = `item-image-dialog-${++imageDialogSequence}`;
+  dialog.id = dialogId;
+  const heading = text("h3", `Image preview · ${itemCardLabel(item)}`);
+  heading.id = `${dialogId}-title`;
+  dialog.setAttribute("aria-labelledby", heading.id);
+  const largeImage = document.createElement("img");
+  largeImage.src = image.src;
+  largeImage.alt = alt;
+  const close = text("button", "Close image") as HTMLButtonElement;
+  close.type = "button";
+  close.className = "dialog-close";
+  const closeDialog = (): void => {
+    if (typeof dialog.close === "function") dialog.close();
+    else dialog.removeAttribute("open");
+    button.focus();
+  };
+  close.addEventListener("click", closeDialog);
+  dialog.addEventListener("close", () => button.focus());
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) closeDialog();
+  });
+  dialog.append(heading, largeImage, text("p", scopeLabel), close);
+  button.setAttribute("aria-controls", dialogId);
+  button.addEventListener("click", () => {
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+    close.focus();
+  });
+  figure.append(button, text("figcaption", scopeLabel), dialog);
+  return figure;
+}
+
+function renderItemRow(item: SnapshotItem, catalogue: CatalogueSnapshot, inactive = false, ownerLabel?: string, setIdentity?: string): HTMLLIElement {
   const row = text("li", undefined, "item-row") as HTMLLIElement;
+  row.dataset.itemId = item.itemId;
+  if (item.progressClass === "research") row.classList.add("item-row-research");
+  const asset = resolveImageAsset(catalogue, item);
+  const scopeLabel = imageScopeLabel(item, asset.placeholder);
+  row.append(renderItemImage(item, catalogue));
+  const content = text("div", undefined, "item-content");
   const identity = text("div", undefined, "item-identity");
-  identity.append(text("strong", itemCardLabel(item)));
-  const set = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
+  identity.append(text("strong", presentText(item.cardName) ?? "Unnamed item"));
+  const localCardName = presentText(item.localCardName);
+  if (localCardName || item.progressClass === "research") {
+    identity.append(text("span", localCardName ?? "Local name not recorded", localCardName ? "item-local-name" : "item-muted"));
+  }
+  const set = presentationLabel([item.localSetCode, item.localSetName], "");
   const setDisplay = [set, setIdentity].filter(Boolean).join(" · ");
   if (setDisplay) identity.append(text("span", ` · ${setDisplay}`));
-  const finishCue = itemFinishCue(item);
-  if (finishCue) identity.append(text("span", ` · ${finishCue}`));
   if (ownerLabel) identity.append(text("span", ` · ${ownerLabel}`));
-  row.append(identity);
-  const cue = item.progressClass === "research"
-    ? "Research · read-only"
-    : item.itemKind === "verified-printing" ? "Current-known · verified printing" : "Current-known";
-  row.append(text("span", cue, "item-cue"));
-  if (inactive) row.append(text("span", "Inactive", "item-cue"));
+  content.append(identity);
+  const metadata = text("div", undefined, "item-meta");
+  const localization = catalogue.localizations.find((candidate) => candidate.localizationId === item.localizationId);
+  const locale = localization ? `${localizationLabel(localization)}${localization.locality ? ` (${localization.locality})` : ""}` : item.localizationId;
+  metadata.textContent = [collectorNumberLabel(item) ?? "Collector number not recorded", locale, itemFinishCue(item) ?? "Physical variation not recorded"].join(" · ");
+  content.append(metadata);
+  const tags = text("div", undefined, "item-tags");
+  tags.append(text("span", itemCueLabel(item), "item-cue"), text("span", scopeLabel, "item-scope"));
+  const evidence = evidenceCueLabel(item);
+  if (evidence) tags.append(text("span", evidence, "item-cue"));
+  if (inactive) tags.append(text("span", "Inactive", "item-cue"));
+  content.append(tags, renderItemDetails(item, catalogue, scopeLabel));
+  row.append(content);
   return row;
 }
 
@@ -403,7 +568,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
           candidate.setEditionId === edition.edition.setEditionId && candidate.active && candidate.progressClass !== "research"));
         for (const item of currentItems) {
           const itemIdentity = (currentCollisionCounts.get(itemRowCollisionKey(item)) ?? 0) > 1 ? item.itemId : undefined;
-          list.append(renderItemRow(item, false, undefined, itemIdentity));
+          list.append(renderItemRow(item, catalogue, false, undefined, itemIdentity));
         }
         if (list.childElementCount > 0) editionSection.append(list);
         const research = edition.items.filter((item) => item.active && item.progressClass === "research");
@@ -415,7 +580,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
             candidate.setEditionId === edition.edition.setEditionId && candidate.active && candidate.progressClass === "research"));
           for (const item of research) {
             const itemIdentity = (researchCollisionCounts.get(itemRowCollisionKey(item)) ?? 0) > 1 ? item.itemId : undefined;
-            researchList.append(renderItemRow(item, false, undefined, itemIdentity));
+            researchList.append(renderItemRow(item, catalogue, false, undefined, itemIdentity));
           }
           researchSection.append(researchList);
           editionSection.append(researchSection);
@@ -457,7 +622,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
         : (inactiveSetIdentityCounts.get(setKey)?.size ?? 0) > 1 ? item.setEditionId : undefined;
       const itemIdentity = (inactiveCollisionCounts.get(itemRowCollisionKey(item, false)) ?? 0) > 1 ? item.itemId : undefined;
       const identitySuffix = [setIdentity, itemIdentity].filter(Boolean).join(" · ") || undefined;
-      inactiveList.append(renderItemRow(item, true, ownerLabel, identitySuffix));
+      inactiveList.append(renderItemRow(item, catalogue, true, ownerLabel, identitySuffix));
     }
     inactive.append(inactiveList);
     content.push(inactive);
