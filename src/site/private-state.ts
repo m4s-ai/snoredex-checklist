@@ -4,6 +4,21 @@ export interface PrivateStateRead {
   readonly statuses: ReadonlyMap<string, "need" | "ordered" | "have" | "skip">;
 }
 
+type AuthorityResult =
+  | {
+      readonly ok: true;
+      readonly active: {
+        readonly catalogueFingerprint: string;
+        readonly items: readonly {
+          readonly itemId: string;
+          readonly status: "need" | "ordered" | "have" | "skip";
+        }[];
+      } | undefined;
+    }
+  | { readonly ok: false };
+
+type AuthorityReader = (raw: string | null, recovery: string | null) => AuthorityResult;
+
 // Keep the import runtime-relative so the site compiler does not need the
 // state authority in its source root; build-site emits it beside this module.
 const AUTHORITY_MODULE: string = "./state/authority.js";
@@ -14,14 +29,18 @@ const RECOVERY_KEY = "snoredex-checklist.private-state.recovery";
 export async function readPrivateState(
   expectedCatalogueFingerprint: string,
   knownTrackableItemIds: ReadonlySet<string>,
+  // Keep the trust-boundary adapter directly testable without importing the
+  // generated, runtime-relative authority bundle in source tests.
+  authorityReader?: AuthorityReader,
 ): Promise<PrivateStateRead> {
   try {
     if (typeof localStorage === "undefined") return { readable: true, hasActiveState: false, statuses: new Map() };
     const raw = localStorage.getItem(ACTIVE_KEY);
     const recovery = localStorage.getItem(RECOVERY_KEY);
     if (raw === null && recovery === null) return { readable: true, hasActiveState: false, statuses: new Map() };
-    const authority = await import(AUTHORITY_MODULE);
-    const result = authority.readStateAuthority(raw, recovery);
+    const result = authorityReader === undefined
+      ? (await import(AUTHORITY_MODULE)).readStateAuthority(raw, recovery)
+      : authorityReader(raw, recovery);
     if (!result.ok) return { readable: false, hasActiveState: false, statuses: new Map() };
     const active = result.active;
     // A state envelope belongs to one exact catalogue revision. Defer it to

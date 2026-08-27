@@ -22,7 +22,7 @@
   "scripts": {
     "check": "npm run typecheck && npm test && npm run smoke && npm run build:site",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/catalogue-validator.test.ts tests/catalogue-sync.test.ts tests/state-domain.test.ts tests/state-storage.test.ts tests/state-backup.test.ts tests/site-query.test.ts tests/site-filter.test.ts tests/site-catalogue.test.ts tests/build-site.test.ts",
+    "test": "node --test tests/catalogue-validator.test.ts tests/catalogue-sync.test.ts tests/state-domain.test.ts tests/state-storage.test.ts tests/state-backup.test.ts tests/site-query.test.ts tests/site-filter.test.ts tests/site-catalogue.test.ts tests/site-private-state.test.ts tests/build-site.test.ts",
     "smoke": "node tests/toolchain-smoke.ts",
     "sync:catalogue": "node scripts/sync-catalogue.ts",
     "build:site": "node scripts/build-site.mjs"
