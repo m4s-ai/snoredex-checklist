@@ -106,6 +106,7 @@ class BrowserCollectionStateController implements CollectionStateController {
   private noteFlushTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
   private pendingNoteItemId: string | undefined;
   private pendingNoteState: PrivateState | undefined;
+  private supersededNoteItemIds = new Set<string>();
 
   public constructor(
     store: OrderedStateStoreLike,
@@ -155,30 +156,45 @@ class BrowserCollectionStateController implements CollectionStateController {
   public async setStatus(itemId: string, status: CollectionStatus): Promise<CollectionEditResult> {
     const result = this.domain.applyStatusCommand(itemId, this.records.get(itemId), status);
     if (!result.ok) return failure(result.error ?? "IMPORT_INVALID_STATE_DATA");
+    const pendingNoteItemId = this.pendingNoteItemId;
+    const supersededNoteItemIds = new Set(this.supersededNoteItemIds);
     this.setRecord(itemId, result.value);
     this.cancelNoteTimer();
     this.pendingNoteItemId = undefined;
     this.pendingNoteState = undefined;
+    this.supersededNoteItemIds.clear();
     const outcome = persistenceError(await this.store.saveImmediate(this.stateForSave()));
     this.notifySave(itemId, outcome);
+    if (pendingNoteItemId !== undefined && pendingNoteItemId !== itemId) this.notifySave(pendingNoteItemId, outcome);
+    for (const supersededItemId of supersededNoteItemIds) {
+      if (supersededItemId !== itemId && supersededItemId !== pendingNoteItemId) this.notifySave(supersededItemId, outcome);
+    }
     return outcome;
   }
 
   public async setQuantities(itemId: string, quantityOwned: unknown, quantityOrdered: unknown): Promise<CollectionEditResult> {
     const result = this.domain.applyQuantityEdit(itemId, this.records.get(itemId), quantityOwned, quantityOrdered);
     if (!result.ok) return failure(result.error ?? "EDIT_INVALID_QUANTITY");
+    const pendingNoteItemId = this.pendingNoteItemId;
+    const supersededNoteItemIds = new Set(this.supersededNoteItemIds);
     this.setRecord(itemId, result.value);
     this.cancelNoteTimer();
     this.pendingNoteItemId = undefined;
     this.pendingNoteState = undefined;
+    this.supersededNoteItemIds.clear();
     const outcome = persistenceError(await this.store.saveImmediate(this.stateForSave()));
     this.notifySave(itemId, outcome);
+    if (pendingNoteItemId !== undefined && pendingNoteItemId !== itemId) this.notifySave(pendingNoteItemId, outcome);
+    for (const supersededItemId of supersededNoteItemIds) {
+      if (supersededItemId !== itemId && supersededItemId !== pendingNoteItemId) this.notifySave(supersededItemId, outcome);
+    }
     return outcome;
   }
 
   public scheduleNote(itemId: string, note: string): CollectionEditResult {
     const result = this.domain.applyNoteEdit(itemId, this.records.get(itemId), note);
     if (!result.ok) return failure(result.error ?? "EDIT_INVALID_NOTE");
+    if (this.pendingNoteItemId !== undefined) this.supersededNoteItemIds.add(this.pendingNoteItemId);
     this.setRecord(itemId, result.value);
     this.pendingNoteItemId = itemId;
     const scheduled = this.store.scheduleNoteSave(this.stateForSave());
@@ -187,6 +203,7 @@ class BrowserCollectionStateController implements CollectionStateController {
       this.pendingNoteState = undefined;
       const outcome = failure(scheduled.error ?? "STORAGE_WRITE_FAILED");
       this.notifySave(itemId, outcome);
+      this.notifySuperseded(outcome, itemId);
       return outcome;
     }
     this.pendingNoteState = this.stateForSave();
@@ -207,15 +224,22 @@ class BrowserCollectionStateController implements CollectionStateController {
       if (!scheduled.ok) {
         const outcome = failure(scheduled.error ?? "STORAGE_WRITE_FAILED");
         if (itemId !== undefined) this.notifySave(itemId, outcome);
+        this.notifySuperseded(outcome, itemId);
         return outcome;
       }
     }
     const outcome = persistenceError(await this.store.flushNote());
     const isCurrent = this.pendingNoteItemId === itemId && this.pendingNoteState === pendingState;
     if (isCurrent) {
+      const itemIds = new Set(this.supersededNoteItemIds);
+      this.supersededNoteItemIds.clear();
       this.pendingNoteItemId = undefined;
       if (outcome.ok && !outcome.skipped) this.pendingNoteState = undefined;
-      if (itemId !== undefined) this.notifySave(itemId, outcome);
+      if (itemId !== undefined) itemIds.add(itemId);
+      for (const pendingItemId of itemIds) this.notifySave(pendingItemId, outcome);
+    } else if (itemId !== undefined && this.pendingNoteItemId === undefined && this.supersededNoteItemIds.has(itemId)) {
+      this.supersededNoteItemIds.delete(itemId);
+      this.notifySave(itemId, outcome);
     }
     return outcome;
   }
@@ -231,6 +255,7 @@ class BrowserCollectionStateController implements CollectionStateController {
     this.cancelNoteTimer();
     this.pendingNoteItemId = undefined;
     this.pendingNoteState = undefined;
+    this.supersededNoteItemIds.clear();
     this.records = new Map(draft.items.map((record) => [record.itemId, record]));
     this.hasActiveState = this.records.size > 0;
     this.recoveryDraft = undefined;
@@ -245,6 +270,13 @@ class BrowserCollectionStateController implements CollectionStateController {
     this.recoveryDraft = undefined;
     this.notify();
     return { ok: true };
+  }
+
+  private notifySuperseded(result: CollectionEditResult, excludedItemId?: string): void {
+    for (const itemId of this.supersededNoteItemIds) {
+      if (itemId !== excludedItemId) this.notifySave(itemId, result);
+    }
+    this.supersededNoteItemIds.clear();
   }
 
   private setRecord(itemId: string, record: PrivateItemState | undefined): void {
