@@ -146,9 +146,11 @@ test("retains a note owner when scheduling the durable draft fails", async () =>
 });
 
 test("settles superseded note owners after a later note save succeeds", async () => {
+  const firstFlush = deferred<SaveOutcome>();
+  const secondFlush = deferred<SaveOutcome>();
   const controller = makeController(
     [],
-    [],
+    [firstFlush, secondFlush],
     undefined,
     [{ ok: true, value: undefined }, { ok: false, error: "STORAGE_WRITE_FAILED" }],
   );
@@ -159,8 +161,22 @@ test("settles superseded note owners after a later note save succeeds", async ()
   assert.deepEqual(controller.scheduleNote("item-b", "second"), { ok: false, error: "STORAGE_WRITE_FAILED" });
   assert.deepEqual(events, ["item-b:failed", "item-a:failed"]);
 
-  await controller.flushNote();
-  assert.deepEqual(events, ["item-b:failed", "item-a:failed", "item-a:saved", "item-b:saved"]);
+  const failedFlush = controller.flushNote();
+  firstFlush.resolve({ ok: false, error: "STORAGE_WRITE_FAILED" });
+  await failedFlush;
+  assert.deepEqual(events, ["item-b:failed", "item-a:failed", "item-a:failed", "item-b:failed"]);
+
+  const successfulFlush = controller.flushNote();
+  secondFlush.resolve({ ok: true, value: {} });
+  await successfulFlush;
+  assert.deepEqual(events, [
+    "item-b:failed",
+    "item-a:failed",
+    "item-a:failed",
+    "item-b:failed",
+    "item-a:saved",
+    "item-b:saved",
+  ]);
 });
 
 test("lets the controller own note autosave timing", async () => {

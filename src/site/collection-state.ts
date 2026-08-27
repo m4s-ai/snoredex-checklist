@@ -234,8 +234,8 @@ export class BrowserCollectionStateController implements CollectionStateControll
     const isCurrent = this.pendingNoteItemId === itemId && this.pendingNoteState === pendingState;
     if (isCurrent) {
       const itemIds = new Set(this.supersededNoteItemIds);
-      this.supersededNoteItemIds.clear();
       if (outcome.ok && !outcome.skipped) {
+        this.supersededNoteItemIds.clear();
         for (const pendingItemId of this.supersededImmediateItemIds) itemIds.add(pendingItemId);
         this.supersededImmediateItemIds.clear();
         this.pendingNoteItemId = undefined;
