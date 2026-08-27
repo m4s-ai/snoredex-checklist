@@ -17,6 +17,25 @@ export interface SnapshotLocalization {
   readonly [key: string]: unknown;
 }
 
+export interface SnapshotLocalSet {
+  readonly localSetId: string;
+  readonly locality: string;
+  readonly localSetCode?: string | null;
+  readonly localSetName?: string | null;
+  readonly sortKey?: string;
+  readonly [key: string]: unknown;
+}
+
+export interface SnapshotSetEdition {
+  readonly setEditionId: string;
+  readonly localSetId: string;
+  readonly localizationId: string;
+  readonly localSetCode?: string | null;
+  readonly localSetName?: string | null;
+  readonly sortKey?: string;
+  readonly [key: string]: unknown;
+}
+
 export interface SnapshotItem {
   readonly itemId: string;
   readonly localizationId: string;
@@ -37,8 +56,8 @@ export interface SnapshotItem {
 export interface CatalogueSnapshot {
   readonly meta: SnapshotMeta;
   readonly localizations: readonly SnapshotLocalization[];
-  readonly localSets: readonly Record<string, unknown>[];
-  readonly setEditions: readonly Record<string, unknown>[];
+  readonly localSets: readonly SnapshotLocalSet[];
+  readonly setEditions: readonly SnapshotSetEdition[];
   readonly works: readonly Record<string, unknown>[];
   readonly items: readonly SnapshotItem[];
   readonly assets: readonly Record<string, unknown>[];
@@ -60,9 +79,10 @@ export function validateProvenance(value: unknown, catalogue: CatalogueSnapshot)
 }
 
 export function localizationLabel(localization: SnapshotLocalization): string {
-  const displayName = localization.displayName?.trim();
+  const normalize = (value: string): string => value.normalize("NFC").trim().replace(/\s+/gu, " ");
+  const displayName = typeof localization.displayName === "string" ? normalize(localization.displayName) : undefined;
   if (displayName) return displayName;
-  const languageTag = localization.languageTag?.trim();
+  const languageTag = typeof localization.languageTag === "string" ? normalize(localization.languageTag) : undefined;
   return languageTag || localization.localizationId;
 }
 
@@ -181,8 +201,11 @@ export async function validateSnapshot(value: unknown): Promise<SnapshotValidati
 
   if (localizations.some((row) => !isString(row.locality) || !isString(row.languageTag) ||
       typeof row.displayName !== "string" || typeof row.displayOrder !== "number" || !Number.isInteger(row.displayOrder)) ||
-      localSets.some((row) => !isString(row.locality)) ||
-      setEditions.some((row) => !isString(row.localSetId) || !isString(row.localizationId)) ||
+      localSets.some((row) => !isString(row.localSetId) || !isString(row.locality) ||
+        !isNullableText(row.localSetCode) || !isNullableText(row.localSetName) || typeof row.sortKey !== "string") ||
+      setEditions.some((row) => !isString(row.setEditionId) || !isString(row.localSetId) ||
+        !isString(row.localizationId) || !isNullableText(row.localSetCode) ||
+        !isNullableText(row.localSetName) || typeof row.sortKey !== "string") ||
       assets.some((row) => !isString(row.imageScope))) {
     return { ok: false, reason: "invalid" };
   }

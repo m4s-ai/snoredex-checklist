@@ -21,6 +21,8 @@ try {
   const tsc = resolve(root, "node_modules/typescript/bin/tsc");
   const result = spawnSync(process.execPath, [tsc, "-p", resolve(root, "tsconfig.site.json"), "--outDir", assets], { cwd: root, stdio: "inherit" });
   if (result.status !== 0) throw new Error(`site TypeScript build failed with status ${result.status ?? "unknown"}`);
+  const stateResult = spawnSync(process.execPath, [tsc, "-p", resolve(root, "tsconfig.site-state.json"), "--outDir", resolve(assets, "state")], { cwd: root, stdio: "inherit" });
+  if (stateResult.status !== 0) throw new Error(`browser state read API build failed with status ${stateResult.status ?? "unknown"}`);
 
   const provenance = {
     mode: "synthetic-fixture",

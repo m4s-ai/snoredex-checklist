@@ -4,12 +4,26 @@ import test from "node:test";
 import { parseQuery, serializeQuery } from "../src/site/query.ts";
 
 const ids = new Set(["west-es", "latam-es"]);
+const editionIds = new Set(["edition-west", "edition-latam"]);
 
 test("round-trips canonical public criteria", () => {
   const criteria = { localization: "west-es", q: "Snorlax & friends", kind: "verified-printing" as const, research: "false" as const };
   const encoded = serializeQuery(criteria);
   assert.equal(encoded, "?localization=west-es&q=Snorlax+%26+friends&kind=verified-printing&research=false");
   assert.deepEqual(parseQuery(encoded, ids), { ok: true, criteria });
+});
+
+test("round-trips a validated set-edition deep link", () => {
+  const criteria = { localization: "west-es", edition: "edition-west" };
+  const encoded = serializeQuery(criteria);
+  assert.equal(encoded, "?localization=west-es&edition=edition-west");
+  assert.deepEqual(parseQuery(encoded, ids, editionIds), { ok: true, criteria });
+  assert.deepEqual(parseQuery("?edition=unknown", ids, editionIds), { ok: false });
+});
+
+test("normalizes surrounding search whitespace without changing the URL contract", () => {
+  assert.deepEqual(parseQuery("?q=%20Snorlax%20", ids), { ok: true, criteria: { q: "Snorlax" } });
+  assert.equal(serializeQuery({ q: "  Snorlax  " }), "?q=Snorlax");
 });
 
 test("rejects the whole query when one criterion is invalid", () => {

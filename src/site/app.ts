@@ -1,7 +1,8 @@
-import { localizationLabel, validateProvenance, validateSnapshot, type CatalogueSnapshot, type SnapshotItem, type SnapshotLocalization } from "./catalogue.js";
+import { localizationLabel, validateProvenance, validateSnapshot, type CatalogueSnapshot, type SnapshotItem, type SnapshotLocalSet, type SnapshotLocalization } from "./catalogue.js";
 import { matchesResearch } from "./filter.js";
+import { readPrivateState, type PrivateStateRead } from "./private-state.js";
 import { parseQuery, serializeQuery, type QueryCriteria } from "./query.js";
-import { buildResultViewModel } from "./results.js";
+import { buildBrowseHierarchy, buildProgressViewModel, buildResultViewModel } from "./results.js";
 import snapshot, { provenance } from "./snapshot.js";
 
 const $ = <T extends Element>(selector: string): T => {
@@ -21,6 +22,47 @@ function link(href: string, label: string, className?: string): HTMLAnchorElemen
   const element = text("a", label, className) as HTMLAnchorElement;
   element.href = href;
   return element;
+}
+
+function presentationLabel(values: readonly (string | null | undefined)[], fallback: string): string {
+  const parts: string[] = [];
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.normalize("NFC").trim().replace(/\s+/gu, " ");
+    if (trimmed) parts.push(trimmed);
+  }
+  return parts.join(" · ") || fallback;
+}
+
+function itemFinishCue(item: SnapshotItem): string | undefined {
+  const finish = typeof item.finish === "string" ? presentationLabel([item.finish], "") : "";
+  const family = typeof item.finishFamily === "string" ? presentationLabel([item.finishFamily], "") : "";
+  if (finish && family && finish !== family) return `Finish: ${finish} · Finish family: ${family}`;
+  if (finish) return `Finish: ${finish}`;
+  if (family) return `Finish family: ${family}`;
+  return undefined;
+}
+
+function itemCardLabel(item: SnapshotItem): string {
+  const cardName = presentationLabel([item.cardName], "Unnamed item");
+  const localCardName = typeof item.localCardName === "string" ? presentationLabel([item.localCardName], "") : "";
+  return localCardName && localCardName !== cardName ? `${cardName} · ${localCardName}` : cardName;
+}
+
+function itemRowCollisionKey(item: SnapshotItem, includeEdition = true): string {
+  const card = itemCardLabel(item);
+  const set = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
+  const visibleIdentity = [card, set, itemFinishCue(item)].filter(Boolean).join(" · ");
+  return [item.localizationId, includeEdition ? item.setEditionId ?? "" : "", visibleIdentity].join("\u0000");
+}
+
+function itemRowCollisionCounts(items: readonly SnapshotItem[], includeEdition = true): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const key = itemRowCollisionKey(item, includeEdition);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
 }
 
 function enableThemeControl(): void {
@@ -71,6 +113,64 @@ function renderLocalizationLinks(container: HTMLElement, catalogue: CatalogueSna
   container.replaceChildren(list);
 }
 
+function renderBrowseNavigation(container: HTMLElement, catalogue: CatalogueSnapshot): void {
+  const details = text("details", undefined, "browse-details") as HTMLDetailsElement;
+  details.open = true;
+  details.append(text("summary", "Browse sets"));
+  const tree = text("div", undefined, "browse-tree");
+  const localities = text("ul", undefined, "link-list");
+  const localizations = new Map(catalogue.localizations.map((localization) => [localization.localizationId, localization] as const));
+  const setsByLocality = new Map<string, SnapshotLocalSet[]>();
+  for (const set of catalogue.localSets) {
+    const rows = setsByLocality.get(set.locality) ?? [];
+    rows.push(set);
+    setsByLocality.set(set.locality, rows);
+  }
+  for (const [locality, localitySets] of [...setsByLocality.entries()].sort(([left], [right]) => left.localeCompare(right, "en"))) {
+    const localityItem = text("li", undefined, "browse-locality");
+    localityItem.append(text("strong", locality));
+    const setList = text("ul", undefined, "link-list browse-nested");
+    const setLabelCounts = new Map<string, number>();
+    for (const set of localitySets) {
+      const setLabel = presentationLabel([set.localSetCode, set.localSetName], set.localSetId);
+      setLabelCounts.set(setLabel, (setLabelCounts.get(setLabel) ?? 0) + 1);
+    }
+    for (const set of localitySets.sort((left, right) =>
+      String(left.sortKey ?? "").localeCompare(String(right.sortKey ?? ""), "en", { numeric: true }) || left.localSetId.localeCompare(right.localSetId))) {
+      const setItem = text("li", undefined, "browse-set");
+      const setLabel = presentationLabel([set.localSetCode, set.localSetName], set.localSetId);
+      const displaySetLabel = (setLabelCounts.get(setLabel) ?? 0) > 1 ? `${setLabel} · ${set.localSetId}` : setLabel;
+      setItem.append(text("span", displaySetLabel));
+      const editionList = text("ul", undefined, "browse-nested");
+      const editions = catalogue.setEditions.filter((edition) => edition.localSetId === set.localSetId);
+      const editionEntries = editions
+        .sort((left, right) =>
+          String(left.sortKey ?? "").localeCompare(String(right.sortKey ?? ""), "en", { numeric: true }) || left.setEditionId.localeCompare(right.setEditionId))
+        .map((edition) => {
+          const editionLabel = presentationLabel([edition.localSetCode, edition.localSetName], edition.setEditionId);
+          const localization = localizations.get(edition.localizationId);
+          const label = localization ? `${editionLabel} · ${localizationLabel(localization)}` : editionLabel;
+          return { edition, label };
+        });
+      const labelCounts = new Map<string, number>();
+      for (const { label } of editionEntries) labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
+      for (const { edition, label } of editionEntries) {
+        const editionItem = text("li", undefined, "browse-edition");
+        const projectionLabel = (labelCounts.get(label) ?? 0) > 1 ? `${label} · ${edition.setEditionId}` : label;
+        editionItem.append(link(`./${serializeQuery({ localization: edition.localizationId, edition: edition.setEditionId })}`, projectionLabel));
+        editionList.append(editionItem);
+      }
+      setItem.append(editionList);
+      setList.append(setItem);
+    }
+    localityItem.append(setList);
+    localities.append(localityItem);
+  }
+  tree.append(localities);
+  details.append(tree);
+  container.replaceChildren(details);
+}
+
 function renderIndex(catalogue: CatalogueSnapshot): void {
   renderProvenance($("[data-provenance]"), catalogue);
   renderLocalizationLinks($("[data-localizations]"), catalogue);
@@ -80,38 +180,91 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
   const form = text("form", undefined, "query-form") as HTMLFormElement;
   form.method = "get";
   form.action = "./";
-  const localization = text("label", "Localization") as HTMLLabelElement;
-  const select = document.createElement("select");
-  select.name = "localization";
-  const home = text("option", "All localizations") as HTMLOptionElement;
-  home.value = ""; select.append(home);
-  for (const row of sortedLocalizations(catalogue)) {
-    const option = text("option", localizationLabel(row)) as HTMLOptionElement;
-    option.value = row.localizationId; option.selected = row.localizationId === criteria.localization; select.append(option);
+  const controls: HTMLSelectElement[] = [];
+  const makeSelect = (labelText: string, name: string, options: readonly [string, string][], value?: string): HTMLLabelElement => {
+    const label = text("label", labelText) as HTMLLabelElement;
+    const select = document.createElement("select");
+    select.name = name;
+    for (const [optionValue, optionLabel] of options) {
+      const option = text("option", optionLabel) as HTMLOptionElement;
+      option.value = optionValue;
+      option.selected = optionValue === (value ?? "");
+      select.append(option);
+    }
+    controls.push(select);
+    label.append(select);
+    return label;
+  };
+  const localizationOptions: [string, string][] = [["", "All localizations"]];
+  const localizationLabelCounts = new Map<string, number>();
+  for (const row of catalogue.localizations) {
+    const label = localizationLabel(row);
+    const key = `${row.locality ?? ""}\u0000${label}`;
+    localizationLabelCounts.set(key, (localizationLabelCounts.get(key) ?? 0) + 1);
   }
-  localization.append(select);
+  for (const row of sortedLocalizations(catalogue)) {
+    const label = localizationLabel(row);
+    const key = `${row.locality ?? ""}\u0000${label}`;
+    const displayLabel = (localizationLabelCounts.get(key) ?? 0) > 1 ? `${label} · ${row.localizationId}` : label;
+    localizationOptions.push([row.localizationId, `${displayLabel}${row.locality ? ` (${row.locality})` : ""}`]);
+  }
+  const localization = makeSelect("Localization", "localization", localizationOptions, criteria.localization);
+  const localizationSelect = localization.querySelector("select");
+  const editionId = criteria.edition;
+  const selectedEdition = editionId === undefined
+    ? undefined
+    : catalogue.setEditions.find((edition) => edition.setEditionId === editionId);
+  const editionInput = editionId === undefined ? undefined : document.createElement("input");
+  if (editionInput !== undefined) {
+    editionInput.type = "hidden";
+    editionInput.name = "edition";
+    editionInput.value = editionId ?? "";
+  }
+  let localizationChanged = false;
+  const syncEditionScope = (): void => {
+    if (editionInput === undefined || !(localizationSelect instanceof HTMLSelectElement)) return;
+    const explicitScopeChange = localizationChanged;
+    editionInput.disabled = selectedEdition?.localizationId !== undefined &&
+      explicitScopeChange && localizationSelect.value !== selectedEdition.localizationId;
+  };
+  localizationSelect?.addEventListener("change", () => {
+    localizationChanged = true;
+    syncEditionScope();
+  });
   const query = text("label", "Search public catalogue text") as HTMLLabelElement;
   const input = document.createElement("input");
   input.type = "search"; input.name = "q"; input.maxLength = 120; input.value = criteria.q ?? "";
+  const syncSearchValidity = (): void => {
+    const terms = input.value.trim().split(/\s+/u).filter(Boolean);
+    input.setCustomValidity(terms.length > 12 ? "Use at most 12 search terms." : "");
+  };
+  input.addEventListener("input", syncSearchValidity);
+  syncSearchValidity();
   query.append(input);
-  for (const [name, value] of [["status", criteria.status], ["kind", criteria.kind], ["research", criteria.research]] as const) {
-    if (!value) continue;
-    const hidden = document.createElement("input");
-    hidden.type = "hidden"; hidden.name = name; hidden.value = value;
-    form.append(hidden);
-  }
+  const status = makeSelect("Status", "status", [["", "All statuses"], ["need", "Need"], ["ordered", "Ordered"], ["have", "Have"], ["skip", "Skip"]], criteria.status);
+  const kind = makeSelect("Item class", "kind", [["", "All item classes"], ["verified-printing", "Verified printing"], ["finish-candidate", "Finish candidate"], ["research-placeholder", "Research placeholder"]], criteria.kind);
+  const research = makeSelect("Research", "research", [["", "Current and research"], ["false", "Current-known only"], ["true", "Research only"]], criteria.research);
   const submit = text("button", "Apply criteria") as HTMLButtonElement; submit.type = "submit";
-  form.addEventListener("submit", () => {
+  form.addEventListener("submit", (event) => {
+    syncSearchValidity();
+    if (!input.checkValidity()) {
+      event.preventDefault();
+      return;
+    }
     // Empty optional controls are omitted; explicit empty URL values remain invalid.
-    select.disabled = select.value === "";
-    input.disabled = input.value === "";
+    for (const control of controls) control.disabled = control.value === "";
+    input.disabled = input.value.trim() === "";
+    syncEditionScope();
   });
   window.addEventListener("pageshow", () => {
     // bfcache can restore the submitted DOM; controls must remain editable on Back.
-    select.disabled = false;
+    for (const control of controls) control.disabled = false;
     input.disabled = false;
+    syncEditionScope();
   });
-  form.append(localization, query, submit);
+  if (editionInput !== undefined) form.append(editionInput);
+  syncEditionScope();
+  form.append(localization, query, status, kind, research, submit);
   container.replaceChildren(form);
 }
 
@@ -136,38 +289,175 @@ function renderInvalid(container: HTMLElement, recoverableLocalization?: string,
   section.append(actions); container.replaceChildren(section);
 }
 
-function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogue: CatalogueSnapshot): void {
-  if (criteria.status) {
+function renderProgress(catalogue: CatalogueSnapshot, localizationId: string | undefined, editionId: string | undefined, state: PrivateStateRead): HTMLElement {
+  const scope = catalogue.items.filter((item) =>
+    (!localizationId || item.localizationId === localizationId) && (!editionId || item.setEditionId === editionId));
+  const progress = buildProgressViewModel(scope, state.readable ? state.statuses : undefined);
+  const section = text("section", undefined, "progress-panel");
+  const heading = text("h2", "Current-known progress");
+  heading.id = "progress-title";
+  section.setAttribute("aria-labelledby", heading.id);
+  section.append(heading);
+  if (!state.readable) {
+    section.append(text("p", "Collection progress is temporarily unavailable because the local state could not be read. Public catalogue counts remain available."));
+    const bar = document.createElement("progress");
+    bar.max = 1;
+    bar.removeAttribute("value");
+    bar.setAttribute("aria-label", "Current-known progress unavailable");
+    section.append(bar);
+  } else {
+    section.append(text("p", `${progress.ownedTotal} of ${progress.currentKnownTotal} current-known items owned · ${progress.securedTotal} secured (Have or Ordered)`));
+    const bar = document.createElement("progress");
+    if (progress.currentKnownTotal > 0) {
+      bar.max = progress.currentKnownTotal;
+      bar.value = progress.ownedTotal;
+      bar.setAttribute("aria-label", `Owned current-known items: ${progress.ownedTotal} of ${progress.currentKnownTotal}`);
+    } else {
+      bar.setAttribute("aria-label", "No current-known items to collect");
+    }
+    section.append(bar);
+  }
+  section.append(text("p", `Research: ${progress.researchTotal} read-only item${progress.researchTotal === 1 ? "" : "s"}. Research is not part of the progress denominator.`));
+  return section;
+}
+
+function renderItemRow(item: SnapshotItem, inactive = false, ownerLabel?: string, setIdentity?: string): HTMLLIElement {
+  const row = text("li", undefined, "item-row") as HTMLLIElement;
+  const identity = text("div", undefined, "item-identity");
+  identity.append(text("strong", itemCardLabel(item)));
+  const set = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
+  const setDisplay = [set, setIdentity].filter(Boolean).join(" · ");
+  if (setDisplay) identity.append(text("span", ` · ${setDisplay}`));
+  const finishCue = itemFinishCue(item);
+  if (finishCue) identity.append(text("span", ` · ${finishCue}`));
+  if (ownerLabel) identity.append(text("span", ` · ${ownerLabel}`));
+  row.append(identity);
+  const cue = item.progressClass === "research"
+    ? "Research · read-only"
+    : item.itemKind === "verified-printing" ? "Current-known · verified printing" : "Current-known";
+  row.append(text("span", cue, "item-cue"));
+  if (inactive) row.append(text("span", "Inactive", "item-cue"));
+  return row;
+}
+
+function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogue: CatalogueSnapshot, state: PrivateStateRead): void {
+  if (criteria.status && !state.readable) {
     const deferred = text("section", undefined, "state-panel");
     deferred.setAttribute("aria-live", "polite");
-    deferred.append(text("h2", "Status filter pending"), text("p", "This public criterion is preserved in the link, but private progress is not available to the static shell yet. The collection state layer will apply it without exposing private values in the URL."));
+    deferred.append(text("h2", "Status filter unavailable"), text("p", "The local collection state could not be read, so this status filter was not applied. Reload the page or restore a valid local collection and try again."));
     container.replaceChildren(deferred);
     return;
   }
-  if (!criteria.localization) {
+  const hasFilter = Boolean(criteria.edition || criteria.q || criteria.kind || criteria.research || criteria.status);
+  if (!criteria.localization && !hasFilter) {
     const summary = text("div", undefined, "state-panel");
-    summary.append(text("h2", "Choose a localization"), text("p", "The home view shows public summaries only. Choose a localization to open its checklist and keep the URL shareable."));
+    summary.append(text("h2", "Choose a localization or search"), text("p", "Browse one localization or search the public catalogue across set groups. The owning localization and set remain labelled on every result."));
     container.replaceChildren(summary);
     return;
   }
-  const model = buildResultViewModel(criteria, catalogue, matchesResearch);
+  const progress = renderProgress(catalogue, criteria.localization, criteria.edition, state);
+  const model = buildResultViewModel(criteria, catalogue, matchesResearch, state.readable ? state.statuses : undefined);
   const { activeItems: items, inactiveItems } = model;
-  const list = text("ul", undefined, "item-list");
-  for (const item of items) {
-    const row = text("li", undefined, "item-row");
-    row.append(text("strong", item.cardName ?? "Unnamed item"), text("span", ` · ${item.localSetCode ?? "Unknown set"} ${item.collectorNumber ?? ""}`));
-    if (item.localCardName) row.append(text("span", ` · ${item.localCardName}`));
-    list.append(row);
+  const content: Node[] = [progress, text("p", model.activeSummary)];
+  const groups = buildBrowseHierarchy(criteria, catalogue, matchesResearch, state.readable ? state.statuses : undefined);
+  const grouped = text("div", undefined, "browse-results");
+  const localizationLabelCounts = new Map<string, number>();
+  for (const candidate of catalogue.localizations) {
+    const label = localizationLabel(candidate);
+    const key = `${candidate.locality ?? ""}\u0000${label}`;
+    localizationLabelCounts.set(key, (localizationLabelCounts.get(key) ?? 0) + 1);
   }
-  const content: Node[] = [text("p", model.activeSummary), list];
+  for (const localization of groups) {
+    const localizationSection = text("section", undefined, "result-localization");
+    const localizationLabelValue = localizationLabel(localization.localization);
+    const localizationKey = `${localization.localization.locality ?? ""}\u0000${localizationLabelValue}`;
+    const displayLocalizationLabel = (localizationLabelCounts.get(localizationKey) ?? 0) > 1
+      ? `${localizationLabelValue} · ${localization.localization.localizationId}`
+      : localizationLabelValue;
+    localizationSection.append(text("h2", `${displayLocalizationLabel}${localization.localization.locality ? ` (${localization.localization.locality})` : ""}`));
+    const setLabelCounts = new Map<string, number>();
+    for (const candidate of catalogue.localSets) {
+      if (localization.localization.locality !== undefined && candidate.locality !== localization.localization.locality) continue;
+      const setLabel = presentationLabel([candidate.localSetCode, candidate.localSetName], candidate.localSetId);
+      setLabelCounts.set(setLabel, (setLabelCounts.get(setLabel) ?? 0) + 1);
+    }
+    for (const set of localization.sets) {
+      const setSection = text("section", undefined, "result-set");
+      const setLabel = presentationLabel([set.set.localSetCode, set.set.localSetName], set.set.localSetId);
+      const displaySetLabel = (setLabelCounts.get(setLabel) ?? 0) > 1 ? `${setLabel} · ${set.set.localSetId}` : setLabel;
+      setSection.append(text("h3", displaySetLabel));
+      const siblingEditionLabelCounts = new Map<string, number>();
+      for (const sibling of catalogue.setEditions) {
+        if (sibling.localSetId !== set.set.localSetId || sibling.localizationId !== localization.localization.localizationId) continue;
+        const siblingLabel = presentationLabel([sibling.localSetCode, sibling.localSetName], sibling.setEditionId);
+        siblingEditionLabelCounts.set(siblingLabel, (siblingEditionLabelCounts.get(siblingLabel) ?? 0) + 1);
+      }
+      for (const edition of set.editions) {
+        const editionSection = text("section", undefined, "result-edition");
+        const editionLabel = presentationLabel([edition.edition.localSetCode, edition.edition.localSetName], edition.edition.setEditionId);
+        const headingLabel = (siblingEditionLabelCounts.get(editionLabel) ?? 0) > 1 ? `${editionLabel} · ${edition.edition.setEditionId}` : editionLabel;
+        editionSection.append(text("h4", headingLabel));
+        const list = text("ul", undefined, "item-list");
+        const currentItems = edition.items.filter((candidate) => candidate.active && candidate.progressClass !== "research");
+        const currentCollisionCounts = itemRowCollisionCounts(catalogue.items.filter((candidate) =>
+          candidate.setEditionId === edition.edition.setEditionId && candidate.active && candidate.progressClass !== "research"));
+        for (const item of currentItems) {
+          const itemIdentity = (currentCollisionCounts.get(itemRowCollisionKey(item)) ?? 0) > 1 ? item.itemId : undefined;
+          list.append(renderItemRow(item, false, undefined, itemIdentity));
+        }
+        if (list.childElementCount > 0) editionSection.append(list);
+        const research = edition.items.filter((item) => item.active && item.progressClass === "research");
+        if (research.length > 0) {
+          const researchSection = text("section", undefined, "research-section");
+          researchSection.append(text("h5", "Research (read-only)"));
+          const researchList = text("ul", undefined, "item-list");
+          const researchCollisionCounts = itemRowCollisionCounts(catalogue.items.filter((candidate) =>
+            candidate.setEditionId === edition.edition.setEditionId && candidate.active && candidate.progressClass === "research"));
+          for (const item of research) {
+            const itemIdentity = (researchCollisionCounts.get(itemRowCollisionKey(item)) ?? 0) > 1 ? item.itemId : undefined;
+            researchList.append(renderItemRow(item, false, undefined, itemIdentity));
+          }
+          researchSection.append(researchList);
+          editionSection.append(researchSection);
+        }
+        setSection.append(editionSection);
+      }
+      localizationSection.append(setSection);
+    }
+    grouped.append(localizationSection);
+  }
+  if (items.length > 0) content.push(grouped);
+  else if (inactiveItems.length === 0) content.push(text("p", "No public catalogue items match these criteria.", "empty-state"));
   if (inactiveItems.length > 0) {
     const inactive = text("section", undefined, "state-panel");
     inactive.append(text("h2", model.inactiveHeading), text("p", model.inactiveSummary));
     const inactiveList = text("ul", undefined, "item-list");
+    const inactiveSetIdentityCounts = new Map<string, Set<string>>();
+    for (const item of catalogue.items) {
+      const setLabel = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
+      const key = `${item.localizationId}\u0000${setLabel}`;
+      const identities = inactiveSetIdentityCounts.get(key) ?? new Set<string>();
+      identities.add(item.setEditionId ?? item.itemId);
+      inactiveSetIdentityCounts.set(key, identities);
+    }
+    const inactiveCollisionCounts = itemRowCollisionCounts(catalogue.items.filter((candidate) => !candidate.active), false);
     for (const item of inactiveItems) {
-      const row = text("li", undefined, "item-row");
-      row.append(text("strong", item.cardName), text("span", ` · ${item.localSetCode ?? "Unknown set"} ${item.collectorNumber ?? ""}`));
-      inactiveList.append(row);
+      const localization = catalogue.localizations.find((candidate) => candidate.localizationId === item.localizationId);
+      let ownerLabel = item.localizationId;
+      if (localization) {
+        const label = localizationLabel(localization);
+        const key = `${localization.locality ?? ""}\u0000${label}`;
+        const displayLabel = (localizationLabelCounts.get(key) ?? 0) > 1 ? `${label} · ${localization.localizationId}` : label;
+        ownerLabel = `${displayLabel}${localization.locality ? ` (${localization.locality})` : ""}`;
+      }
+      const setLabel = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
+      const setKey = `${item.localizationId}\u0000${setLabel}`;
+      const setIdentity = !setLabel
+        ? (item.setEditionId ?? item.itemId)
+        : (inactiveSetIdentityCounts.get(setKey)?.size ?? 0) > 1 ? item.setEditionId : undefined;
+      const itemIdentity = (inactiveCollisionCounts.get(itemRowCollisionKey(item, false)) ?? 0) > 1 ? item.itemId : undefined;
+      const identitySuffix = [setIdentity, itemIdentity].filter(Boolean).join(" · ") || undefined;
+      inactiveList.append(renderItemRow(item, true, ownerLabel, identitySuffix));
     }
     inactive.append(inactiveList);
     content.push(inactive);
@@ -175,17 +465,29 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
   container.replaceChildren(...content);
 }
 
-function renderCollection(catalogue: CatalogueSnapshot): void {
+async function renderCollection(catalogue: CatalogueSnapshot): Promise<void> {
   const ids = new Set(sortedLocalizations(catalogue).map((row) => row.localizationId));
-  const parsed = parseQuery(window.location.search, ids);
+  const editionIds = new Set(catalogue.setEditions.map((row) => row.setEditionId));
+  const parsed = parseQuery(window.location.search, ids, editionIds);
   renderProvenance($("[data-provenance]"), catalogue);
-  renderLocalizationLinks($("[data-localizations]"), catalogue, "");
+  renderBrowseNavigation($("[data-localizations]"), catalogue);
   if (!parsed.ok) {
     renderInvalid($("[data-view]"), parsed.recoverableLocalization);
     return;
   }
+  if (parsed.criteria.edition) {
+    const edition = catalogue.setEditions.find((row) => row.setEditionId === parsed.criteria.edition);
+    if (!edition || (parsed.criteria.localization && edition.localizationId !== parsed.criteria.localization)) {
+      renderInvalid($("[data-view]"), parsed.criteria.localization);
+      return;
+    }
+  }
+  const knownTrackableItemIds = new Set(catalogue.items
+    .filter((item) => item.active && item.progressClass === "current-known")
+    .map((item) => item.itemId));
+  const state = await readPrivateState(catalogue.meta.catalogueFingerprint, knownTrackableItemIds);
   renderQueryForm($("[data-query]"), parsed.criteria, catalogue);
-  renderResults($("[data-view]"), parsed.criteria, catalogue);
+  renderResults($("[data-view]"), parsed.criteria, catalogue, state);
 }
 
 enableThemeControl();
@@ -195,7 +497,7 @@ if (!validated.ok) {
 } else if (!validateProvenance(provenance, validated.snapshot)) {
   renderInvalid($("[data-view]"), undefined, true);
 } else if (document.body.dataset.page === "collection") {
-  renderCollection(validated.snapshot);
+  await renderCollection(validated.snapshot);
 } else {
   renderIndex(validated.snapshot);
 }
