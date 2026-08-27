@@ -193,7 +193,7 @@ export function buildBrowseHierarchy(
       if (edition.localizationId !== localization.localizationId) continue;
       const set = sets.get(edition.localSetId);
       if (!set) continue;
-      const editionItems = itemByEdition.get(edition.setEditionId) ?? [];
+      const editionItems = (itemByEdition.get(edition.setEditionId) ?? []).filter((item) => item.active);
       // A filtered/global search only displays groups containing a result. A plain
       // localization browse keeps empty editions visible as useful navigation.
       if ((criteria.edition || criteria.q || criteria.kind || criteria.research || criteria.status) && editionItems.length === 0) continue;

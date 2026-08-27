@@ -277,9 +277,13 @@ function renderProgress(catalogue: CatalogueSnapshot, localizationId: string | u
   } else {
     section.append(text("p", `${progress.ownedTotal} of ${progress.currentKnownTotal} current-known items owned · ${progress.securedTotal} secured (Have or Ordered)`));
     const bar = document.createElement("progress");
-    bar.max = Math.max(1, progress.currentKnownTotal);
-    bar.value = progress.ownedTotal;
-    bar.setAttribute("aria-label", `Owned current-known items: ${progress.ownedTotal} of ${progress.currentKnownTotal}`);
+    if (progress.currentKnownTotal > 0) {
+      bar.max = progress.currentKnownTotal;
+      bar.value = progress.ownedTotal;
+      bar.setAttribute("aria-label", `Owned current-known items: ${progress.ownedTotal} of ${progress.currentKnownTotal}`);
+    } else {
+      bar.setAttribute("aria-label", "No current-known items to collect");
+    }
     section.append(bar);
   }
   section.append(text("p", `Research: ${progress.researchTotal} read-only item${progress.researchTotal === 1 ? "" : "s"}. Research is not part of the progress denominator.`));
