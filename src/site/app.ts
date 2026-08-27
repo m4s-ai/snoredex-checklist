@@ -1,4 +1,5 @@
 import { localizationLabel, validateProvenance, validateSnapshot, type CatalogueSnapshot, type SnapshotItem, type SnapshotLocalization } from "./catalogue.js";
+import { matchesResearch } from "./filter.js";
 import { parseQuery, serializeQuery, type QueryCriteria } from "./query.js";
 import { buildResultViewModel } from "./results.js";
 import snapshot, { provenance } from "./snapshot.js";
@@ -149,7 +150,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
     container.replaceChildren(summary);
     return;
   }
-  const model = buildResultViewModel(criteria, catalogue);
+  const model = buildResultViewModel(criteria, catalogue, matchesResearch);
   const { activeItems: items, inactiveItems } = model;
   const list = text("ul", undefined, "item-list");
   for (const item of items) {

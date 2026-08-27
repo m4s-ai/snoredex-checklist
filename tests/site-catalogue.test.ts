@@ -4,6 +4,7 @@ import test from "node:test";
 import fixture from "./fixtures/collector-catalogue.fixture.json" with { type: "json" };
 import { semanticFingerprint } from "../src/catalogue/validate.ts";
 import { localizationLabel, validateProvenance, validateSnapshot } from "../src/site/catalogue.ts";
+import { matchesResearch } from "../src/site/filter.ts";
 import { buildResultViewModel } from "../src/site/results.ts";
 
 function reseal(value: any): any {
@@ -35,7 +36,7 @@ test("keeps inactive items separate from active results", async () => {
   const validation = await validateSnapshot(reseal(inactive));
   assert.equal(validation.ok, true);
   if (!validation.ok) return;
-  const model = buildResultViewModel({ localization: inactive.items[0].localizationId }, validation.snapshot);
+  const model = buildResultViewModel({ localization: inactive.items[0].localizationId }, validation.snapshot, matchesResearch);
   assert.equal(model.activeItems.some((item) => item.itemId === inactive.items[0].itemId), false);
   assert.equal(model.inactiveItems.some((item) => item.itemId === inactive.items[0].itemId), true);
   assert.equal(model.activeSummary.startsWith("0 public catalogue items."), true);
