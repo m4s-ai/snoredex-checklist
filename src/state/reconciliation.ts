@@ -98,6 +98,8 @@ interface WorkingRecord {
   readonly itemId: string;
   /** Original identity used to make source-fingerprint recovery replayable. */
   readonly sourceItemId: string;
+  /** Whether any preceding hop changed the source identity. */
+  readonly hadRekey: boolean;
 }
 
 interface ClassifiedRecord {
@@ -126,12 +128,28 @@ function cloneItem(item: PrivateItemState, itemId = item.itemId): PrivateItemSta
   return { ...item, itemId };
 }
 
-function migrationList(context: ReconciliationContext): readonly ReconciliationMigration[] {
+function migrationList(
+  context: ReconciliationContext,
+  sourceFingerprint: string,
+  targetFingerprint: string,
+): readonly ReconciliationMigration[] | undefined {
   const source = context?.migrations as unknown;
   if (Array.isArray(source)) return source as readonly ReconciliationMigration[];
   if (!isObjectRecord(source)) return [];
+  if (source.meta !== undefined) {
+    if (!isObjectRecord(source.meta)) return undefined;
+    const meta = source.meta;
+    if (meta.fromFingerprint !== undefined
+      && (!isFingerprint(meta.fromFingerprint) || meta.fromFingerprint !== sourceFingerprint)) {
+      return undefined;
+    }
+    if (meta.toFingerprint !== undefined
+      && (!isFingerprint(meta.toFingerprint) || meta.toFingerprint !== targetFingerprint)) {
+      return undefined;
+    }
+  }
   const transitions = source.catalogueTransitions;
-  return Array.isArray(transitions) ? transitions : [];
+  return Array.isArray(transitions) ? transitions : undefined;
 }
 
 function transitionSources(transition: ReconciliationTransition): readonly string[] {
@@ -326,6 +344,26 @@ function transitionRecord(
   };
 }
 
+function reportTransition(
+  transition: ReconciliationTransition,
+  sourceItemId: string,
+  hadRekey: boolean,
+): ReconciliationTransition {
+  const changeKind = hadRekey && transition.changeKind === "retained"
+    ? "rekey-1:1"
+    : transition.changeKind;
+  const reconciliation = changeKind === "rekey-1:1"
+    ? "one-to-one-preserve"
+    : transition.reconciliation;
+  return {
+    ...transition,
+    fromItemId: sourceItemId,
+    fromItemIds: [sourceItemId],
+    changeKind,
+    reconciliation,
+  };
+}
+
 function blockedSource(
   state: PrivateState,
   targetFingerprint: string,
@@ -403,7 +441,8 @@ export function reconcilePrivateState(
     };
   }
 
-  const migrations = migrationList(context);
+  const migrations = migrationList(context, state.catalogueFingerprint, targetFingerprint);
+  if (migrations === undefined) return fail("STATE_RECONCILIATION_BLOCKED");
   if (migrations.some((migration) => !migrationIsStructurallyValid(migration))) {
     return fail("STATE_RECONCILIATION_BLOCKED");
   }
@@ -415,6 +454,7 @@ export function reconcilePrivateState(
     state: cloneItem(item),
     itemId: item.itemId,
     sourceItemId: item.itemId,
+    hadRekey: false,
   }]));
   const orphaned: PrivateItemState[] = [];
   const conflicted: PrivateItemState[] = [];
@@ -455,7 +495,10 @@ export function reconcilePrivateState(
         blocked = true;
         continue;
       }
-      const classified = transitionRecord(transition, current.state, kind);
+      const effectiveTransition = fromIds.length === 1 && (isFinalStep || kind !== "active")
+        ? reportTransition(transition, current.sourceItemId, current.hadRekey)
+        : transition;
+      const classified = transitionRecord(effectiveTransition, current.state, kind);
       // Intermediate one-to-one hops are implementation details of a
       // multi-step chain. Account an original state record exactly once at
       // the final hop (or immediately when it becomes an orphan/conflict).
@@ -474,6 +517,7 @@ export function reconcilePrivateState(
           state: cloneItem(current.state, targetId),
           itemId: targetId,
           sourceItemId: current.sourceItemId,
+          hadRekey: current.hadRekey || transition.changeKind === "rekey-1:1",
         });
       } else if (kind === "orphan") {
         // Recovery keeps the source catalogue fingerprint. Keep the original

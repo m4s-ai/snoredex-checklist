@@ -110,6 +110,41 @@ test("preserves the original identity through a multi-step retired chain", () =>
     quantityOrdered: 0,
     note: "private",
   }]);
+  assert.deepEqual(result.value.report.records, [{
+    fromItemIds: [oldA],
+    toItemIds: [],
+    changeKind: "retired-1:0",
+    automaticStateAction: "none",
+    resolution: "retire-to-orphan",
+    disposition: "orphan",
+  }]);
+});
+
+test("preserves the source disposition through a rekey then retained chain", () => {
+  const source = state(oldFingerprint, [{ itemId: oldA, status: "have", quantityOwned: 1, quantityOrdered: 0 }]);
+  const result = reconcilePrivateState(source, targetFingerprint, {
+    migrations: [
+      migration(oldFingerprint, middleFingerprint, [
+        transition(oldA, [oldB], "rekey-1:1", "preserve", "one-to-one-preserve"),
+      ]),
+      migration(middleFingerprint, targetFingerprint, [
+        transition(oldB, [oldB], "retained", "preserve", "identity-retained"),
+      ]),
+    ],
+    knownTargetItemIds: new Set([oldB]),
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.value.report.records, [{
+    fromItemIds: [oldA],
+    toItemIds: [oldB],
+    changeKind: "rekey-1:1",
+    automaticStateAction: "preserve",
+    resolution: "one-to-one-preserve",
+    disposition: "migrated",
+  }]);
+  assert.equal(result.value.report.accounting.retained, 0);
+  assert.equal(result.value.report.accounting.migrated, 1);
 });
 
 test("fails closed for split, merge, unresolved and unaccounted records", () => {
@@ -164,6 +199,32 @@ test("rejects unknown, future and incomplete chains before mutation", () => {
   });
   assert.equal(malformed.ok, false);
   if (!malformed.ok) assert.equal(malformed.error, "STATE_RECONCILIATION_BLOCKED");
+
+  const manifest = {
+    meta: { fromFingerprint: oldFingerprint, toFingerprint: targetFingerprint },
+    catalogueTransitions: [migration(oldFingerprint, targetFingerprint, [
+      transition(oldA, [targetA], "rekey-1:1", "preserve", "one-to-one-preserve"),
+    ])],
+  };
+  const acceptedManifest = reconcilePrivateState(state(oldFingerprint, [
+    { itemId: oldA, status: "have", quantityOwned: 1, quantityOrdered: 0 },
+  ]), targetFingerprint, {
+    migrations: manifest,
+    knownTargetItemIds: new Set([targetA]),
+  });
+  assert.equal(acceptedManifest.ok, true);
+
+  const skewedManifest = {
+    ...manifest,
+    meta: { fromFingerprint: middleFingerprint, toFingerprint: targetFingerprint },
+  };
+  const rejectedManifest = reconcilePrivateState(state(oldFingerprint, [
+    { itemId: oldA, status: "have", quantityOwned: 1, quantityOrdered: 0 },
+  ]), targetFingerprint, {
+    migrations: skewedManifest,
+    knownTargetItemIds: new Set([targetA]),
+  });
+  assert.deepEqual(rejectedManifest, { ok: false, error: "STATE_RECONCILIATION_BLOCKED" });
 
   const mismatchedRetained = reconcilePrivateState(state(oldFingerprint, [
     { itemId: oldA, status: "have", quantityOwned: 1, quantityOrdered: 0 },
