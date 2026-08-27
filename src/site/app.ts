@@ -389,7 +389,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
     inactive.append(text("h2", model.inactiveHeading), text("p", model.inactiveSummary));
     const inactiveList = text("ul", undefined, "item-list");
     const inactiveSetIdentityCounts = new Map<string, Set<string>>();
-    for (const item of inactiveItems) {
+    for (const item of catalogue.items) {
       const setLabel = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
       const key = `${item.localizationId}\u0000${setLabel}`;
       const identities = inactiveSetIdentityCounts.get(key) ?? new Set<string>();
