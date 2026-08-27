@@ -598,7 +598,7 @@ function statusKey(state: PrivateStateRead): string {
   return [...state.statuses.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([itemId, status]) => `${itemId}:${status}`).join("|");
 }
 
-function renderRecoveryPanel(controller: CollectionStateController): HTMLElement | undefined {
+function renderRecoveryPanel(controller: CollectionStateController, onResolved?: () => void): HTMLElement | undefined {
   const recovery = controller.recovery;
   if (recovery === undefined) return undefined;
   const panel = text("section", undefined, "state-panel recovery-panel");
@@ -637,6 +637,7 @@ function renderRecoveryPanel(controller: CollectionStateController): HTMLElement
     if (controller.recovery === undefined) {
       stop?.();
       panel.remove();
+      onResolved?.();
     }
   });
   return panel;
@@ -672,7 +673,7 @@ function renderItemRow(item: SnapshotItem, catalogue: CatalogueSnapshot, inactiv
   if (evidence) tags.append(text("span", evidence, "item-cue"));
   if (inactive) tags.append(text("span", "Inactive", "item-cue"));
   content.append(tags);
-  if (!inactive && item.active && item.progressClass === "current-known" && stateController !== undefined) {
+  if (!inactive && item.active && item.progressClass === "current-known" && stateController !== undefined && stateController.recovery === undefined) {
     content.append(renderCollectionControls(item, stateController));
   }
   content.append(renderItemDetails(item, catalogue, scopeLabel));
@@ -681,7 +682,9 @@ function renderItemRow(item: SnapshotItem, catalogue: CatalogueSnapshot, inactiv
 }
 
 function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogue: CatalogueSnapshot, state: PrivateStateRead, stateController?: CollectionStateController): void {
-  const recoveryPanel = stateController === undefined ? undefined : renderRecoveryPanel(stateController);
+  const recoveryPanel = stateController === undefined
+    ? undefined
+    : renderRecoveryPanel(stateController, () => renderResults(container, criteria, catalogue, stateController.state, stateController));
   if (criteria.status && !state.readable) {
     const deferred = text("section", undefined, "state-panel");
     deferred.setAttribute("aria-live", "polite");
@@ -704,7 +707,8 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
   if (criteria.status && stateController !== undefined) {
     let previousStatusKey = statusKey(stateController.state);
     let stopStatusListener: (() => void) | undefined;
-    stopStatusListener = stateController.onChange(() => {
+    stopStatusListener = stateController.onSave((_itemId, result) => {
+      if (!result.ok || result.skipped) return;
       const nextStatusKey = statusKey(stateController.state);
       if (nextStatusKey === previousStatusKey) return;
       previousStatusKey = nextStatusKey;

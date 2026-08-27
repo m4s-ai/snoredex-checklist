@@ -359,11 +359,6 @@ export class OrderedStateStore {
     }
     this.observedRaw = raw;
     this.hasObservedRaw = true;
-    if (raw === null) {
-      this.lastKnownGood = undefined;
-      this.restorePendingNoteDraft();
-      return success(undefined);
-    }
     const authority = readStateAuthority(raw, recoveryRaw);
     if (!authority.ok) {
       this.restorePendingNoteDraft(false);
