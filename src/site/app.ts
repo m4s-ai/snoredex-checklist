@@ -43,10 +43,16 @@ function itemFinishCue(item: SnapshotItem): string | undefined {
   return undefined;
 }
 
+function itemCardLabel(item: SnapshotItem): string {
+  const cardName = presentationLabel([item.cardName], "Unnamed item");
+  const localCardName = typeof item.localCardName === "string" ? presentationLabel([item.localCardName], "") : "";
+  return localCardName && localCardName !== cardName ? `${cardName} · ${localCardName}` : cardName;
+}
+
 function itemRowCollisionKey(item: SnapshotItem): string {
-  const card = presentationLabel([item.cardName, item.localCardName], item.itemId);
+  const card = itemCardLabel(item);
   const set = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
-  return [card, set, itemFinishCue(item) ?? ""].join("\u0000");
+  return [item.localizationId, item.setEditionId ?? "", card, set, itemFinishCue(item) ?? ""].join("\u0000");
 }
 
 function itemRowCollisionCounts(items: readonly SnapshotItem[]): Map<string, number> {
@@ -317,8 +323,7 @@ function renderProgress(catalogue: CatalogueSnapshot, localizationId: string | u
 function renderItemRow(item: SnapshotItem, inactive = false, ownerLabel?: string, setIdentity?: string): HTMLLIElement {
   const row = text("li", undefined, "item-row") as HTMLLIElement;
   const identity = text("div", undefined, "item-identity");
-  identity.append(text("strong", item.cardName ?? "Unnamed item"));
-  if (item.localCardName && item.localCardName !== item.cardName) identity.append(text("span", ` · ${item.localCardName}`));
+  identity.append(text("strong", itemCardLabel(item)));
   const set = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], "");
   const setDisplay = [set, setIdentity].filter(Boolean).join(" · ");
   if (setDisplay) identity.append(text("span", ` · ${setDisplay}`));
@@ -393,7 +398,8 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
         editionSection.append(text("h4", headingLabel));
         const list = text("ul", undefined, "item-list");
         const currentItems = edition.items.filter((candidate) => candidate.active && candidate.progressClass !== "research");
-        const currentCollisionCounts = itemRowCollisionCounts(currentItems);
+        const currentCollisionCounts = itemRowCollisionCounts(catalogue.items.filter((candidate) =>
+          candidate.setEditionId === edition.edition.setEditionId && candidate.active && candidate.progressClass !== "research"));
         for (const item of currentItems) {
           const itemIdentity = (currentCollisionCounts.get(itemRowCollisionKey(item)) ?? 0) > 1 ? item.itemId : undefined;
           list.append(renderItemRow(item, false, undefined, itemIdentity));
@@ -404,7 +410,8 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
           const researchSection = text("section", undefined, "research-section");
           researchSection.append(text("h5", "Research (read-only)"));
           const researchList = text("ul", undefined, "item-list");
-          const researchCollisionCounts = itemRowCollisionCounts(research);
+          const researchCollisionCounts = itemRowCollisionCounts(catalogue.items.filter((candidate) =>
+            candidate.setEditionId === edition.edition.setEditionId && candidate.active && candidate.progressClass === "research"));
           for (const item of research) {
             const itemIdentity = (researchCollisionCounts.get(itemRowCollisionKey(item)) ?? 0) > 1 ? item.itemId : undefined;
             researchList.append(renderItemRow(item, false, undefined, itemIdentity));
@@ -432,7 +439,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
       identities.add(item.setEditionId ?? item.itemId);
       inactiveSetIdentityCounts.set(key, identities);
     }
-    const inactiveCollisionCounts = itemRowCollisionCounts(inactiveItems);
+    const inactiveCollisionCounts = itemRowCollisionCounts(catalogue.items.filter((candidate) => !candidate.active));
     for (const item of inactiveItems) {
       const localization = catalogue.localizations.find((candidate) => candidate.localizationId === item.localizationId);
       let ownerLabel = item.localizationId;
