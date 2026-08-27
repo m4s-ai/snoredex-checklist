@@ -13,8 +13,9 @@ function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value
 type Store = ConstructorParameters<typeof BrowserCollectionStateController>[0];
 type Domain = ConstructorParameters<typeof BrowserCollectionStateController>[1];
 type SaveOutcome = { readonly ok: true; readonly value: { readonly skipped?: boolean } } | { readonly ok: false; readonly error: string };
+type DeferredSave = ReturnType<typeof deferred<SaveOutcome>>;
 
-function makeController(saves: Array<ReturnType<typeof deferred<SaveOutcome>>>): BrowserCollectionStateController {
+function makeController(saves: DeferredSave[], noteFlushes: DeferredSave[] = []): BrowserCollectionStateController {
   const store = {
     read: () => ({ ok: true, value: undefined }),
     unsaved: () => undefined,
@@ -27,7 +28,7 @@ function makeController(saves: Array<ReturnType<typeof deferred<SaveOutcome>>>):
       return save.promise;
     },
     scheduleNoteSave: () => ({ ok: true, value: undefined }),
-    flushNote: async () => ({ ok: true, value: {} }),
+    flushNote: () => noteFlushes.shift()?.promise ?? Promise.resolve({ ok: true, value: {} }),
   } as Store;
   const domain = {
     applyStatusCommand: (itemId: string, _current: unknown, status: string) => ({
@@ -75,4 +76,42 @@ test("retains failed immediate edit owners until a later save succeeds", async (
   saves[2].resolve({ ok: true, value: {} });
   await retry;
   assert.deepEqual(events, ["item-a:failed", "item-b:failed", "item-a:saved", "item-b:saved"]);
+});
+
+test("settles failed immediate owners after a successful note save", async () => {
+  const saves: DeferredSave[] = [];
+  const controller = makeController(saves);
+  const events: string[] = [];
+  controller.onSave((itemId, result) => events.push(`${itemId}:${result.ok ? "saved" : "failed"}`));
+
+  const first = controller.setStatus("item-a", "have");
+  const second = controller.setStatus("item-b", "have");
+  saves[0].resolve({ ok: true, value: { skipped: true } });
+  saves[1].resolve({ ok: false, error: "STORAGE_COMMIT_UNCERTAIN" });
+  await Promise.all([first, second]);
+  assert.deepEqual(events, ["item-a:failed", "item-b:failed"]);
+
+  controller.scheduleNote("item-c", "note");
+  await controller.flushNote();
+  assert.deepEqual(events, ["item-a:failed", "item-b:failed", "item-a:saved", "item-b:saved", "item-c:saved"]);
+});
+
+test("retains a failed note owner through a later immediate save", async () => {
+  const saves: DeferredSave[] = [];
+  const noteFlush = deferred<SaveOutcome>();
+  const noteFlushes = [noteFlush];
+  const controller = makeController(saves, noteFlushes);
+  const events: string[] = [];
+  controller.onSave((itemId, result) => events.push(`${itemId}:${result.ok ? "saved" : "failed"}`));
+
+  controller.scheduleNote("item-a", "note");
+  const note = controller.flushNote();
+  noteFlush.resolve({ ok: false, error: "STORAGE_WRITE_FAILED" });
+  await note;
+  assert.deepEqual(events, ["item-a:failed"]);
+
+  const status = controller.setStatus("item-b", "have");
+  saves[0].resolve({ ok: true, value: {} });
+  await status;
+  assert.deepEqual(events, ["item-a:failed", "item-a:saved", "item-b:saved"]);
 });
