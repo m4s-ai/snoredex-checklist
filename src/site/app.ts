@@ -1,4 +1,4 @@
-import { validateSnapshot, type CatalogueSnapshot, type SnapshotItem, type SnapshotLocalization } from "./catalogue.js";
+import { localizationLabel, validateProvenance, validateSnapshot, type CatalogueSnapshot, type SnapshotItem, type SnapshotLocalization } from "./catalogue.js";
 import { matchesResearch } from "./filter.js";
 import { parseQuery, serializeQuery, type QueryCriteria } from "./query.js";
 import snapshot, { provenance } from "./snapshot.js";
@@ -44,9 +44,9 @@ function renderProvenance(container: HTMLElement, catalogue: CatalogueSnapshot):
   const fields: readonly [string, unknown][] = [
     ["Data as of", catalogue.meta.dataAsOf ?? "Unknown"],
     ["Source", catalogue.meta.sourceRepository ?? "Unknown"],
-    ["Contract", provenance.contractVersion ?? catalogue.meta.schemaVersion],
+    ["Contract", catalogue.meta.schemaVersion],
     ["Catalogue fingerprint", catalogue.meta.catalogueFingerprint],
-    ["Build input", provenance.mode],
+    ["Build input", "synthetic-fixture"],
   ];
   for (const [label, value] of fields) {
     dl.append(text("dt", label), text("dd", value));
@@ -61,7 +61,7 @@ function sortedLocalizations(catalogue: CatalogueSnapshot): SnapshotLocalization
 function renderLocalizationLinks(container: HTMLElement, catalogue: CatalogueSnapshot, hrefPrefix = "collection/"): void {
   const list = text("ul", undefined, "link-list");
   for (const localization of sortedLocalizations(catalogue)) {
-    const name = localization.displayName ?? localization.languageTag ?? localization.localizationId;
+    const name = localizationLabel(localization);
     const suffix = localization.locality ? ` (${localization.locality})` : "";
     const li = text("li");
     li.append(link(`${hrefPrefix}${serializeQuery({ localization: localization.localizationId })}`, `${name}${suffix}`));
@@ -90,7 +90,7 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
   const home = text("option", "All localizations") as HTMLOptionElement;
   home.value = ""; select.append(home);
   for (const row of sortedLocalizations(catalogue)) {
-    const option = text("option", row.displayName ?? row.localizationId) as HTMLOptionElement;
+    const option = text("option", localizationLabel(row)) as HTMLOptionElement;
     option.value = row.localizationId; option.selected = row.localizationId === criteria.localization; select.append(option);
   }
   localization.append(select);
@@ -185,6 +185,8 @@ function renderCollection(catalogue: CatalogueSnapshot): void {
 enableThemeControl();
 const validated = await validateSnapshot(snapshot);
 if (!validated.ok) {
+  renderInvalid($("[data-view]"), undefined, true);
+} else if (!validateProvenance(provenance, validated.snapshot)) {
   renderInvalid($("[data-view]"), undefined, true);
 } else if (document.body.dataset.page === "collection") {
   renderCollection(validated.snapshot);

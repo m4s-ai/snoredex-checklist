@@ -3,7 +3,7 @@ import test from "node:test";
 
 import fixture from "./fixtures/collector-catalogue.fixture.json" with { type: "json" };
 import { semanticFingerprint } from "../src/catalogue/validate.ts";
-import { validateSnapshot } from "../src/site/catalogue.ts";
+import { localizationLabel, validateProvenance, validateSnapshot } from "../src/site/catalogue.ts";
 
 function reseal(value: any): any {
   value.meta.catalogueFingerprint = semanticFingerprint(value);
@@ -12,6 +12,19 @@ function reseal(value: any): any {
 
 test("accepts the reviewed browser snapshot shape", async () => {
   assert.equal((await validateSnapshot(fixture.catalogue)).ok, true);
+});
+
+test("validates generated provenance and keeps localization labels nonempty", () => {
+  const valid = {
+    mode: "synthetic-fixture",
+    sourceCommit: "synthetic-fixture",
+    contractVersion: fixture.catalogue.meta.schemaVersion,
+    sourceRepository: fixture.catalogue.meta.sourceRepository,
+  };
+  assert.equal(validateProvenance(valid, fixture.catalogue), true);
+  assert.equal(validateProvenance({ ...valid, contractVersion: "0.0.0" }, fixture.catalogue), false);
+  assert.equal(validateProvenance({ ...valid, mode: {} }, fixture.catalogue), false);
+  assert.equal(localizationLabel({ localizationId: "loc-1", displayName: "", languageTag: "en" }), "en");
 });
 
 test("fails closed on invalid provenance metadata", async () => {

@@ -52,6 +52,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Validate the generated wrapper before any of its presentation fields are used. */
+export function validateProvenance(value: unknown, catalogue: CatalogueSnapshot): boolean {
+  return isRecord(value) && value.mode === "synthetic-fixture" && value.sourceCommit === "synthetic-fixture" &&
+    value.contractVersion === catalogue.meta.schemaVersion && value.sourceRepository === catalogue.meta.sourceRepository;
+}
+
+export function localizationLabel(localization: SnapshotLocalization): string {
+  return localization.displayName || localization.languageTag || localization.localizationId;
+}
+
 function isString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
