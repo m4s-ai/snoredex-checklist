@@ -382,7 +382,7 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
     }
     grouped.append(localizationSection);
   }
-  if (groups.length === 0 || items.length === 0) content.push(text("p", "No public catalogue items match these criteria.", "empty-state"));
+  if (items.length === 0 && inactiveItems.length === 0) content.push(text("p", "No public catalogue items match these criteria.", "empty-state"));
   else content.push(grouped);
   if (inactiveItems.length > 0) {
     const inactive = text("section", undefined, "state-panel");
