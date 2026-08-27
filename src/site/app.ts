@@ -173,8 +173,7 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
   let localizationChanged = false;
   const syncEditionScope = (): void => {
     if (editionInput === undefined || !(localizationSelect instanceof HTMLSelectElement)) return;
-    const explicitScopeChange = localizationChanged &&
-      (criteria.localization !== undefined || localizationSelect.value !== "");
+    const explicitScopeChange = localizationChanged;
     editionInput.disabled = selectedEdition?.localizationId !== undefined &&
       explicitScopeChange && localizationSelect.value !== selectedEdition.localizationId;
   };
@@ -299,8 +298,9 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
     const localizationSection = text("section", undefined, "result-localization");
     localizationSection.append(text("h2", `${localizationLabel(localization.localization)}${localization.localization.locality ? ` (${localization.localization.locality})` : ""}`));
     const setLabelCounts = new Map<string, number>();
-    for (const set of localization.sets) {
-      const setLabel = [set.set.localSetCode, set.set.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || set.set.localSetId;
+    for (const candidate of catalogue.localSets) {
+      if (localization.localization.locality !== undefined && candidate.locality !== localization.localization.locality) continue;
+      const setLabel = [candidate.localSetCode, candidate.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || candidate.localSetId;
       setLabelCounts.set(setLabel, (setLabelCounts.get(setLabel) ?? 0) + 1);
     }
     for (const set of localization.sets) {
