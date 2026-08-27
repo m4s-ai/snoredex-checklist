@@ -493,12 +493,22 @@ function renderCollectionControls(item: SnapshotItem, controller: CollectionStat
   retry.hidden = true;
   let retryAction: (() => Promise<CollectionEditResult>) | undefined;
   const showResult = (result: CollectionEditResult): void => {
+    if (result.deferred) return;
+    retry.textContent = "Retry save";
     if (result.ok && !result.skipped) {
       feedback.textContent = "Saved";
       retry.hidden = true;
     } else if (result.ok) {
       feedback.textContent = "Saving…";
       retry.hidden = true;
+    } else if (result.error === "STORAGE_COMMIT_UNCERTAIN") {
+      feedback.textContent = "Save conflict detected. Reload to reconcile your collection.";
+      retry.textContent = "Reload to recover";
+      retryAction = () => {
+        globalThis.location?.reload();
+        return Promise.resolve({ ok: true, skipped: true });
+      };
+      retry.hidden = false;
     } else {
       feedback.textContent = "Save failed. Your draft is still visible; retry when ready.";
       retry.hidden = false;

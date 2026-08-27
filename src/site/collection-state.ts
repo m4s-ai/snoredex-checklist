@@ -51,8 +51,8 @@ const STORAGE_MODULE = "./state/storage.js";
 const DOMAIN_MODULE = "./state/domain.js";
 
 export type CollectionEditResult =
-  | { readonly ok: true; readonly skipped?: boolean }
-  | { readonly ok: false; readonly error: string };
+  | { readonly ok: true; readonly skipped?: boolean; readonly deferred?: boolean }
+  | { readonly ok: false; readonly error: string; readonly deferred?: boolean };
 
 export interface CollectionRecoverySummary {
   readonly itemIds: readonly string[];
@@ -92,7 +92,13 @@ function persistenceError(result: PersistenceResult<{ readonly skipped?: boolean
   return result.ok ? { ok: true, skipped: result.value?.skipped } : failure(result.error ?? "STORAGE_WRITE_FAILED");
 }
 
-class BrowserCollectionStateController implements CollectionStateController {
+function deferredResult(result: CollectionEditResult): CollectionEditResult {
+  return result.ok
+    ? { ok: true, skipped: result.skipped, deferred: true }
+    : { ok: false, error: result.error, deferred: true };
+}
+
+export class BrowserCollectionStateController implements CollectionStateController {
   public readonly available = true as const;
   private readonly store: OrderedStateStoreLike;
   private readonly domain: DomainModule;
@@ -107,6 +113,10 @@ class BrowserCollectionStateController implements CollectionStateController {
   private pendingNoteItemId: string | undefined;
   private pendingNoteState: PrivateState | undefined;
   private supersededNoteItemIds = new Set<string>();
+  private immediateSaveGeneration = 0;
+  private latestImmediateSaveGeneration = 0;
+  private activeImmediateSaves = new Map<number, string>();
+  private supersededImmediateItemIds = new Set<string>();
 
   public constructor(
     store: OrderedStateStoreLike,
@@ -156,39 +166,33 @@ class BrowserCollectionStateController implements CollectionStateController {
   public async setStatus(itemId: string, status: CollectionStatus): Promise<CollectionEditResult> {
     const result = this.domain.applyStatusCommand(itemId, this.records.get(itemId), status);
     if (!result.ok) return failure(result.error ?? "IMPORT_INVALID_STATE_DATA");
-    const pendingNoteItemId = this.pendingNoteItemId;
-    const supersededNoteItemIds = new Set(this.supersededNoteItemIds);
+    const pendingItemIds = new Set(this.supersededNoteItemIds);
+    if (this.pendingNoteItemId !== undefined) pendingItemIds.add(this.pendingNoteItemId);
     this.setRecord(itemId, result.value);
     this.cancelNoteTimer();
     this.pendingNoteItemId = undefined;
     this.pendingNoteState = undefined;
     this.supersededNoteItemIds.clear();
+    const generation = this.beginImmediateSave(itemId, pendingItemIds);
     const outcome = persistenceError(await this.store.saveImmediate(this.stateForSave()));
-    this.notifySave(itemId, outcome);
-    if (pendingNoteItemId !== undefined && pendingNoteItemId !== itemId) this.notifySave(pendingNoteItemId, outcome);
-    for (const supersededItemId of supersededNoteItemIds) {
-      if (supersededItemId !== itemId && supersededItemId !== pendingNoteItemId) this.notifySave(supersededItemId, outcome);
-    }
-    return outcome;
+    const settled = this.finishImmediateSave(generation, itemId, outcome);
+    return settled ? outcome : deferredResult(outcome);
   }
 
   public async setQuantities(itemId: string, quantityOwned: unknown, quantityOrdered: unknown): Promise<CollectionEditResult> {
     const result = this.domain.applyQuantityEdit(itemId, this.records.get(itemId), quantityOwned, quantityOrdered);
     if (!result.ok) return failure(result.error ?? "EDIT_INVALID_QUANTITY");
-    const pendingNoteItemId = this.pendingNoteItemId;
-    const supersededNoteItemIds = new Set(this.supersededNoteItemIds);
+    const pendingItemIds = new Set(this.supersededNoteItemIds);
+    if (this.pendingNoteItemId !== undefined) pendingItemIds.add(this.pendingNoteItemId);
     this.setRecord(itemId, result.value);
     this.cancelNoteTimer();
     this.pendingNoteItemId = undefined;
     this.pendingNoteState = undefined;
     this.supersededNoteItemIds.clear();
+    const generation = this.beginImmediateSave(itemId, pendingItemIds);
     const outcome = persistenceError(await this.store.saveImmediate(this.stateForSave()));
-    this.notifySave(itemId, outcome);
-    if (pendingNoteItemId !== undefined && pendingNoteItemId !== itemId) this.notifySave(pendingNoteItemId, outcome);
-    for (const supersededItemId of supersededNoteItemIds) {
-      if (supersededItemId !== itemId && supersededItemId !== pendingNoteItemId) this.notifySave(supersededItemId, outcome);
-    }
-    return outcome;
+    const settled = this.finishImmediateSave(generation, itemId, outcome);
+    return settled ? outcome : deferredResult(outcome);
   }
 
   public scheduleNote(itemId: string, note: string): CollectionEditResult {
@@ -277,6 +281,28 @@ class BrowserCollectionStateController implements CollectionStateController {
       if (itemId !== excludedItemId) this.notifySave(itemId, result);
     }
     this.supersededNoteItemIds.clear();
+  }
+
+  private beginImmediateSave(itemId: string, additionalItemIds: Iterable<string> = []): number {
+    const generation = ++this.immediateSaveGeneration;
+    this.latestImmediateSaveGeneration = generation;
+    for (const activeItemId of this.activeImmediateSaves.values()) this.supersededImmediateItemIds.add(activeItemId);
+    for (const additionalItemId of additionalItemIds) {
+      if (additionalItemId !== itemId) this.supersededImmediateItemIds.add(additionalItemId);
+    }
+    this.activeImmediateSaves.set(generation, itemId);
+    return generation;
+  }
+
+  private finishImmediateSave(generation: number, itemId: string, result: CollectionEditResult): boolean {
+    this.activeImmediateSaves.delete(generation);
+    if (generation !== this.latestImmediateSaveGeneration) return false;
+    if (result.ok && result.skipped) return true;
+    const itemIds = new Set(this.supersededImmediateItemIds);
+    this.supersededImmediateItemIds.clear();
+    itemIds.add(itemId);
+    for (const pendingItemId of itemIds) this.notifySave(pendingItemId, result);
+    return true;
   }
 
   private setRecord(itemId: string, record: PrivateItemState | undefined): void {
