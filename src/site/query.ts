@@ -1,9 +1,10 @@
 // `status` is a shareable criterion only; no private status values or records are serialized.
-export const QUERY_KEYS = ["localization", "q", "status", "kind", "research"] as const;
+export const QUERY_KEYS = ["localization", "edition", "q", "status", "kind", "research"] as const;
 export type QueryKey = (typeof QUERY_KEYS)[number];
 
 export interface QueryCriteria {
   readonly localization?: string;
+  readonly edition?: string;
   readonly q?: string;
   readonly status?: "need" | "ordered" | "have" | "skip";
   readonly kind?: "verified-printing" | "finish-candidate" | "research-placeholder";
@@ -27,7 +28,11 @@ function recoverableLocalization(params: URLSearchParams, ids: ReadonlySet<strin
   return values.length === 1 && ids.has(values[0]) ? values[0] : undefined;
 }
 
-export function parseQuery(search: string, localizationIds: ReadonlySet<string>): QueryParse {
+export function parseQuery(
+  search: string,
+  localizationIds: ReadonlySet<string>,
+  editionIds: ReadonlySet<string> = new Set(),
+): QueryParse {
   const invalid = (params: URLSearchParams): QueryParse => {
     const localization = recoverableLocalization(params, localizationIds);
     return localization ? { ok: false, recoverableLocalization: localization } : { ok: false };
@@ -58,17 +63,20 @@ export function parseQuery(search: string, localizationIds: ReadonlySet<string>)
     }
   }
   const localization = params.get("localization") ?? undefined;
+  const edition = params.get("edition") ?? undefined;
   const q = params.get("q") ?? undefined;
   const status = params.get("status") ?? undefined;
   const kind = params.get("kind") ?? undefined;
   const research = params.get("research") ?? undefined;
   const terms = q?.trim().split(/\s+/u).filter(Boolean) ?? [];
-  if ((localization && !localizationIds.has(localization)) || (q && (q.length > MAX_QUERY_TEXT || terms.length > MAX_QUERY_TERMS || terms.length === 0)) ||
+  if ((localization && !localizationIds.has(localization)) || (edition && !editionIds.has(edition)) ||
+      (q && (q.length > MAX_QUERY_TEXT || terms.length > MAX_QUERY_TERMS || terms.length === 0)) ||
       (status && !STATUS.has(status)) || (kind && !KIND.has(kind)) || (research && !RESEARCH.has(research))) {
     return invalid(params);
   }
-  const criteria: { localization?: string; q?: string; status?: QueryCriteria["status"]; kind?: QueryCriteria["kind"]; research?: QueryCriteria["research"] } = {};
+  const criteria: { localization?: string; edition?: string; q?: string; status?: QueryCriteria["status"]; kind?: QueryCriteria["kind"]; research?: QueryCriteria["research"] } = {};
   if (localization) criteria.localization = localization;
+  if (edition) criteria.edition = edition;
   if (q) criteria.q = q.trim();
   if (status) criteria.status = status as QueryCriteria["status"];
   if (kind) criteria.kind = kind as QueryCriteria["kind"];

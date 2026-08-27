@@ -1,4 +1,4 @@
-import { localizationLabel, validateProvenance, validateSnapshot, type CatalogueSnapshot, type SnapshotItem, type SnapshotLocalization } from "./catalogue.js";
+import { localizationLabel, validateProvenance, validateSnapshot, type CatalogueSnapshot, type SnapshotItem, type SnapshotLocalSet, type SnapshotLocalization } from "./catalogue.js";
 import { matchesResearch } from "./filter.js";
 import { readPrivateState, type PrivateStateRead } from "./private-state.js";
 import { parseQuery, serializeQuery, type QueryCriteria } from "./query.js";
@@ -78,35 +78,41 @@ function renderBrowseNavigation(container: HTMLElement, catalogue: CatalogueSnap
   details.append(text("summary", "Browse sets"));
   const nav = text("nav", undefined, "browse-tree");
   nav.setAttribute("aria-label", "Locality, set and edition hierarchy");
-  const localizations = text("ul", undefined, "link-list");
-  const sets = new Map(catalogue.localSets.map((set) => [set.localSetId, set] as const));
-  for (const localization of sortedLocalizations(catalogue)) {
-    const localizationItem = text("li", undefined, "browse-localization");
-    localizationItem.append(link(`./${serializeQuery({ localization: localization.localizationId })}`, `${localizationLabel(localization)}${localization.locality ? ` (${localization.locality})` : ""}`));
+  const localities = text("ul", undefined, "link-list");
+  const localizations = new Map(catalogue.localizations.map((localization) => [localization.localizationId, localization] as const));
+  const setsByLocality = new Map<string, SnapshotLocalSet[]>();
+  for (const set of catalogue.localSets) {
+    const rows = setsByLocality.get(set.locality) ?? [];
+    rows.push(set);
+    setsByLocality.set(set.locality, rows);
+  }
+  for (const [locality, localitySets] of [...setsByLocality.entries()].sort(([left], [right]) => left.localeCompare(right, "en"))) {
+    const localityItem = text("li", undefined, "browse-locality");
+    localityItem.append(text("strong", locality));
     const setList = text("ul", undefined, "link-list browse-nested");
-    const seen = new Set<string>();
-    for (const edition of catalogue.setEditions) {
-      if (edition.localizationId !== localization.localizationId || seen.has(edition.localSetId)) continue;
-      seen.add(edition.localSetId);
-      const set = sets.get(edition.localSetId);
-      if (!set) continue;
-      const setItem = text("li");
+    for (const set of localitySets.sort((left, right) =>
+      String(left.sortKey ?? "").localeCompare(String(right.sortKey ?? ""), "en", { numeric: true }) || left.localSetId.localeCompare(right.localSetId))) {
+      const setItem = text("li", undefined, "browse-set");
       const setLabel = [set.localSetCode, set.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || set.localSetId;
       setItem.append(text("span", setLabel));
       const editionList = text("ul", undefined, "browse-nested");
-      for (const row of catalogue.setEditions.filter((candidate) => candidate.localizationId === localization.localizationId && candidate.localSetId === set.localSetId)) {
-        const editionItem = text("li");
-        const editionLabel = [row.localSetCode, row.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || row.setEditionId;
-        editionItem.append(text("span", editionLabel));
+      const editions = catalogue.setEditions.filter((edition) => edition.localSetId === set.localSetId);
+      for (const edition of editions.sort((left, right) =>
+        String(left.sortKey ?? "").localeCompare(String(right.sortKey ?? ""), "en", { numeric: true }) || left.setEditionId.localeCompare(right.setEditionId))) {
+        const editionItem = text("li", undefined, "browse-edition");
+        const editionLabel = [edition.localSetCode, edition.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || edition.setEditionId;
+        const localization = localizations.get(edition.localizationId);
+        const projectionLabel = localization ? `${editionLabel} · ${localizationLabel(localization)}` : editionLabel;
+        editionItem.append(link(`./${serializeQuery({ localization: edition.localizationId, edition: edition.setEditionId })}`, projectionLabel));
         editionList.append(editionItem);
       }
       setItem.append(editionList);
       setList.append(setItem);
     }
-    localizationItem.append(setList);
-    localizations.append(localizationItem);
+    localityItem.append(setList);
+    localities.append(localityItem);
   }
-  nav.append(localizations);
+  nav.append(localities);
   details.append(nav);
   container.replaceChildren(details);
 }
@@ -183,8 +189,9 @@ function renderInvalid(container: HTMLElement, recoverableLocalization?: string,
   section.append(actions); container.replaceChildren(section);
 }
 
-function renderProgress(catalogue: CatalogueSnapshot, localizationId: string | undefined, state: PrivateStateRead): HTMLElement {
-  const scope = catalogue.items.filter((item) => !localizationId || item.localizationId === localizationId);
+function renderProgress(catalogue: CatalogueSnapshot, localizationId: string | undefined, editionId: string | undefined, state: PrivateStateRead): HTMLElement {
+  const scope = catalogue.items.filter((item) =>
+    (!localizationId || item.localizationId === localizationId) && (!editionId || item.setEditionId === editionId));
   const progress = buildProgressViewModel(scope, state.readable ? state.statuses : undefined);
   const section = text("section", undefined, "progress-panel");
   const heading = text("h2", "Current-known progress");
@@ -234,14 +241,14 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
     container.replaceChildren(deferred);
     return;
   }
-  const hasFilter = Boolean(criteria.q || criteria.kind || criteria.research || criteria.status);
+  const hasFilter = Boolean(criteria.edition || criteria.q || criteria.kind || criteria.research || criteria.status);
   if (!criteria.localization && !hasFilter) {
     const summary = text("div", undefined, "state-panel");
     summary.append(text("h2", "Choose a localization or search"), text("p", "Browse one localization or search the public catalogue across set groups. The owning localization and set remain labelled on every result."));
     container.replaceChildren(summary);
     return;
   }
-  const progress = renderProgress(catalogue, criteria.localization, state);
+  const progress = renderProgress(catalogue, criteria.localization, criteria.edition, state);
   const model = buildResultViewModel(criteria, catalogue, matchesResearch, state.readable ? state.statuses : undefined);
   const { activeItems: items, inactiveItems } = model;
   const content: Node[] = [progress, text("p", model.activeSummary)];
@@ -291,14 +298,22 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
 
 async function renderCollection(catalogue: CatalogueSnapshot): Promise<void> {
   const ids = new Set(sortedLocalizations(catalogue).map((row) => row.localizationId));
-  const parsed = parseQuery(window.location.search, ids);
+  const editionIds = new Set(catalogue.setEditions.map((row) => row.setEditionId));
+  const parsed = parseQuery(window.location.search, ids, editionIds);
   renderProvenance($("[data-provenance]"), catalogue);
   renderBrowseNavigation($("[data-localizations]"), catalogue);
   if (!parsed.ok) {
     renderInvalid($("[data-view]"), parsed.recoverableLocalization);
     return;
   }
-  const state = await readPrivateState();
+  if (parsed.criteria.edition) {
+    const edition = catalogue.setEditions.find((row) => row.setEditionId === parsed.criteria.edition);
+    if (!edition || (parsed.criteria.localization && edition.localizationId !== parsed.criteria.localization)) {
+      renderInvalid($("[data-view]"), parsed.criteria.localization);
+      return;
+    }
+  }
+  const state = await readPrivateState(catalogue.meta.catalogueFingerprint);
   renderQueryForm($("[data-query]"), parsed.criteria, catalogue);
   renderResults($("[data-view]"), parsed.criteria, catalogue, state);
 }

@@ -96,6 +96,15 @@ test("applies private status criteria only to current-known items", () => {
   assert.deepEqual(need.activeItems, []);
 });
 
+test("scopes selected-edition results and progress by opaque edition ID", () => {
+  const editionId = fixture.catalogue.items[0].setEditionId;
+  const model = buildResultViewModel({ edition: editionId }, fixture.catalogue, matchesResearch);
+  assert.deepEqual(model.activeItems.map((item) => item.itemId), [fixture.catalogue.items[0].itemId]);
+  const progress = buildProgressViewModel(fixture.catalogue.items.filter((item) => item.setEditionId === editionId));
+  assert.equal(progress.currentKnownTotal, 1);
+  assert.equal(progress.researchTotal, 0);
+});
+
 test("fails closed on invalid provenance metadata", async () => {
   const invalidSource = structuredClone(fixture.catalogue);
   (invalidSource.meta as Record<string, unknown>).sourceRepository = {};

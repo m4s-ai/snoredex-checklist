@@ -92,6 +92,7 @@ function matchesCriteria(
   const terms = searchTerms(criteria.q);
   const status = privateStatuses?.get(item.itemId) ?? "need";
   return (!criteria.localization || item.localizationId === criteria.localization) &&
+    (!criteria.edition || item.setEditionId === criteria.edition) &&
     (terms.length === 0 || terms.every((term) => publicSearchText(item).includes(term))) &&
     (!criteria.kind || item.itemKind === criteria.kind) &&
     (!criteria.research || matchesResearch(item.progressClass ?? "", criteria.research)) &&
@@ -194,7 +195,7 @@ export function buildBrowseHierarchy(
       const editionItems = itemByEdition.get(edition.setEditionId) ?? [];
       // A filtered/global search only displays groups containing a result. A plain
       // localization browse keeps empty editions visible as useful navigation.
-      if ((criteria.q || criteria.kind || criteria.research || criteria.status) && editionItems.length === 0) continue;
+      if ((criteria.edition || criteria.q || criteria.kind || criteria.research || criteria.status) && editionItems.length === 0) continue;
       const rows = bySet.get(set.localSetId) ?? [];
       rows.push({ edition, items: editionItems });
       bySet.set(set.localSetId, rows);
