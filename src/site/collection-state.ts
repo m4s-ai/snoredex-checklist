@@ -201,6 +201,7 @@ class BrowserCollectionStateController implements CollectionStateController {
   public async flushNote(): Promise<CollectionEditResult> {
     this.cancelNoteTimer();
     const itemId = this.pendingNoteItemId;
+    const pendingState = this.pendingNoteState;
     if (this.pendingNoteState !== undefined && !this.store.hasPendingNote()) {
       const scheduled = this.store.scheduleNoteSave(this.pendingNoteState);
       if (!scheduled.ok) {
@@ -210,9 +211,12 @@ class BrowserCollectionStateController implements CollectionStateController {
       }
     }
     const outcome = persistenceError(await this.store.flushNote());
-    this.pendingNoteItemId = undefined;
-    if (outcome.ok && !outcome.skipped) this.pendingNoteState = undefined;
-    if (itemId !== undefined) this.notifySave(itemId, outcome);
+    const isCurrent = this.pendingNoteItemId === itemId && this.pendingNoteState === pendingState;
+    if (isCurrent) {
+      this.pendingNoteItemId = undefined;
+      if (outcome.ok && !outcome.skipped) this.pendingNoteState = undefined;
+      if (itemId !== undefined) this.notifySave(itemId, outcome);
+    }
     return outcome;
   }
 
