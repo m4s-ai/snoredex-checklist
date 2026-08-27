@@ -296,10 +296,17 @@ function renderResults(container: HTMLElement, criteria: QueryCriteria, catalogu
       const setSection = text("section", undefined, "result-set");
       const setLabel = [set.set.localSetCode, set.set.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || set.set.localSetId;
       setSection.append(text("h3", setLabel));
+      const siblingEditionLabelCounts = new Map<string, number>();
+      for (const sibling of catalogue.setEditions) {
+        if (sibling.localSetId !== set.set.localSetId || sibling.localizationId !== localization.localization.localizationId) continue;
+        const siblingLabel = [sibling.localSetCode, sibling.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || sibling.setEditionId;
+        siblingEditionLabelCounts.set(siblingLabel, (siblingEditionLabelCounts.get(siblingLabel) ?? 0) + 1);
+      }
       for (const edition of set.editions) {
         const editionSection = text("section", undefined, "result-edition");
         const editionLabel = [edition.edition.localSetCode, edition.edition.localSetName].filter((value): value is string => typeof value === "string" && value.length > 0).join(" · ") || edition.edition.setEditionId;
-        editionSection.append(text("h4", editionLabel));
+        const headingLabel = (siblingEditionLabelCounts.get(editionLabel) ?? 0) > 1 ? `${editionLabel} · ${edition.edition.setEditionId}` : editionLabel;
+        editionSection.append(text("h4", headingLabel));
         const list = text("ul", undefined, "item-list");
         for (const item of edition.items.filter((candidate) => candidate.active && candidate.progressClass !== "research")) list.append(renderItemRow(item));
         if (list.childElementCount > 0) editionSection.append(list);
