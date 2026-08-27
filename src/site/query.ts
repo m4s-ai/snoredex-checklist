@@ -18,6 +18,7 @@ const STATUS = new Set(["need", "ordered", "have", "skip"]);
 const KIND = new Set(["verified-printing", "finish-candidate", "research-placeholder"]);
 const RESEARCH = new Set(["true", "false"]);
 const MAX_QUERY_TEXT = 120;
+const MAX_QUERY_TERMS = 12;
 // Keep a bounded raw URL while applying the user-facing limit to decoded text below.
 const MAX_QUERY_RAW = 4096;
 
@@ -61,13 +62,14 @@ export function parseQuery(search: string, localizationIds: ReadonlySet<string>)
   const status = params.get("status") ?? undefined;
   const kind = params.get("kind") ?? undefined;
   const research = params.get("research") ?? undefined;
-  if ((localization && !localizationIds.has(localization)) || (q && q.length > MAX_QUERY_TEXT) ||
+  const terms = q?.trim().split(/\s+/u).filter(Boolean) ?? [];
+  if ((localization && !localizationIds.has(localization)) || (q && (q.length > MAX_QUERY_TEXT || terms.length > MAX_QUERY_TERMS || terms.length === 0)) ||
       (status && !STATUS.has(status)) || (kind && !KIND.has(kind)) || (research && !RESEARCH.has(research))) {
     return invalid(params);
   }
   const criteria: { localization?: string; q?: string; status?: QueryCriteria["status"]; kind?: QueryCriteria["kind"]; research?: QueryCriteria["research"] } = {};
   if (localization) criteria.localization = localization;
-  if (q) criteria.q = q;
+  if (q) criteria.q = q.trim();
   if (status) criteria.status = status as QueryCriteria["status"];
   if (kind) criteria.kind = kind as QueryCriteria["kind"];
   if (research) criteria.research = research as QueryCriteria["research"];
@@ -77,7 +79,7 @@ export function parseQuery(search: string, localizationIds: ReadonlySet<string>)
 export function serializeQuery(criteria: QueryCriteria): string {
   const params = new URLSearchParams();
   for (const key of QUERY_KEYS) {
-    const value = criteria[key];
+    const value = key === "q" ? criteria.q?.trim() : criteria[key];
     if (value) params.set(key, value);
   }
   const query = params.toString();

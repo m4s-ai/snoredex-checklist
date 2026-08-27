@@ -12,6 +12,11 @@ test("round-trips canonical public criteria", () => {
   assert.deepEqual(parseQuery(encoded, ids), { ok: true, criteria });
 });
 
+test("normalizes surrounding search whitespace without changing the URL contract", () => {
+  assert.deepEqual(parseQuery("?q=%20Snorlax%20", ids), { ok: true, criteria: { q: "Snorlax" } });
+  assert.equal(serializeQuery({ q: "  Snorlax  " }), "?q=Snorlax");
+});
+
 test("rejects the whole query when one criterion is invalid", () => {
   assert.deepEqual(parseQuery("?localization=west-es&q=ok&unknown=x", ids), { ok: false, recoverableLocalization: "west-es" });
   assert.deepEqual(parseQuery("?localization=west-es&status=maybe", ids), { ok: false, recoverableLocalization: "west-es" });

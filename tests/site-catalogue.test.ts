@@ -5,7 +5,7 @@ import fixture from "./fixtures/collector-catalogue.fixture.json" with { type: "
 import { semanticFingerprint } from "../src/catalogue/validate.ts";
 import { localizationLabel, validateProvenance, validateSnapshot } from "../src/site/catalogue.ts";
 import { matchesResearch } from "../src/site/filter.ts";
-import { buildResultViewModel } from "../src/site/results.ts";
+import { buildBrowseHierarchy, buildProgressViewModel, buildResultViewModel } from "../src/site/results.ts";
 
 function reseal(value: any): any {
   value.meta.catalogueFingerprint = semanticFingerprint(value);
@@ -42,6 +42,58 @@ test("keeps inactive items separate from active results", async () => {
   assert.equal(model.activeSummary.startsWith("0 public catalogue items."), true);
   assert.equal(model.inactiveHeading, "Inactive catalogue items");
   assert.match(model.inactiveSummary ?? "", /inactive and excluded from the active checklist/);
+});
+
+test("searches public fields with AND terms and never rarity metadata", () => {
+  const result = buildResultViewModel({ q: "Snorlax reverse-holo" }, fixture.catalogue, matchesResearch);
+  assert.deepEqual(result.activeItems.map((item) => item.itemId), [fixture.catalogue.items[1].itemId]);
+
+  const withRarity = structuredClone(fixture.catalogue);
+  (withRarity.items[0] as Record<string, unknown>).rarity = { display: "secret-only-label" };
+  const rarityResult = buildResultViewModel({ q: "secret-only-label" }, withRarity, matchesResearch);
+  assert.equal(rarityResult.activeItems.length, 0);
+});
+
+test("keeps research separate from current-known progress", () => {
+  const itemId = fixture.catalogue.items[0].itemId;
+  const need = buildProgressViewModel(fixture.catalogue.items);
+  assert.deepEqual(need, {
+    currentKnownTotal: 1,
+    ownedTotal: 0,
+    securedTotal: 0,
+    researchTotal: 2,
+    ownedPercent: 0,
+    securedPercent: 0,
+  });
+  const have = buildProgressViewModel(fixture.catalogue.items, new Map([[itemId, "have"]]));
+  assert.equal(have.currentKnownTotal, 1);
+  assert.equal(have.researchTotal, 2);
+  assert.equal(have.ownedTotal, 1);
+  assert.equal(have.securedTotal, 1);
+  assert.equal(have.ownedPercent, 100);
+});
+
+test("groups browse results by opaque IDs despite duplicate set labels", () => {
+  const groups = buildBrowseHierarchy({}, fixture.catalogue, matchesResearch);
+  assert.deepEqual(groups.map((group) => group.localization.localizationId), [
+    "fixture-loc-west-es",
+    "fixture-loc-latam-es",
+    "fixture-loc-west-en",
+  ]);
+  assert.deepEqual(groups.map((group) => group.sets[0].set.localSetId), ["fixture-set-1", "fixture-set-2", "fixture-set-3"]);
+  assert.equal(groups[1].sets[0].editions[0].items[0].progressClass, "research");
+
+  const empty = buildBrowseHierarchy({ q: "does-not-exist" }, fixture.catalogue, matchesResearch);
+  assert.deepEqual(empty, []);
+});
+
+test("applies private status criteria only to current-known items", () => {
+  const itemId = fixture.catalogue.items[0].itemId;
+  const status = new Map([[itemId, "have" as const]]);
+  const have = buildResultViewModel({ status: "have" }, fixture.catalogue, matchesResearch, status);
+  assert.deepEqual(have.activeItems.map((item) => item.itemId), [itemId]);
+  const need = buildResultViewModel({ status: "need" }, fixture.catalogue, matchesResearch, status);
+  assert.deepEqual(need.activeItems, []);
 });
 
 test("fails closed on invalid provenance metadata", async () => {

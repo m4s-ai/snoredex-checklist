@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.site.json",
+  "compilerOptions": {
+    "rootDir": "src/state",
+    "outDir": "dist/site/assets/state",
+    "noEmit": false,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src/state/domain.ts", "src/state/authority.ts"]
+}
