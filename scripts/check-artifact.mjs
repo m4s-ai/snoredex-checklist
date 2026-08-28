@@ -74,29 +74,39 @@ function readAttribute(tag, name) {
   return undefined;
 }
 
+function parseHtmlTagAt(html, start) {
+  let cursor = start + 1;
+  let quote;
+  while (cursor < html.length) {
+    const character = html[cursor];
+    if (quote !== undefined) {
+      if (character === quote) quote = undefined;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === '>') {
+      const raw = html.slice(start, cursor + 1);
+      const match = /^<(?:(\/)[\s]*)?([a-z][\w:-]*)(?=[\t\n\f\r />])/iu.exec(raw);
+      return {
+        closing: match?.[1] !== undefined,
+        name: match?.[2]?.toLowerCase(),
+        raw,
+        end: cursor + 1,
+      };
+    }
+    cursor += 1;
+  }
+  return { end: html.length };
+}
+
 function* htmlTags(html) {
   let index = 0;
   while (index < html.length) {
     const start = html.indexOf('<', index);
     if (start < 0) return;
-    let cursor = start + 1;
-    let quote;
-    while (cursor < html.length) {
-      const character = html[cursor];
-      if (quote !== undefined) {
-        if (character === quote) quote = undefined;
-      } else if (character === '"' || character === "'") {
-        quote = character;
-      } else if (character === '>') {
-        const raw = html.slice(start, cursor + 1);
-        const match = /^<(?:(\/)[\s]*)?([a-z][\w:-]*)(?=[\t\n\f\r />])/iu.exec(raw);
-        if (match) yield { closing: match[1] !== undefined, name: match[2].toLowerCase(), raw, index: start };
-        index = cursor + 1;
-        break;
-      }
-      cursor += 1;
-    }
-    if (cursor >= html.length) return;
+    const tag = parseHtmlTagAt(html, start);
+    if (tag.name !== undefined) yield { ...tag, index: start };
+    index = tag.end;
+    if (index <= start) index = start + 1;
   }
 }
 
@@ -106,13 +116,54 @@ function stripHtmlComments(html) {
   let commentDepth = 0;
   let commentStart = false;
   let commentStartDash = false;
+  let rawTextTag;
+  const rawTextElements = new Set([
+    'iframe',
+    'noembed',
+    'noframes',
+    'noscript',
+    'plaintext',
+    'script',
+    'style',
+    'textarea',
+    'title',
+    'xmp',
+  ]);
   while (index < html.length) {
     if (commentDepth === 0) {
+      if (rawTextTag !== undefined) {
+        const closePattern = new RegExp(`</${rawTextTag}(?=[\\t\\n\\f\\r />])`, 'iu');
+        const close = closePattern.exec(html.slice(index));
+        if (close === null) {
+          output += html.slice(index);
+          break;
+        }
+        const closeStart = index + close.index;
+        const closeEnd = html.indexOf('>', closeStart);
+        if (closeEnd < 0) {
+          output += html.slice(index);
+          break;
+        }
+        output += html.slice(index, closeEnd + 1);
+        index = closeEnd + 1;
+        rawTextTag = undefined;
+        continue;
+      }
       if (html.startsWith('<!--', index)) {
         commentDepth = 1;
         commentStart = true;
         commentStartDash = false;
         index += 4;
+      } else if (html[index] === '<') {
+        const tag = parseHtmlTagAt(html, index);
+        if (tag.name !== undefined) {
+          output += tag.raw;
+          index = tag.end;
+          if (!tag.closing && rawTextElements.has(tag.name)) rawTextTag = tag.name;
+        } else {
+          output += html[index];
+          index += 1;
+        }
       } else {
         output += html[index];
         index += 1;
