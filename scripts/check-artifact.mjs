@@ -169,6 +169,9 @@ function extractHead(html) {
   let rawTextTag;
   let inertDepth = 0;
   let headStart = -1;
+  let implicitHead = false;
+  let explicitHeadTagStart = -1;
+  let explicitHeadContentStart = -1;
   let bodyStarted = false;
   let previousEnd = 0;
   for (const tag of htmlTags(html)) {
@@ -214,9 +217,24 @@ function extractHead(html) {
       continue;
     }
     if (closing) {
-      if (headStart >= 0 && name === 'head') return html.slice(headStart, tag.index);
+      if (headStart >= 0 && name === 'head') {
+        if (implicitHead && explicitHeadTagStart >= 0) {
+          return html.slice(headStart, explicitHeadTagStart) + html.slice(explicitHeadContentStart, tag.index);
+        }
+        return html.slice(headStart, tag.index);
+      }
       previousEnd = tag.index + tag.raw.length;
       continue;
+    }
+    if (headStart < 0 && name === 'head') {
+      headStart = tag.index + tag.raw.length;
+    } else if (headStart >= 0 && name === 'head' && implicitHead) {
+      explicitHeadTagStart = tag.index;
+      explicitHeadContentStart = tag.index + tag.raw.length;
+    }
+    if (headStart < 0 && preHeadElements.has(name) && !['head', 'html', 'template'].includes(name)) {
+      headStart = tag.index;
+      implicitHead = true;
     }
     if (rawTextElements.has(name)) {
       rawTextTag = name;
@@ -228,7 +246,6 @@ function extractHead(html) {
       previousEnd = tag.index + tag.raw.length;
       continue;
     }
-    if (headStart < 0 && name === 'head') headStart = tag.index + tag.raw.length;
     previousEnd = tag.index + tag.raw.length;
   }
   return '';
