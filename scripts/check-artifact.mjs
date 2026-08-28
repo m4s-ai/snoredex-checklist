@@ -596,7 +596,7 @@ function isJavaScriptRegexStart(value, index) {
     /^(?:await|case|default|delete|do|else|extends|in|instanceof|new|of|return|throw|typeof|void|yield)$/iu.test(
       token[1],
     ) ||
-    (lineTerminator && /^continue$/iu.test(token[1]))
+    (lineTerminator && /^(?:break|continue)$/iu.test(token[1]))
   );
 }
 
