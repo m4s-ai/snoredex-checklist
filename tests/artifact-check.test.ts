@@ -253,6 +253,8 @@ test('rejects external JavaScript module dependencies', async () => {
     'import/**/("/outside.js");\n',
     'import/**/"/outside.js";\n',
     'const expression = `${import/**/("/outside.js")}`;\n',
+    'import(`/outside.js`);\n',
+    'const expression = `${/}/.test("}") ? import/**/("/outside.js") : ""}`;\n',
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-module-test-'));
     try {
@@ -264,6 +266,25 @@ test('rejects external JavaScript module dependencies', async () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  }
+});
+
+test('rejects absolute stylesheet URLs before path normalization', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-absolute-stylesheet-test-'));
+  try {
+    await writeValidArtifact(directory, {
+      indexMeta: `<head><meta http-equiv="Content-Security-Policy" content="${csp}"><link rel="stylesheet" href="https://m4s-ai.github.io/outside.css"></head>`,
+    });
+    if (process.platform !== 'win32') {
+      await mkdir(join(directory, 'https:'), { recursive: true });
+      await mkdir(join(directory, 'https:', 'm4s-ai.github.io'), { recursive: true });
+      await writeFile(join(directory, 'https:', 'm4s-ai.github.io', 'outside.css'), '');
+    }
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_EXTERNAL_STYLESHEET_PRESENT: index\.html/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });
 

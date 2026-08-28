@@ -266,6 +266,7 @@ function isArtifactAssetTarget(source, page, relativeFiles) {
   } catch {
     return false;
   }
+  if (/^[a-z][a-z\d+.-]*:/iu.test(decodedPath)) return false;
   const normalizedPath = posix.normalize(posix.join(posix.dirname(page), decodedPath));
   return normalizedPath !== '..' && !normalizedPath.startsWith('../') && relativeFiles.includes(normalizedPath);
 }
@@ -341,6 +342,7 @@ function moduleDependencySources(value) {
     for (const pattern of [
       /\bimport\s*\(\s*(['"])([^'"]+)\1/gu,
       /\bimport\s*(['"])([^'"]+)\1/gu,
+      /\bimport\s*\(\s*(\x60)([^\x60$]*)\1/gu,
       /\b(?:import|export)\s+[\s\S]{0,200}?\bfrom\s*(['"])([^'"]+)\1/gu,
     ]) {
       for (const match of source.matchAll(pattern)) dependencies.push(match[2]);
@@ -396,6 +398,8 @@ function collectJavaScriptExpression(value, index, sources) {
       index = skipJavaScriptBlockComment(value, index);
     } else if (character === '`') {
       index = collectTemplateExpressions(value, index + 1, sources);
+    } else if (character === '/' && isJavaScriptRegexStart(value, index)) {
+      index = skipJavaScriptRegex(value, index);
     } else if (character === '{') {
       depth += 1;
       index += 1;
@@ -427,6 +431,30 @@ function skipJavaScriptLineComment(value, index) {
 function skipJavaScriptBlockComment(value, index) {
   const end = value.indexOf('*/', index + 2);
   return end < 0 ? value.length : end + 2;
+}
+
+function isJavaScriptRegexStart(value, index) {
+  let previous = index - 1;
+  while (previous >= 0 && /\s/u.test(value[previous])) previous -= 1;
+  return previous < 0 || /[({[=,:;!?&|+\-*%^~<>]/u.test(value[previous]);
+}
+
+function skipJavaScriptRegex(value, index) {
+  let inCharacterClass = false;
+  for (let cursor = index + 1; cursor < value.length; cursor += 1) {
+    if (value[cursor] === '\\') {
+      cursor += 1;
+    } else if (value[cursor] === '[') {
+      inCharacterClass = true;
+    } else if (value[cursor] === ']') {
+      inCharacterClass = false;
+    } else if (value[cursor] === '/' && !inCharacterClass) {
+      cursor += 1;
+      while (cursor < value.length && /[a-z]/iu.test(value[cursor])) cursor += 1;
+      return cursor;
+    }
+  }
+  return value.length;
 }
 
 function stripJavaScriptComments(value) {
