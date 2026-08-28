@@ -286,6 +286,7 @@ test('rejects external JavaScript module dependencies', async () => {
     'const expression = `${(()=>{if(true) /}/.test("x")})() || import/**/("/outside.js")}`;\n',
     'const expression = `${(()=>{if(("(") ) /}/.test("x")})() || import/**/("/outside.js")}`;\n',
     'const expression = `${(()=>{if((`(`) ) /}/.test("x")})() || import/**/("/outside.js")}`;\n',
+    `export {${' '.repeat(201)}} from "/outside.js";\n`,
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-module-test-'));
     try {
@@ -311,6 +312,22 @@ test('rejects absolute stylesheet URLs before path normalization', async () => {
       await mkdir(join(directory, 'https:', 'm4s-ai.github.io'), { recursive: true });
       await writeFile(join(directory, 'https:', 'm4s-ai.github.io', 'outside.css'), '');
     }
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_EXTERNAL_STYLESHEET_PRESENT: index\.html/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects named HTML references in stylesheet URLs', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-named-reference-test-'));
+  try {
+    await writeValidArtifact(directory, {
+      indexMeta: `<head><meta http-equiv="Content-Security-Policy" content="${csp}"><link rel="stylesheet" href="&sol;/outside.css"></head>`,
+    });
+    await mkdir(join(directory, '&sol;'), { recursive: true });
+    await writeFile(join(directory, '&sol;', 'outside.css'), '');
     const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
     assert.notEqual(result.status, 0);
     assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_EXTERNAL_STYLESHEET_PRESENT: index\.html/u);

@@ -31,10 +31,14 @@ function decodeHtmlAttribute(value) {
       const codePoint = Number.parseInt(decimal, 10);
       return Number.isSafeInteger(codePoint) && codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : '\ufffd';
     })
-    .replace(/&(amp|apos|colon|gt|lt|quot);/giu, (_, entity) => {
-      const entities = { amp: '&', apos: "'", colon: ':', gt: '>', lt: '<', quot: '"' };
+    .replace(/&(amp|apos|colon|gt|lt|quot|sol);/giu, (_, entity) => {
+      const entities = { amp: '&', apos: "'", colon: ':', gt: '>', lt: '<', quot: '"', sol: '/' };
       return entities[entity.toLowerCase()];
     });
+}
+
+function hasResidualHtmlReference(value) {
+  return /&(?:#(?:x[\da-f]+|\d+)|[a-z][a-z\d]+);/iu.test(value);
 }
 
 function readAttributeLegacy(tag, name) {
@@ -372,7 +376,7 @@ function moduleDependencySources(value) {
       /\bimport\s*\(\s*(['"])([^'"]+)\1/gu,
       /\bimport\s*(['"])([^'"]+)\1/gu,
       /\bimport\s*\(\s*(\x60)([^\x60$]*)\1/gu,
-      /\b(?:import|export)\s+[\s\S]{0,200}?\bfrom\s*(['"])([^'"]+)\1/gu,
+      /\b(?:import|export)\s+[\s\S]*?\bfrom\s*(['"])([^'"]+)\1/gu,
     ]) {
       for (const match of source.matchAll(pattern)) dependencies.push(match[2]);
     }
@@ -819,6 +823,7 @@ try {
         source !== source.trim() ||
         /[\u0000-\u0020\u007f]/u.test(source) ||
         source.includes('&') ||
+        hasResidualHtmlReference(source) ||
         source.startsWith('/') ||
         /^[a-z][a-z\d+.-]*:/iu.test(source) ||
         source.includes('\\') ||
@@ -841,6 +846,7 @@ try {
         source !== source.trim() ||
         /[\u0000-\u0020\u007f]/u.test(source) ||
         source.includes('\\') ||
+        hasResidualHtmlReference(source) ||
         !isArtifactAssetTarget(source, page, relativeFiles)
       )
         throw new Error(`ARTIFACT_EXTERNAL_STYLESHEET_PRESENT: ${page}`);
@@ -855,7 +861,11 @@ try {
         /@import\s+(?:url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s)]+))\s*\)|"([^"]*)"|'([^']*)')/giu,
       )) {
         const source = decodeHtmlAttribute(match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? '');
-        if (!source || !isArtifactAssetTarget(source, relativePath, relativeFiles)) {
+        if (
+          !source ||
+          hasResidualHtmlReference(source) ||
+          !isArtifactAssetTarget(source, relativePath, relativeFiles)
+        ) {
           throw new Error(`ARTIFACT_EXTERNAL_CSS_IMPORT_PRESENT: ${relativePath}`);
         }
       }
