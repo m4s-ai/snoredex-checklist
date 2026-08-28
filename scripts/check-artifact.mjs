@@ -106,6 +106,14 @@ function hasTagNameAt(html, index, name) {
   );
 }
 
+function hasClosingTagNameAt(html, index, name) {
+  const prefix = `</${name}`;
+  return (
+    html.slice(index, index + prefix.length).toLowerCase() === prefix &&
+    /[\t\n\f\r />]/u.test(html[index + prefix.length] ?? '')
+  );
+}
+
 function rawTextClosingEnd(html, index, name) {
   const tag = parseHtmlTagAt(html, index);
   return tag.closing && tag.name === name ? tag.end : -1;
@@ -145,10 +153,9 @@ function findRawTextEnd(html, index, name) {
         index += 1;
       }
     } else {
-      const end = rawTextClosingEnd(html, index, name);
-      if (end >= 0) {
+      if (hasClosingTagNameAt(html, index, name)) {
         state = 'escaped';
-        index = end;
+        index += name.length + 2;
       } else if (hasTagNameAt(html, index, 'script')) {
         index += 1;
       } else {
