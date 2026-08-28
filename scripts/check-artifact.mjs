@@ -92,7 +92,8 @@ try {
   for (const page of ['index.html', 'collection/index.html']) {
     const html = await readFile(join(root, page), 'utf8');
     const withoutComments = html.replace(/<!--[\s\S]*?(?:-->|$)/gu, '');
-    const hasCspMeta = Array.from(withoutComments.matchAll(/<meta\b[^>]*>/giu)).some((match) => {
+    const head = /<head\b[^>]*>([\s\S]*?)<\/head\s*>/iu.exec(withoutComments)?.[1] ?? '';
+    const hasCspMeta = Array.from(head.matchAll(/<meta\b[^>]*>/giu)).some((match) => {
       const tag = match[0];
       return (
         readAttribute(tag, 'http-equiv')?.toLowerCase() === 'content-security-policy' &&
@@ -109,6 +110,7 @@ try {
       if (
         !source ||
         source !== source.trim() ||
+        /[\u0000-\u0020\u007f]/u.test(source) ||
         source.includes('&') ||
         source.startsWith('/') ||
         /^[a-z][a-z\d+.-]*:/iu.test(source) ||

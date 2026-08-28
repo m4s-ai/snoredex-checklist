@@ -14,8 +14,8 @@ const csp =
 async function writeValidArtifact(
   directory: string,
   {
-    indexMeta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`,
-    collectionMeta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`,
+    indexMeta = `<head><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
+    collectionMeta = `<head><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     indexScript = '<script src="theme.js"></script>',
     collectionScript = '<script src="../theme.js"></script>',
   } = {},
@@ -77,6 +77,7 @@ test('rejects external scripts in single-quoted and unquoted src attributes', as
     'https://evil.invalid/a.js',
     '"https&#58;//evil.invalid/a.js"',
     '"&#9;https://evil.invalid/a.js"',
+    '"ht&#10;tps://evil.invalid/a.js"',
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-script-test-'));
     try {
@@ -94,7 +95,21 @@ test('rejects a CSP meta declaration hidden inside an HTML comment', async () =>
   const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-csp-test-'));
   try {
     await writeValidArtifact(directory, {
-      indexMeta: `<!-- <meta http-equiv="Content-Security-Policy" content="${csp}"> -->`,
+      indexMeta: `<head><!-- <meta http-equiv="Content-Security-Policy" content="${csp}"> --></head>`,
+    });
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_CSP_MISSING: index\.html/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('requires the CSP meta element to be inside the document head', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-csp-location-test-'));
+  try {
+    await writeValidArtifact(directory, {
+      indexMeta: `<head></head><body><meta http-equiv="Content-Security-Policy" content="${csp}"></body>`,
     });
     const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
     assert.notEqual(result.status, 0);
