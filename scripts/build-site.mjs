@@ -1,77 +1,132 @@
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { replaceOutput } from "./site-output.ts";
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { replaceOutput } from './site-output.ts';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const output = resolve(root, process.argv[2] === "--out-dir" ? process.argv[3] : "dist/site");
-const fixture = JSON.parse(await readFile(resolve(root, "tests/fixtures/collector-catalogue.fixture.json"), "utf8"));
-const validator = await import(pathToFileURL(resolve(root, "src/catalogue/validate.ts")));
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const output = resolve(root, process.argv[2] === '--out-dir' ? process.argv[3] : 'dist/site');
+const fixture = JSON.parse(await readFile(resolve(root, 'tests/fixtures/collector-catalogue.fixture.json'), 'utf8'));
+const validator = await import(pathToFileURL(resolve(root, 'src/catalogue/validate.ts')));
 const validated = validator.validateCatalogueFixture(fixture);
-if (!validated.ok) throw new Error(`synthetic fixture rejected: ${validated.errors.join(", ")}`);
+if (!validated.ok) throw new Error(`synthetic fixture rejected: ${validated.errors.join(', ')}`);
 
 const staging = `${output}.staging-${process.pid}`;
 const previous = `${output}.previous-${process.pid}`;
-const assets = resolve(staging, "assets");
+const requestedAppRevision = process.env.SNOREDEX_APP_REVISION ?? process.env.GITHUB_SHA;
+const gitResult = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' });
+const gitRevision = requestedAppRevision ?? (gitResult.status === 0 ? gitResult.stdout.trim() : '');
+if (!/^[0-9a-f]{40}$/u.test(gitRevision)) throw new Error('BUILD_APP_REVISION_INVALID');
+const assets = resolve(staging, 'assets');
 await rm(staging, { recursive: true, force: true });
 await rm(previous, { recursive: true, force: true });
 try {
   await mkdir(assets, { recursive: true });
-  const tsc = resolve(root, "node_modules/typescript/bin/tsc");
-  const result = spawnSync(process.execPath, [tsc, "-p", resolve(root, "tsconfig.site.json"), "--outDir", assets], { cwd: root, stdio: "inherit" });
-  if (result.status !== 0) throw new Error(`site TypeScript build failed with status ${result.status ?? "unknown"}`);
-  const stateResult = spawnSync(process.execPath, [tsc, "-p", resolve(root, "tsconfig.site-state.json"), "--outDir", resolve(assets, "state")], { cwd: root, stdio: "inherit" });
-  if (stateResult.status !== 0) throw new Error(`browser state read API build failed with status ${stateResult.status ?? "unknown"}`);
+  const tsc = resolve(root, 'node_modules/typescript/bin/tsc');
+  const result = spawnSync(process.execPath, [tsc, '-p', resolve(root, 'tsconfig.site.json'), '--outDir', assets], {
+    cwd: root,
+    stdio: 'inherit',
+  });
+  if (result.status !== 0) throw new Error(`site TypeScript build failed with status ${result.status ?? 'unknown'}`);
+  const stateResult = spawnSync(
+    process.execPath,
+    [tsc, '-p', resolve(root, 'tsconfig.site-state.json'), '--outDir', resolve(assets, 'state')],
+    { cwd: root, stdio: 'inherit' },
+  );
+  if (stateResult.status !== 0)
+    throw new Error(`browser state read API build failed with status ${stateResult.status ?? 'unknown'}`);
 
-  const siteAssets = await import(pathToFileURL(resolve(assets, "assets.js")));
+  const siteAssets = await import(pathToFileURL(resolve(assets, 'assets.js')));
   const placeholderAssets = Object.values(siteAssets.PLACEHOLDER_ASSETS ?? {});
-  if (placeholderAssets.length === 0) throw new Error("site image manifest has no placeholders");
+  if (placeholderAssets.length === 0) throw new Error('site image manifest has no placeholders');
   const imageManifest = [];
   for (const asset of placeholderAssets) {
-    if (typeof asset.path !== "string" || !asset.path.startsWith("images/") || asset.path.includes("..") ||
-        asset.path.includes("\\") || asset.path.includes("//") || asset.placeholder !== true ||
-        asset.mimeType !== "image/svg+xml" || !["exact-printing", "card-release"].includes(asset.imageScope) ||
-        typeof asset.altTextBasis !== "string" || !asset.attribution ||
-        asset.attribution.rightsStatus !== "project-authored-placeholder" ||
-        asset.attribution.licenceRef !== "LICENSE.md" || asset.attribution.noticeRef !== "THIRD_PARTY_NOTICES.md") {
+    if (
+      typeof asset.path !== 'string' ||
+      !asset.path.startsWith('images/') ||
+      asset.path.includes('..') ||
+      asset.path.includes('\\') ||
+      asset.path.includes('//') ||
+      asset.placeholder !== true ||
+      asset.mimeType !== 'image/svg+xml' ||
+      !['exact-printing', 'card-release'].includes(asset.imageScope) ||
+      typeof asset.altTextBasis !== 'string' ||
+      !asset.attribution ||
+      asset.attribution.rightsStatus !== 'project-authored-placeholder' ||
+      asset.attribution.licenceRef !== 'LICENSE.md' ||
+      asset.attribution.noticeRef !== 'THIRD_PARTY_NOTICES.md'
+    ) {
       throw new Error(`unsafe site image path for ${asset.assetId}`);
     }
-    const source = resolve(root, "site-src/assets", asset.path);
+    const source = resolve(root, 'site-src/assets', asset.path);
     const bytes = await readFile(source);
-    const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+    const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
     if (digest !== asset.sha256) throw new Error(`site image digest mismatch for ${asset.assetId}`);
     const destination = resolve(assets, asset.path);
     await mkdir(dirname(destination), { recursive: true });
     await cp(source, destination);
     imageManifest.push(asset);
   }
-  await writeFile(resolve(assets, "image-manifest.json"), `${JSON.stringify({
-    schema: "snoredex-site-image-manifest",
-    schemaVersion: "1.0.0",
-    assets: imageManifest,
-  }, null, 2)}\n`, "utf8");
+  await writeFile(
+    resolve(assets, 'image-manifest.json'),
+    `${JSON.stringify(
+      {
+        schema: 'snoredex-site-image-manifest',
+        schemaVersion: '1.0.0',
+        assets: imageManifest,
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  );
 
   const provenance = {
-    mode: "synthetic-fixture",
-    sourceCommit: "synthetic-fixture",
+    mode: 'synthetic-fixture',
+    sourceCommit: 'synthetic-fixture',
     contractVersion: fixture.catalogue.meta.schemaVersion,
     sourceRepository: fixture.catalogue.meta.sourceRepository,
   };
-  await writeFile(resolve(assets, "snapshot.js"), `export const provenance = Object.freeze(${JSON.stringify(provenance)});\nexport default Object.freeze(${JSON.stringify(fixture.catalogue)});\n`, "utf8");
-  const catalogue = await import(pathToFileURL(resolve(assets, "catalogue.js")));
-  const snapshot = await import(pathToFileURL(resolve(assets, "snapshot.js")));
-  if (!(await catalogue.validateSnapshot(snapshot.default)).ok) throw new Error("site snapshot failed browser boundary validation");
+  await writeFile(
+    resolve(assets, 'snapshot.js'),
+    `export const provenance = Object.freeze(${JSON.stringify(provenance)});\nexport default Object.freeze(${JSON.stringify(fixture.catalogue)});\n`,
+    'utf8',
+  );
+  await writeFile(
+    resolve(staging, 'provenance.json'),
+    `${JSON.stringify(
+      {
+        schema: 'snoredex-site-provenance',
+        schemaVersion: '1.0.0',
+        appRevision: gitRevision,
+        catalogue: {
+          mode: provenance.mode,
+          sourceCommit: provenance.sourceCommit,
+          sourceRepository: provenance.sourceRepository,
+          contractVersion: provenance.contractVersion,
+          catalogueFingerprint: fixture.catalogue.meta.catalogueFingerprint,
+          lock: null,
+        },
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  );
+  const catalogue = await import(pathToFileURL(resolve(assets, 'catalogue.js')));
+  const snapshot = await import(pathToFileURL(resolve(assets, 'snapshot.js')));
+  if (!(await catalogue.validateSnapshot(snapshot.default)).ok)
+    throw new Error('site snapshot failed browser boundary validation');
 
-  await cp(resolve(root, "site-src/index.html"), resolve(staging, "index.html"));
-  await mkdir(resolve(staging, "collection"), { recursive: true });
-  await cp(resolve(root, "site-src/collection/index.html"), resolve(staging, "collection/index.html"));
-  await cp(resolve(root, "site-src/llms.txt"), resolve(staging, "llms.txt"));
-  await cp(resolve(root, "site-src/styles.css"), resolve(staging, "styles.css"));
-  await cp(resolve(root, "LICENSE.md"), resolve(staging, "LICENSE.md"));
-  await cp(resolve(root, "THIRD_PARTY_NOTICES.md"), resolve(staging, "THIRD_PARTY_NOTICES.md"));
-  await cp(resolve(root, "LICENSES"), resolve(staging, "LICENSES"), { recursive: true });
+  await cp(resolve(root, 'site-src/index.html'), resolve(staging, 'index.html'));
+  await mkdir(resolve(staging, 'collection'), { recursive: true });
+  await cp(resolve(root, 'site-src/collection/index.html'), resolve(staging, 'collection/index.html'));
+  await cp(resolve(root, 'site-src/llms.txt'), resolve(staging, 'llms.txt'));
+  await cp(resolve(root, 'site-src/styles.css'), resolve(staging, 'styles.css'));
+  await cp(resolve(root, 'LICENSE.md'), resolve(staging, 'LICENSE.md'));
+  await cp(resolve(root, 'THIRD_PARTY_NOTICES.md'), resolve(staging, 'THIRD_PARTY_NOTICES.md'));
+  await cp(resolve(root, 'LICENSES'), resolve(staging, 'LICENSES'), { recursive: true });
 
   await replaceOutput({ output, previous, staging });
 } catch (error) {
