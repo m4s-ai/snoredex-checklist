@@ -77,12 +77,18 @@ function readAttribute(tag, name) {
 function parseHtmlTagAt(html, start) {
   let cursor = start + 1;
   let quote;
+  let expectingValue = false;
   while (cursor < html.length) {
     const character = html[cursor];
     if (quote !== undefined) {
       if (character === quote) quote = undefined;
-    } else if (character === '"' || character === "'") {
+    } else if (expectingValue && (character === '"' || character === "'")) {
       quote = character;
+      expectingValue = false;
+    } else if (character === '=') {
+      expectingValue = true;
+    } else if (expectingValue && !/[\t\n\f\r ]/u.test(character)) {
+      expectingValue = false;
     } else if (character === '>') {
       const raw = html.slice(start, cursor + 1);
       const match = /^<(?:(\/))?([a-z][\w:-]*)(?=[\t\n\f\r />])/iu.exec(raw);
@@ -447,6 +453,10 @@ function isJavaScriptRegexStart(value, index) {
 function isControlConditionEnd(value, closeIndex) {
   let depth = 0;
   for (let index = closeIndex; index >= 0; index -= 1) {
+    if (value[index] === '"' || value[index] === "'") {
+      index = skipJavaScriptQuotedBackward(value, index);
+      continue;
+    }
     if (value[index] === ')') depth += 1;
     else if (value[index] === '(') {
       depth -= 1;
@@ -459,6 +469,17 @@ function isControlConditionEnd(value, closeIndex) {
     }
   }
   return false;
+}
+
+function skipJavaScriptQuotedBackward(value, closeIndex) {
+  const quote = value[closeIndex];
+  for (let index = closeIndex - 1; index >= 0; index -= 1) {
+    if (value[index] !== quote) continue;
+    let escapes = 0;
+    for (let cursor = index - 1; cursor >= 0 && value[cursor] === '\\'; cursor -= 1) escapes += 1;
+    if (escapes % 2 === 0) return index;
+  }
+  return -1;
 }
 
 function skipJavaScriptRegex(value, index) {
