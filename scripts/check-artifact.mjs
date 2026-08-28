@@ -85,6 +85,7 @@ function parseHtmlTagAt(html, start) {
   let tagNameValid = false;
   let attributeName = false;
   let expectingValue = false;
+  let unquotedValue = false;
   while (cursor < html.length) {
     const character = html[cursor];
     if (quote !== undefined) {
@@ -112,12 +113,18 @@ function parseHtmlTagAt(html, start) {
       } else {
         tagNameValid = false;
       }
+    } else if (unquotedValue) {
+      if (/[\t\n\f\r ]/u.test(character)) {
+        unquotedValue = false;
+        attributeName = false;
+      }
     } else if (expectingValue && (character === '"' || character === "'")) {
       quote = character;
       expectingValue = false;
     } else if (expectingValue && !/[\t\n\f\r ]/u.test(character)) {
       expectingValue = false;
       attributeName = false;
+      unquotedValue = true;
     } else if (character === '=' && attributeName) {
       expectingValue = true;
       attributeName = false;
@@ -376,12 +383,64 @@ function moduleDependencySources(value) {
       /\bimport\s*\(\s*(['"])([^'"]+)\1/gu,
       /\bimport\s*(['"])([^'"]+)\1/gu,
       /\bimport\s*\(\s*(\x60)([^\x60$]*)\1/gu,
-      /\b(?:import|export)\s+[\s\S]*?\bfrom\s*(['"])([^'"]+)\1/gu,
     ]) {
       for (const match of source.matchAll(pattern)) dependencies.push(match[2]);
     }
+    dependencies.push(...staticModuleDependencies(source));
   }
   return dependencies;
+}
+
+function staticModuleDependencies(value) {
+  const dependencies = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (character === '"' || character === "'") {
+      index = skipJavaScriptQuoted(value, index, character) - 1;
+      continue;
+    }
+    if (character === '`') {
+      index = collectTemplateExpressions(value, index + 1, []) - 1;
+      continue;
+    }
+    const token = /\b(?:import|export)\s+/gu.exec(value.slice(index));
+    if (token?.index !== 0) continue;
+    const dependency = staticModuleDependency(value, index + token[0].length);
+    if (dependency !== undefined) dependencies.push(dependency);
+    index += token[0].length - 1;
+  }
+  return dependencies;
+}
+
+function staticModuleDependency(value, index) {
+  let braceDepth = 0;
+  for (let cursor = index; cursor < value.length; cursor += 1) {
+    const character = value[cursor];
+    if (character === '"' || character === "'") {
+      cursor = skipJavaScriptQuoted(value, cursor, character) - 1;
+      continue;
+    }
+    if (character === '`') {
+      cursor = collectTemplateExpressions(value, cursor + 1, []) - 1;
+      continue;
+    }
+    if (character === '{') {
+      braceDepth += 1;
+      continue;
+    }
+    if (character === '}') {
+      braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
+    if (character === ';' && braceDepth === 0) return undefined;
+    const from = /\bfrom\s*(['"])/gu.exec(value.slice(cursor));
+    if (from?.index !== 0) continue;
+    const quote = from[1];
+    const sourceStart = cursor + from[0].length;
+    const sourceEnd = value.indexOf(quote, sourceStart);
+    return sourceEnd < 0 ? undefined : value.slice(sourceStart, sourceEnd);
+  }
+  return undefined;
 }
 
 function extractTemplateExpressions(value) {
