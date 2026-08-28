@@ -677,6 +677,15 @@ function stripJavaScriptComments(value) {
     if (character === '"' || character === "'" || character === '`') {
       quote = character;
       output += character;
+    } else if (
+      character === '/' &&
+      value[index + 1] !== '/' &&
+      value[index + 1] !== '*' &&
+      isJavaScriptRegexStart(value, index)
+    ) {
+      const end = skipJavaScriptRegex(value, index);
+      output += value.slice(index, end);
+      index = end - 1;
     } else if (character === '/' && value[index + 1] === '/') {
       lineComment = true;
       output += ' ';
