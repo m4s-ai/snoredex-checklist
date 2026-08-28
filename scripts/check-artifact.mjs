@@ -593,6 +593,23 @@ function isJavaScriptRegexStart(value, index) {
   );
 }
 
+function skipJavaScriptRegexBackward(value, closeIndex) {
+  let inCharacterClass = false;
+  for (let index = closeIndex - 1; index >= 0; index -= 1) {
+    const character = value[index];
+    if (character === '\\') {
+      index -= 1;
+    } else if (inCharacterClass) {
+      if (character === '[') inCharacterClass = false;
+    } else if (character === ']') {
+      inCharacterClass = true;
+    } else if (character === '/') {
+      return isJavaScriptRegexStart(value, index) ? index : -1;
+    }
+  }
+  return -1;
+}
+
 function isJavaScriptFunctionExpression(prefix) {
   let close = prefix.length - 1;
   while (close >= 0 && /\s/u.test(prefix[close])) close -= 1;
@@ -608,6 +625,13 @@ function isJavaScriptFunctionExpression(prefix) {
     if (character === '`') {
       index = skipJavaScriptTemplateBackward(prefix, index);
       continue;
+    }
+    if (character === '/') {
+      const regexStart = skipJavaScriptRegexBackward(prefix, index);
+      if (regexStart >= 0) {
+        index = regexStart;
+        continue;
+      }
     }
     if (character === ')') depth += 1;
     else if (character === '(') {
