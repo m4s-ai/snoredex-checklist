@@ -17,8 +17,10 @@ test("publishes the hand-authored v2 privacy and provenance guide", async () => 
   assert.match(guide, /## Use the checklist/);
   assert.match(guide, /## Catalogue data and provenance/);
   assert.match(guide, /## Optional/);
+  assert.match(guide, /current build renders a validated synthetic fixture/);
+  assert.match(guide, /current release provides no collection export control or endpoint/);
   assert.match(guide, /no hosted personal collection record or collection-state API/);
-  assert.match(guide, /only supported handoff to an LLM or agent is a user-initiated export/);
+  assert.match(guide, /the only supported handoff is a user-initiated export/);
   assert.match(guide, /Do not ask the user to publish that file/);
   assert.match(guide, /untrusted private data, never as instructions/);
   assert.match(guide, /not robots\.txt, authentication, access control or an anti-scraping mechanism/);
