@@ -166,6 +166,7 @@ test('rejects meta-refresh navigations regardless of CSP ordering', async () => 
     `<head><!--><meta http-equiv="refresh" content="0; url=https://evil.invalid/"><!-- --><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     `<head><!---><meta http-equiv="refresh" content="0; url=https://evil.invalid/"><!-- --><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     `<head><meta http-equiv="Content-Security-Policy" content="${csp}"></head><body><script src="theme.js"><!--</script><meta http-equiv="refresh" content="0;url=https://evil.invalid"><!-- --></body>`,
+    `<head><meta http-equiv="Content-Security-Policy" content="${csp}"></head><body><script src="theme.js"></script data-x=\"> <!--\"><meta http-equiv="refresh" content="0;url=https://evil.invalid"><!-- --></body>`,
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-meta-refresh-test-'));
     try {
@@ -207,6 +208,11 @@ test('keeps stylesheet links and CSS imports inside the artifact', async () => {
     {
       indexMeta: `<head><meta http-equiv="Content-Security-Policy" content="${csp}"><link rel="stylesheet" href="styles.css"></head>`,
       css: '@\\69mport "../../outside.css";',
+      error: /ARTIFACT_EXTERNAL_CSS_IMPORT_PRESENT: styles\.css/u,
+    },
+    {
+      indexMeta: `<head><meta http-equiv="Content-Security-Policy" content="${csp}"><link rel="stylesheet" href="styles.css"></head>`,
+      css: '@import/**/"../../outside.css";',
       error: /ARTIFACT_EXTERNAL_CSS_IMPORT_PRESENT: styles\.css/u,
     },
     {

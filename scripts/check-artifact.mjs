@@ -107,15 +107,8 @@ function hasTagNameAt(html, index, name) {
 }
 
 function rawTextClosingEnd(html, index, name) {
-  const prefix = `</${name}`;
-  if (
-    html.slice(index, index + prefix.length).toLowerCase() !== prefix ||
-    !/[\t\n\f\r />]/u.test(html[index + prefix.length] ?? '')
-  ) {
-    return -1;
-  }
-  const end = html.indexOf('>', index + prefix.length);
-  return end < 0 ? -1 : end + 1;
+  const tag = parseHtmlTagAt(html, index);
+  return tag.closing && tag.name === name ? tag.end : -1;
 }
 
 function findRawTextEnd(html, index, name) {
@@ -299,6 +292,36 @@ function decodeCssEscapes(value) {
     }
     output += next;
     index += 1;
+  }
+  return output;
+}
+
+function stripCssComments(value) {
+  let output = '';
+  let quote;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (quote !== undefined) {
+      output += character;
+      if (character === '\\' && index + 1 < value.length) {
+        output += value[index + 1];
+        index += 1;
+      } else if (character === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      output += character;
+    } else if (character === '/' && value[index + 1] === '*') {
+      const end = value.indexOf('*/', index + 2);
+      if (end < 0) break;
+      output += ' ';
+      index = end + 1;
+    } else {
+      output += character;
+    }
   }
   return output;
 }
@@ -565,7 +588,7 @@ try {
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     const relativePath = relative(root, file).replaceAll('\\', '/');
     if (/\.css$/iu.test(relativePath)) {
-      for (const match of decodeCssEscapes(text).matchAll(
+      for (const match of stripCssComments(decodeCssEscapes(text)).matchAll(
         /@import\s+(?:url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s)]+))\s*\)|"([^"]*)"|'([^']*)')/giu,
       )) {
         const source = decodeHtmlAttribute(match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? '');
