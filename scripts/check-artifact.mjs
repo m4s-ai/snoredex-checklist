@@ -180,7 +180,6 @@ function extractHead(html) {
       rawTextTag === undefined &&
       inertDepth === 0 &&
       !bodyStarted &&
-      (headStart < 0 || implicitHead) &&
       /\S/u.test(html.slice(previousEnd, tag.index).replace(/<![^>]*>/gu, ''))
     ) {
       bodyStarted = true;
@@ -218,10 +217,14 @@ function extractHead(html) {
     }
     if (closing) {
       if (headStart >= 0 && name === 'head') {
+        if (bodyStarted) return '';
         if (implicitHead && explicitHeadTagStart >= 0) {
           return html.slice(headStart, explicitHeadTagStart) + html.slice(explicitHeadContentStart, tag.index);
         }
         return html.slice(headStart, tag.index);
+      }
+      if (!bodyStarted && headStart >= 0 && ['body', 'br', 'html'].includes(name)) {
+        bodyStarted = true;
       }
       previousEnd = tag.index + tag.raw.length;
       continue;
