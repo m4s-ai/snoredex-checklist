@@ -21,6 +21,22 @@ function containsPrivateStateSchema(value) {
   return Object.values(value).some((entry) => containsPrivateStateSchema(entry));
 }
 
+function decodeHtmlAttribute(value) {
+  return value
+    .replace(/&#x([\da-f]+);/giu, (_, hex) => {
+      const codePoint = Number.parseInt(hex, 16);
+      return Number.isSafeInteger(codePoint) && codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : '\ufffd';
+    })
+    .replace(/&#(\d+);/gu, (_, decimal) => {
+      const codePoint = Number.parseInt(decimal, 10);
+      return Number.isSafeInteger(codePoint) && codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : '\ufffd';
+    })
+    .replace(/&(amp|apos|colon|gt|lt|quot);/giu, (_, entity) => {
+      const entities = { amp: '&', apos: "'", colon: ':', gt: '>', lt: '<', quot: '"' };
+      return entities[entity.toLowerCase()];
+    });
+}
+
 async function filesIn(directory) {
   const output = [];
   async function visit(current) {
@@ -76,8 +92,15 @@ try {
     for (const match of html.matchAll(/<script\b[^>]*>/giu)) {
       const src = /(?:^|[\t\n\f\r ])src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/iu.exec(match[0]);
       if (!src) throw new Error(`ARTIFACT_INLINE_SCRIPT_PRESENT: ${page}`);
-      const source = src[1] ?? src[2] ?? src[3];
-      if (!source || source.startsWith('/') || /^[a-z][a-z\d+.-]*:/iu.test(source) || source.includes('\\'))
+      const encodedSource = src[1] ?? src[2] ?? src[3];
+      const source = decodeHtmlAttribute(encodedSource);
+      if (
+        !source ||
+        source.includes('&') ||
+        source.startsWith('/') ||
+        /^[a-z][a-z\d+.-]*:/iu.test(source) ||
+        source.includes('\\')
+      )
         throw new Error(`ARTIFACT_EXTERNAL_SCRIPT_PRESENT: ${page}`);
     }
   }

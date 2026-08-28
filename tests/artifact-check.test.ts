@@ -73,7 +73,11 @@ test('rejects a renamed private-state JSON export', async () => {
 });
 
 test('rejects external scripts in single-quoted and unquoted src attributes', async () => {
-  for (const source of ["'https://evil.invalid/a.js'", 'https://evil.invalid/a.js']) {
+  for (const source of [
+    "'https://evil.invalid/a.js'",
+    'https://evil.invalid/a.js',
+    '"https&#58;//evil.invalid/a.js"',
+  ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-script-test-'));
     try {
       await writeValidArtifact(directory, { indexScript: `<script src=${source}></script>` });
