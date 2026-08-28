@@ -203,8 +203,18 @@ test('keeps stylesheet links and CSS imports inside the artifact', async () => {
       error: /ARTIFACT_EXTERNAL_STYLESHEET_PRESENT: index\.html/u,
     },
     {
+      indexMeta: `<head><meta http-equiv="Content-Security-Policy" content="${csp}"><link rel="stylesheet" href="/styles.css"></head>`,
+      css: '',
+      error: /ARTIFACT_EXTERNAL_STYLESHEET_PRESENT: index\.html/u,
+    },
+    {
       indexMeta: `<head><meta http-equiv="Content-Security-Policy" content="${csp}"><link rel="stylesheet" href="styles.css"></head>`,
       css: '@import url("../../outside.css");',
+      error: /ARTIFACT_EXTERNAL_CSS_IMPORT_PRESENT: styles\.css/u,
+    },
+    {
+      indexMeta: `<head><meta http-equiv="Content-Security-Policy" content="${csp}"><link rel="stylesheet" href="styles.css"></head>`,
+      css: '@import "/styles.css";',
       error: /ARTIFACT_EXTERNAL_CSS_IMPORT_PRESENT: styles\.css/u,
     },
     {
@@ -234,6 +244,19 @@ test('keeps stylesheet links and CSS imports inside the artifact', async () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  }
+});
+
+test('rejects external JavaScript module dependencies', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-module-test-'));
+  try {
+    await writeValidArtifact(directory);
+    await writeFile(join(directory, 'theme.js'), "import('/outside.js');\n");
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_EXTERNAL_MODULE_PRESENT: theme\.js/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });
 

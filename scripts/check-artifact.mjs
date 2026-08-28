@@ -258,6 +258,7 @@ function stripHtmlComments(html) {
 }
 
 function isArtifactAssetTarget(source, page, relativeFiles) {
+  if (source.startsWith('/')) return false;
   const pathPart = source.split(/[?#]/u, 1)[0];
   let decodedPath;
   try {
@@ -331,6 +332,18 @@ function stripCssComments(value) {
     }
   }
   return output;
+}
+
+function moduleDependencySources(value) {
+  const sources = [];
+  for (const pattern of [
+    /\bimport\s*\(\s*(['"])([^'"]+)\1/gu,
+    /\bimport\s*(['"])([^'"]+)\1/gu,
+    /\b(?:import|export)\s+[\s\S]{0,200}?\bfrom\s*(['"])([^'"]+)\1/gu,
+  ]) {
+    for (const match of value.matchAll(pattern)) sources.push(match[2]);
+  }
+  return sources;
 }
 
 function hasMetaRefresh(html) {
@@ -601,6 +614,13 @@ try {
         const source = decodeHtmlAttribute(match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? '');
         if (!source || !isArtifactAssetTarget(source, relativePath, relativeFiles)) {
           throw new Error(`ARTIFACT_EXTERNAL_CSS_IMPORT_PRESENT: ${relativePath}`);
+        }
+      }
+    }
+    if (/\.js$/iu.test(relativePath)) {
+      for (const source of moduleDependencySources(text)) {
+        if (!isArtifactAssetTarget(source, relativePath, relativeFiles)) {
+          throw new Error(`ARTIFACT_EXTERNAL_MODULE_PRESENT: ${relativePath}`);
         }
       }
     }
