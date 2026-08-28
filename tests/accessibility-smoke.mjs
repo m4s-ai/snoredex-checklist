@@ -241,7 +241,10 @@ try {
         assert.deepEqual(textResizeOverflow, [], `${engineName}/${viewportName}: 200% text reflow`);
         await page.goto(`${baseUrl}/collection/?localization=fixture-loc-latam-es`, { waitUntil: 'networkidle' });
         await page.getByRole('combobox', { name: 'Research' }).selectOption('true');
-        await page.getByRole('button', { name: 'Apply criteria' }).click();
+        await Promise.all([
+          page.waitForURL(/research=true/u),
+          page.getByRole('button', { name: 'Apply criteria' }).click(),
+        ]);
         await page.waitForLoadState('networkidle');
         assert.equal(
           (await page.getByText('Research (read-only)').count()) > 0,
