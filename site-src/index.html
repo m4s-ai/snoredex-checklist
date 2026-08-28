@@ -1,32 +1,71 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="A calm, private checklist for exploring the Snoredex catalogue.">
-  <title>Snoredex Checklist</title>
-  <link rel="stylesheet" href="styles.css">
-  <link rel="describedby" href="https://m4s-ai.github.io/snoredex-checklist/llms.txt">
-  <script>let s;try{s=localStorage.getItem("snoredex-theme")}catch{}document.documentElement.dataset.theme=s==="light"||s==="dark"?s:(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")</script>
-</head>
-<body data-page="index">
-  <a class="skip-link" href="#main-content">Skip to content</a>
-  <header class="site-header"><a class="brand" href="./">Snoredex Checklist</a><button type="button" data-theme-toggle aria-pressed="false">Dark theme</button></header>
-  <main id="main-content" class="page-shell">
-    <section class="hero" aria-labelledby="hero-title">
-      <p class="eyebrow">A private collector companion</p>
-      <h1 id="hero-title">Your Snorlax collection. One checklist.</h1>
-      <p class="lede">Browse the public catalogue, keep your progress in this browser, and share useful public filters without sharing your collection.</p>
-      <p><a class="button" href="collection/">Open collection</a></p>
-    </section>
-    <section class="surface split" data-catalogue-dependent aria-labelledby="about-title">
-      <div><h2 id="about-title">Made for slow, careful collecting</h2><p>Snoredex Checklist keeps private progress local. The catalogue is a pinned, validated snapshot from the <a href="https://m4s-ai.github.io/snoredex-data/" rel="noopener noreferrer">Snoredex Data website <span aria-hidden="true">↗</span><span class="sr-only">External site</span></a>.</p></div>
-      <div><h2>Browse by localization</h2><nav aria-label="Localizations"><div data-localizations><p>Loading localizations…</p></div></nav></div>
-    </section>
-    <section class="surface" data-catalogue-dependent aria-labelledby="trust-title"><h2 id="trust-title">Public data, private collection</h2><p>Search and filter links contain public catalogue criteria and the explicitly public status criterion only. Notes, quantities, private status values and records, recovery data and collection identities never enter URLs, page artifacts or telemetry.</p><div data-provenance></div></section>
-    <section data-view class="state-panel" hidden aria-live="polite"></section>
-  </main>
-  <footer class="site-footer"><span>English interface · static GitHub Pages site</span><span><a href="LICENSE.md">License</a> · <a href="THIRD_PARTY_NOTICES.md">Third-party notices</a> · <a href="https://m4s-ai.github.io/snoredex-data/" rel="noopener noreferrer">Snoredex Data <span aria-hidden="true">↗</span><span class="sr-only">External site</span></a></span></footer>
-  <script type="module" src="assets/app.js"></script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="A calm, private checklist for exploring the Snoredex catalogue." />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'none'; media-src 'none'; manifest-src 'none'"
+    />
+    <title>Snoredex Checklist</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="describedby" href="llms.txt" />
+    <script src="theme.js"></script>
+  </head>
+  <body data-page="index">
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <header class="site-header">
+      <a class="brand" href="./">Snoredex Checklist</a
+      ><button type="button" data-theme-toggle aria-pressed="false">Dark theme</button>
+    </header>
+    <main id="main-content" class="page-shell">
+      <section class="hero" aria-labelledby="hero-title">
+        <p class="eyebrow">A private collector companion</p>
+        <h1 id="hero-title">Your Snorlax collection. One checklist.</h1>
+        <p class="lede">
+          Browse the public catalogue, keep your progress in this browser, and share useful public filters without
+          sharing your collection.
+        </p>
+        <p><a class="button" href="collection/">Open collection</a></p>
+      </section>
+      <section class="surface split" data-catalogue-dependent aria-labelledby="about-title">
+        <div>
+          <h2 id="about-title">Made for slow, careful collecting</h2>
+          <p>
+            Snoredex Checklist keeps private progress local. The catalogue is a pinned, validated snapshot from the
+            <a href="https://m4s-ai.github.io/snoredex-data/" rel="noopener noreferrer"
+              >Snoredex Data website <span aria-hidden="true">↗</span><span class="sr-only">External site</span></a
+            >.
+          </p>
+        </div>
+        <div>
+          <h2>Browse by localization</h2>
+          <nav aria-label="Localizations">
+            <div data-localizations><p>Loading localizations…</p></div>
+          </nav>
+        </div>
+      </section>
+      <section class="surface" data-catalogue-dependent aria-labelledby="trust-title">
+        <h2 id="trust-title">Public data, private collection</h2>
+        <p>
+          Search and filter links contain public catalogue criteria and the explicitly public status criterion only.
+          Notes, quantities, private status values and records, recovery data and collection identities never enter
+          URLs, page artifacts or telemetry.
+        </p>
+        <div data-provenance></div>
+      </section>
+      <section data-view class="state-panel" hidden aria-live="polite"></section>
+    </main>
+    <footer class="site-footer">
+      <span>English interface · static GitHub Pages site</span
+      ><span
+        ><a href="LICENSE.md">License</a> · <a href="THIRD_PARTY_NOTICES.md">Third-party notices</a> ·
+        <a href="https://m4s-ai.github.io/snoredex-data/" rel="noopener noreferrer"
+          >Snoredex Data <span aria-hidden="true">↗</span><span class="sr-only">External site</span></a
+        ></span
+      >
+    </footer>
+    <script type="module" src="assets/app.js"></script>
+  </body>
 </html>

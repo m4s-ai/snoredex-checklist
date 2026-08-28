@@ -1,6 +1,6 @@
-import type { PrivateStateRead } from "./private-state.js";
+import type { PrivateStateRead } from './private-state.js';
 
-type CollectionStatus = "need" | "ordered" | "have" | "skip";
+type CollectionStatus = 'need' | 'ordered' | 'have' | 'skip';
 
 interface PrivateItemState {
   readonly itemId: string;
@@ -11,9 +11,9 @@ interface PrivateItemState {
 }
 
 interface PrivateState {
-  readonly schema: "snoredex-collection-state";
-  readonly schemaVersion: "1.0.0";
-  readonly datasetId: "snoredex-data/snorlax-current-known";
+  readonly schema: 'snoredex-collection-state';
+  readonly schemaVersion: '1.0.0';
+  readonly datasetId: 'snoredex-data/snorlax-current-known';
   readonly catalogueFingerprint: string;
   readonly items: readonly PrivateItemState[];
 }
@@ -42,13 +42,23 @@ interface StorageModule {
 }
 
 interface DomainModule {
-  readonly applyStatusCommand: (itemId: string, current: PrivateItemState | undefined, status: CollectionStatus) => PersistenceResult<PrivateItemState | undefined>;
-  readonly applyQuantityEdit: (itemId: string, current: PrivateItemState | undefined, quantityOwned: unknown, quantityOrdered: unknown) => PersistenceResult<PrivateItemState | undefined>;
-  readonly applyNoteEdit: (itemId: string, current: PrivateItemState | undefined, note: unknown) => PersistenceResult<PrivateItemState | undefined>;
+  readonly applyStatusCommand: (
+    itemId: string,
+    current: PrivateItemState | undefined,
+    status: CollectionStatus,
+  ) => PersistenceResult<PrivateItemState | undefined>;
+  readonly applyQuantityEdit: (
+    itemId: string,
+    current: PrivateItemState | undefined,
+    quantityOwned: unknown,
+    quantityOrdered: unknown,
+  ) => PersistenceResult<PrivateItemState | undefined>;
+  readonly applyNoteEdit: (
+    itemId: string,
+    current: PrivateItemState | undefined,
+    note: unknown,
+  ) => PersistenceResult<PrivateItemState | undefined>;
 }
-
-const STORAGE_MODULE = "./state/storage.js";
-const DOMAIN_MODULE = "./state/domain.js";
 
 export type CollectionEditResult =
   | { readonly ok: true; readonly skipped?: boolean; readonly deferred?: boolean }
@@ -76,9 +86,9 @@ export interface CollectionStateController {
 
 function emptyState(catalogueFingerprint: string): PrivateState {
   return {
-    schema: "snoredex-collection-state",
-    schemaVersion: "1.0.0",
-    datasetId: "snoredex-data/snorlax-current-known",
+    schema: 'snoredex-collection-state',
+    schemaVersion: '1.0.0',
+    datasetId: 'snoredex-data/snorlax-current-known',
     catalogueFingerprint,
     items: [],
   };
@@ -89,7 +99,7 @@ function failure(error: string): CollectionEditResult {
 }
 
 function persistenceError(result: PersistenceResult<{ readonly skipped?: boolean }>): CollectionEditResult {
-  return result.ok ? { ok: true, skipped: result.value?.skipped } : failure(result.error ?? "STORAGE_WRITE_FAILED");
+  return result.ok ? { ok: true, skipped: result.value?.skipped } : failure(result.error ?? 'STORAGE_WRITE_FAILED');
 }
 
 function deferredResult(result: CollectionEditResult): CollectionEditResult {
@@ -170,7 +180,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
 
   public async setStatus(itemId: string, status: CollectionStatus): Promise<CollectionEditResult> {
     const result = this.domain.applyStatusCommand(itemId, this.records.get(itemId), status);
-    if (!result.ok) return failure(result.error ?? "IMPORT_INVALID_STATE_DATA");
+    if (!result.ok) return failure(result.error ?? 'IMPORT_INVALID_STATE_DATA');
     const pendingItemIds = new Set(this.supersededNoteItemIds);
     if (this.pendingNoteItemId !== undefined) pendingItemIds.add(this.pendingNoteItemId);
     this.setRecord(itemId, result.value);
@@ -185,9 +195,13 @@ export class BrowserCollectionStateController implements CollectionStateControll
     return settled ? outcome : deferredResult(outcome);
   }
 
-  public async setQuantities(itemId: string, quantityOwned: unknown, quantityOrdered: unknown): Promise<CollectionEditResult> {
+  public async setQuantities(
+    itemId: string,
+    quantityOwned: unknown,
+    quantityOrdered: unknown,
+  ): Promise<CollectionEditResult> {
     const result = this.domain.applyQuantityEdit(itemId, this.records.get(itemId), quantityOwned, quantityOrdered);
-    if (!result.ok) return failure(result.error ?? "EDIT_INVALID_QUANTITY");
+    if (!result.ok) return failure(result.error ?? 'EDIT_INVALID_QUANTITY');
     const pendingItemIds = new Set(this.supersededNoteItemIds);
     if (this.pendingNoteItemId !== undefined) pendingItemIds.add(this.pendingNoteItemId);
     this.setRecord(itemId, result.value);
@@ -204,7 +218,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
 
   public scheduleNote(itemId: string, note: string): CollectionEditResult {
     const result = this.domain.applyNoteEdit(itemId, this.records.get(itemId), note);
-    if (!result.ok) return failure(result.error ?? "EDIT_INVALID_NOTE");
+    if (!result.ok) return failure(result.error ?? 'EDIT_INVALID_NOTE');
     if (this.pendingNoteItemId !== undefined) this.supersededNoteItemIds.add(this.pendingNoteItemId);
     this.setRecord(itemId, result.value);
     const generation = ++this.noteGeneration;
@@ -214,7 +228,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     this.pendingNoteState = pendingState;
     const scheduled = this.store.scheduleNoteSave(pendingState, false);
     if (!scheduled.ok) {
-      const outcome = failure(scheduled.error ?? "STORAGE_WRITE_FAILED");
+      const outcome = failure(scheduled.error ?? 'STORAGE_WRITE_FAILED');
       this.notifySave(itemId, outcome);
       this.notifySuperseded(outcome, itemId);
     }
@@ -223,7 +237,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
       this.noteFlushTimer = undefined;
       void this.flushNote();
     }, this.noteAutosaveDelay + 10);
-    return scheduled.ok ? { ok: true } : failure(scheduled.error ?? "STORAGE_WRITE_FAILED");
+    return scheduled.ok ? { ok: true } : failure(scheduled.error ?? 'STORAGE_WRITE_FAILED');
   }
 
   public flushNote(): Promise<CollectionEditResult> {
@@ -268,7 +282,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     if (this.pendingNoteState !== undefined && !this.store.hasPendingNote()) {
       const scheduled = this.store.scheduleNoteSave(this.pendingNoteState, false);
       if (!scheduled.ok) {
-        const outcome = failure(scheduled.error ?? "STORAGE_WRITE_FAILED");
+        const outcome = failure(scheduled.error ?? 'STORAGE_WRITE_FAILED');
         if (itemId !== undefined) this.notifySave(itemId, outcome);
         this.notifySuperseded(outcome, itemId);
         return outcome;
@@ -299,7 +313,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     const current = this.recoveryDraft;
     if (current === undefined) return { ok: true, skipped: true };
     const adopted = this.store.adoptUnsavedDraft();
-    if (!adopted.ok) return failure(adopted.error ?? "LOCAL_STATE_UNREADABLE");
+    if (!adopted.ok) return failure(adopted.error ?? 'LOCAL_STATE_UNREADABLE');
     const draft = adopted.value ?? current;
     const outcome = persistenceError(await this.store.saveImmediate(draft));
     if (!outcome.ok) return outcome;
@@ -318,7 +332,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
   public discardRecovery(): CollectionEditResult {
     if (this.recoveryDraft === undefined) return { ok: true, skipped: true };
     this.store.discardUnsavedDraft();
-    if (this.store.unsaved() !== undefined) return failure("STORAGE_WRITE_FAILED");
+    if (this.store.unsaved() !== undefined) return failure('STORAGE_WRITE_FAILED');
     this.recoveryDraft = undefined;
     this.notify();
     return { ok: true };
@@ -390,8 +404,10 @@ export async function createCollectionStateController(
 ): Promise<CollectionStateController | undefined> {
   try {
     const [storageModule, domainModule] = await Promise.all([
-      import(STORAGE_MODULE) as Promise<StorageModule>,
-      import(DOMAIN_MODULE) as Promise<DomainModule>,
+      // @ts-expect-error The runtime-relative module is emitted by the separate state build.
+      import('./state/storage.js') as Promise<StorageModule>,
+      // @ts-expect-error The runtime-relative module is emitted by the separate state build.
+      import('./state/domain.js') as Promise<DomainModule>,
     ]);
     const storage = storageModule.getBrowserStorage();
     if (!storage.ok) return undefined;
@@ -403,7 +419,8 @@ export async function createCollectionStateController(
     if (active !== undefined && active.items.some((item) => !knownTrackableItemIds.has(item.itemId))) return undefined;
     const recovery = store.unsaved();
     if (recovery !== undefined && recovery.catalogueFingerprint !== catalogueFingerprint) return undefined;
-    if (recovery !== undefined && recovery.items.some((item) => !knownTrackableItemIds.has(item.itemId))) return undefined;
+    if (recovery !== undefined && recovery.items.some((item) => !knownTrackableItemIds.has(item.itemId)))
+      return undefined;
     return new BrowserCollectionStateController(
       store,
       domainModule,

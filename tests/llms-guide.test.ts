@@ -6,7 +6,7 @@ import test from 'node:test';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const guidePath = resolve(root, 'site-src/llms.txt');
-const guideUrl = 'https://m4s-ai.github.io/snoredex-checklist/llms.txt';
+const guideUrls = ['llms.txt', '../llms.txt'];
 
 test('publishes the hand-authored v2 privacy and provenance guide', async () => {
   const bytes = await readFile(guidePath);
@@ -34,22 +34,26 @@ test('publishes the hand-authored v2 privacy and provenance guide', async () => 
   assert.ok(!guide.includes('synthetic-secret'));
 });
 
-test('both entry pages advertise the same deployed guide URL', async () => {
+test('both entry pages use a same-origin guide link', async () => {
   const [index, collection] = await Promise.all([
     readFile(resolve(root, 'site-src/index.html'), 'utf8'),
     readFile(resolve(root, 'site-src/collection/index.html'), 'utf8'),
   ]);
-  const describedBy = `<link rel="describedby" href="${guideUrl}">`;
+  const describedBy = guideUrls.map((url) => new RegExp(`<link rel="describedby" href="${url}"\\s*/>`));
   assert.equal((index.match(/rel="describedby"/g) ?? []).length, 1);
   assert.equal((collection.match(/rel="describedby"/g) ?? []).length, 1);
-  assert.ok(index.includes(describedBy));
-  assert.ok(collection.includes(describedBy));
+  assert.match(index, describedBy[0]);
+  assert.match(collection, describedBy[1]);
 });
 
-test('the site build copies the hand-authored guide to the project root', async () => {
+test('the site build copies hand-authored guide and theme assets', async () => {
   const buildScript = await readFile(resolve(root, 'scripts/build-site.mjs'), 'utf8');
   assert.match(
     buildScript,
     /cp\(resolve\(root, ['"]site-src\/llms\.txt['"]\), resolve\(staging, ['"]llms\.txt['"]\)\)/,
+  );
+  assert.match(
+    buildScript,
+    /cp\(resolve\(root, ['"]site-src\/theme\.js['"]\), resolve\(staging, ['"]theme\.js['"]\)\)/,
   );
 });
