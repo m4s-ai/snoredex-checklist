@@ -683,7 +683,11 @@ function isJavaScriptMethodDeclaration(value, tokenStart, openParenthesis) {
 
 function isJavaScriptMethodNameContext(value, tokenStart) {
   let previous = tokenStart - 1;
-  while (previous >= 0 && /\s/u.test(value[previous])) previous -= 1;
+  let lineTerminatorBefore = false;
+  while (previous >= 0 && /\s/u.test(value[previous])) {
+    if (isJavaScriptLineTerminator(value[previous])) lineTerminatorBefore = true;
+    previous -= 1;
+  }
   for (;;) {
     if (previous >= 0 && value[previous] === '*') {
       previous -= 1;
@@ -705,6 +709,10 @@ function isJavaScriptMethodNameContext(value, tokenStart) {
     return open >= 0 && !isJavaScriptBlockOpen(value, open);
   }
   if (value[previous] === '}' || value[previous] === ';') {
+    const open = findEnclosingJavaScriptBrace(value, previous);
+    return open >= 0 && isJavaScriptClassBody(value, open);
+  }
+  if (lineTerminatorBefore) {
     const open = findEnclosingJavaScriptBrace(value, previous);
     return open >= 0 && isJavaScriptClassBody(value, open);
   }
@@ -1045,6 +1053,10 @@ function isJavaScriptBlockOpen(value, openIndex) {
   if (before < 0 || /[;}]/u.test(value[before])) return true;
   if (value[before] === ')' || (value[before] === '>' && value[before - 1] === '=')) return true;
   const prefix = value.slice(0, before + 1);
+  if (/(?:^|\s)static\s*$/iu.test(prefix)) {
+    const classOpen = findEnclosingJavaScriptBrace(value, before);
+    return classOpen >= 0 && isJavaScriptClassBody(value, classOpen);
+  }
   if (/(?:^|\s)(?:catch|do|else|finally|try)\s*$/iu.test(prefix)) return true;
   const classToken = /\bclass(?:\s+[a-z_$][\w$]*)?(?:\s+extends[\s\S]*)?\s*$/iu.exec(prefix);
   if (classToken !== null) {
