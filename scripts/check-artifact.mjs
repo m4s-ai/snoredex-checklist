@@ -261,11 +261,7 @@ function stripHtmlComments(html) {
           output += tag.raw;
           index = tag.end;
           if (tag.name === 'select') selectDepth = Math.max(0, selectDepth + (tag.closing ? -1 : 1));
-          if (
-            !tag.closing &&
-            rawTextElements.has(tag.name) &&
-            !(selectDepth > 0 && ['plaintext', 'style'].includes(tag.name))
-          )
+          if (!tag.closing && rawTextElements.has(tag.name) && !(selectDepth > 0 && tag.name !== 'script'))
             rawTextTag = tag.name;
         } else {
           output += html[index];
@@ -413,7 +409,8 @@ function dynamicModuleDependencies(value) {
     if (token?.index !== 0) continue;
     let cursor = index + token[0].length;
     while (/\s/u.test(value[cursor] ?? '')) cursor += 1;
-    if (value[cursor] === '(') {
+    const dynamicImport = value[cursor] === '(';
+    if (dynamicImport) {
       cursor += 1;
       while (/\s/u.test(value[cursor] ?? '')) cursor += 1;
     }
@@ -429,7 +426,9 @@ function dynamicModuleDependencies(value) {
       const source = value.slice(cursor + 1, end - 1);
       if (!source.includes('$')) dependencies.push(source);
       index = end - 1;
+      continue;
     }
+    if (dynamicImport) dependencies.push('');
   }
   return dependencies;
 }
