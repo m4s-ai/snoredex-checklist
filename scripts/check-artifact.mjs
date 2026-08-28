@@ -93,13 +93,19 @@ try {
     const html = await readFile(join(root, page), 'utf8');
     const withoutComments = html.replace(/<!--[\s\S]*?(?:-->|$)/gu, '');
     const head = /<head\b[^>]*>([\s\S]*?)<\/head\s*>/iu.exec(withoutComments)?.[1] ?? '';
-    const hasCspMeta = Array.from(head.matchAll(/<meta\b[^>]*>/giu)).some((match) => {
-      const tag = match[0];
-      return (
-        readAttribute(tag, 'http-equiv')?.toLowerCase() === 'content-security-policy' &&
-        decodeHtmlAttribute(readAttribute(tag, 'content') ?? '') === csp
-      );
-    });
+    const activeHead = head.replace(/<template\b[^>]*>[\s\S]*?<\/template\s*>/giu, '');
+    const hasTemplate = /<\/?template\b/iu.test(head);
+    const firstControlledResource = activeHead.search(/<(?:base|link|script|style)\b/iu);
+    const hasCspMeta =
+      !hasTemplate &&
+      Array.from(activeHead.matchAll(/<meta\b[^>]*>/giu)).some((match) => {
+        const tag = match[0];
+        return (
+          (firstControlledResource < 0 || match.index <= firstControlledResource) &&
+          readAttribute(tag, 'http-equiv')?.toLowerCase() === 'content-security-policy' &&
+          decodeHtmlAttribute(readAttribute(tag, 'content') ?? '') === csp
+        );
+      });
     if (!hasCspMeta) throw new Error(`ARTIFACT_CSP_MISSING: ${page}`);
     if (/\b(?:unsafe-inline|unsafe-eval)\b/iu.test(html)) throw new Error(`ARTIFACT_CSP_UNSAFE_DIRECTIVE: ${page}`);
     if (/[\s/]on[a-z]+\s*=/iu.test(html)) throw new Error(`ARTIFACT_INLINE_HANDLER_PRESENT: ${page}`);

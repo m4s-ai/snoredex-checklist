@@ -119,6 +119,23 @@ test('requires the CSP meta element to be inside the document head', async () =>
   }
 });
 
+test('requires an active first-applicable CSP before controlled resources', async () => {
+  for (const indexMeta of [
+    `<head><template><meta http-equiv="Content-Security-Policy" content="${csp}"></template></head>`,
+    `<head><script src="theme.js"></script><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
+  ]) {
+    const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-csp-order-test-'));
+    try {
+      await writeValidArtifact(directory, { indexMeta, indexScript: '' });
+      const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+      assert.notEqual(result.status, 0);
+      assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_CSP_MISSING: index\.html/u);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+});
+
 test('rejects slash-separated inline event-handler attributes', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-handler-test-'));
   try {
