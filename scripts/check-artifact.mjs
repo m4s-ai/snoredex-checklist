@@ -141,7 +141,18 @@ function isArtifactScriptTarget(source, page, relativeFiles) {
 }
 
 function extractHead(html) {
-  const rawTextElements = new Set(['noscript', 'script', 'style', 'textarea', 'title']);
+  const rawTextElements = new Set([
+    'iframe',
+    'noembed',
+    'noframes',
+    'noscript',
+    'plaintext',
+    'script',
+    'style',
+    'textarea',
+    'title',
+    'xmp',
+  ]);
   const inertElements = new Set(['template']);
   const preHeadElements = new Set([
     'base',
@@ -172,7 +183,7 @@ function extractHead(html) {
       bodyStarted = true;
     }
     if (rawTextTag !== undefined) {
-      if (closing && name === rawTextTag) rawTextTag = undefined;
+      if (rawTextTag !== 'plaintext' && closing && name === rawTextTag) rawTextTag = undefined;
       previousEnd = tag.index + tag.raw.length;
       continue;
     }
