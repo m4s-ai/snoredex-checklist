@@ -1,5 +1,5 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { join, resolve, relative } from 'node:path';
+import { join, resolve, relative, posix } from 'node:path';
 import process from 'node:process';
 
 const root = resolve(process.cwd(), process.argv[2] ?? 'dist/site');
@@ -100,6 +100,18 @@ function* htmlTags(html) {
   }
 }
 
+function isArtifactScriptTarget(source, page, relativeFiles) {
+  const pathPart = source.split(/[?#]/u, 1)[0];
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(pathPart);
+  } catch {
+    return false;
+  }
+  const normalizedPath = posix.normalize(posix.join(posix.dirname(page), decodedPath));
+  return normalizedPath !== '..' && !normalizedPath.startsWith('../') && relativeFiles.includes(normalizedPath);
+}
+
 function extractHead(html) {
   const rawTextElements = new Set(['noscript', 'script', 'style', 'textarea', 'title']);
   const inertElements = new Set(['template']);
@@ -119,39 +131,61 @@ function extractHead(html) {
   let inertDepth = 0;
   let headStart = -1;
   let bodyStarted = false;
+  let previousEnd = 0;
   for (const tag of htmlTags(html)) {
     const { closing, name } = tag;
+    if (
+      rawTextTag === undefined &&
+      inertDepth === 0 &&
+      headStart < 0 &&
+      !bodyStarted &&
+      /\S/u.test(html.slice(previousEnd, tag.index).replace(/<![^>]*>/gu, ''))
+    ) {
+      bodyStarted = true;
+    }
     if (rawTextTag !== undefined) {
       if (closing && name === rawTextTag) rawTextTag = undefined;
+      previousEnd = tag.index + tag.raw.length;
       continue;
     }
     if (inertDepth > 0) {
-      if (name === 'template') inertDepth += closing ? -1 : 1;
+      if (!closing && rawTextElements.has(name)) rawTextTag = name;
+      else if (name === 'template') inertDepth += closing ? -1 : 1;
+      previousEnd = tag.index + tag.raw.length;
       continue;
     }
     if (!closing && name === 'body') {
       if (headStart >= 0) return html.slice(headStart, tag.index);
       bodyStarted = true;
+      previousEnd = tag.index + tag.raw.length;
       continue;
     }
-    if (bodyStarted) continue;
+    if (bodyStarted) {
+      previousEnd = tag.index + tag.raw.length;
+      continue;
+    }
     if (!closing && headStart < 0 && !preHeadElements.has(name)) {
       bodyStarted = true;
+      previousEnd = tag.index + tag.raw.length;
       continue;
     }
     if (closing) {
       if (headStart >= 0 && name === 'head') return html.slice(headStart, tag.index);
+      previousEnd = tag.index + tag.raw.length;
       continue;
     }
     if (rawTextElements.has(name)) {
       rawTextTag = name;
+      previousEnd = tag.index + tag.raw.length;
       continue;
     }
     if (inertElements.has(name)) {
       inertDepth += 1;
+      previousEnd = tag.index + tag.raw.length;
       continue;
     }
     if (headStart < 0 && name === 'head') headStart = tag.index + tag.raw.length;
+    previousEnd = tag.index + tag.raw.length;
   }
   return '';
 }
@@ -264,7 +298,8 @@ try {
         source.includes('&') ||
         source.startsWith('/') ||
         /^[a-z][a-z\d+.-]*:/iu.test(source) ||
-        source.includes('\\')
+        source.includes('\\') ||
+        !isArtifactScriptTarget(source, page, relativeFiles)
       )
         throw new Error(`ARTIFACT_EXTERNAL_SCRIPT_PRESENT: ${page}`);
     }

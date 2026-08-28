@@ -75,6 +75,7 @@ test('rejects external scripts in single-quoted and unquoted src attributes', as
   for (const source of [
     "'https://evil.invalid/a.js'",
     'https://evil.invalid/a.js',
+    '../../outside.js',
     '"https&#58;//evil.invalid/a.js"',
     '"&#9;https://evil.invalid/a.js"',
     '"ht&#10;tps://evil.invalid/a.js"',
@@ -128,7 +129,9 @@ test('requires an active first-applicable CSP before controlled resources', asyn
     `<head><meta data-x=\"><meta http-equiv="Content-Security-Policy" content="${csp}">\"></head>`,
     `<body><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></body>`,
     `<p>x</p><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
+    `text<head><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     `<template><template></template><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></template>`,
+    `<template><script src="x"></template></script><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></template>`,
     `<script src="theme.js"><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></script>`,
     `<head><script src="theme.js"></script><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
   ]) {
