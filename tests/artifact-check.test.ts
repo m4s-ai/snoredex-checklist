@@ -332,6 +332,7 @@ test('rejects external JavaScript module dependencies', async () => {
     'const foo=1; const C = class {} / foo; import("/outside.js");\n',
     'label: {} /[/*]/.test("*"); import("/outside.js");\n',
     'if (true) { label: {} /[/*]/.test("*"); import("/outside.js"); }\n',
+    'const foo=1; const f = function(){} / foo; import("/outside.js");\n',
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-module-test-'));
     try {
@@ -343,6 +344,20 @@ test('rejects external JavaScript module dependencies', async () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  }
+});
+
+test('preserves script-supporting elements after invalid plaintext in select context', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-select-plaintext-test-'));
+  try {
+    await writeValidArtifact(directory, {
+      indexScript: '<select><plaintext><script src="/outside.js"></script>',
+    });
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_EXTERNAL_SCRIPT_PRESENT: index\.html/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });
 

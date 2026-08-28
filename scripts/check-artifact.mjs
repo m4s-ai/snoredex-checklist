@@ -226,6 +226,7 @@ function stripHtmlComments(html) {
   let commentStart = false;
   let commentStartDash = false;
   let rawTextTag;
+  let selectDepth = 0;
   const rawTextElements = new Set([
     'iframe',
     'noembed',
@@ -259,7 +260,9 @@ function stripHtmlComments(html) {
         if (tag.name !== undefined) {
           output += tag.raw;
           index = tag.end;
-          if (!tag.closing && rawTextElements.has(tag.name)) rawTextTag = tag.name;
+          if (tag.name === 'select') selectDepth = Math.max(0, selectDepth + (tag.closing ? -1 : 1));
+          if (!tag.closing && rawTextElements.has(tag.name) && !(tag.name === 'plaintext' && selectDepth > 0))
+            rawTextTag = tag.name;
         } else {
           output += html[index];
           index += 1;
@@ -590,6 +593,19 @@ function isJavaScriptRegexStart(value, index) {
   );
 }
 
+function isJavaScriptFunctionExpression(prefix) {
+  const functionToken = /(?:async\s+)?function(?:\s*\*)?(?:\s+[a-z_$][\w$]*)?\s*\([^)]*\)\s*$/iu.exec(prefix);
+  if (functionToken === null) return false;
+  let beforeFunction = functionToken.index - 1;
+  while (beforeFunction >= 0 && /\s/u.test(prefix[beforeFunction])) beforeFunction -= 1;
+  if (beforeFunction < 0 || /[;}]/u.test(prefix[beforeFunction])) {
+    const preceding = prefix.slice(0, beforeFunction + 1);
+    return /(?:^|\s)(?:return|yield|await|throw)\s*$/iu.test(preceding);
+  }
+  if (/[=(:,[!?&|+\-*%^~<>]/u.test(prefix[beforeFunction])) return true;
+  return /(?:^|\s)(?:return|yield|await|throw)\s*$/iu.test(prefix.slice(0, beforeFunction + 1));
+}
+
 function isJavaScriptBlockEnd(value, closeIndex) {
   let depth = 0;
   for (let index = closeIndex; index >= 0; index -= 1) {
@@ -613,7 +629,9 @@ function isJavaScriptBlockEnd(value, closeIndex) {
     while (before >= 0 && /\s/u.test(value[before])) before -= 1;
     if (before < 0 || /[;}]/u.test(value[before])) return true;
     if (value[before] === '>' && value[before - 1] === '=') return true;
-    if (value[before] === ')') return true;
+    if (value[before] === ')') {
+      return !isJavaScriptFunctionExpression(value.slice(0, before + 1));
+    }
     const prefix = value.slice(0, before + 1);
     if (/(?:^|\s)(?:catch|do|else|finally|try)\s*$/iu.test(prefix)) return true;
     if (isJavaScriptLabeledBlock(value, prefix)) return true;
