@@ -335,16 +335,98 @@ function stripCssComments(value) {
 }
 
 function moduleDependencySources(value) {
-  const source = stripJavaScriptComments(value);
+  const sources = [stripJavaScriptComments(value), ...extractTemplateExpressions(value).map(stripJavaScriptComments)];
+  const dependencies = [];
+  for (const source of sources) {
+    for (const pattern of [
+      /\bimport\s*\(\s*(['"])([^'"]+)\1/gu,
+      /\bimport\s*(['"])([^'"]+)\1/gu,
+      /\b(?:import|export)\s+[\s\S]{0,200}?\bfrom\s*(['"])([^'"]+)\1/gu,
+    ]) {
+      for (const match of source.matchAll(pattern)) dependencies.push(match[2]);
+    }
+  }
+  return dependencies;
+}
+
+function extractTemplateExpressions(value) {
   const sources = [];
-  for (const pattern of [
-    /\bimport\s*\(\s*(['"])([^'"]+)\1/gu,
-    /\bimport\s*(['"])([^'"]+)\1/gu,
-    /\b(?:import|export)\s+[\s\S]{0,200}?\bfrom\s*(['"])([^'"]+)\1/gu,
-  ]) {
-    for (const match of source.matchAll(pattern)) sources.push(match[2]);
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (character === '"' || character === "'") {
+      index = skipJavaScriptQuoted(value, index, character) - 1;
+    } else if (character === '/' && value[index + 1] === '/') {
+      index = skipJavaScriptLineComment(value, index) - 1;
+    } else if (character === '/' && value[index + 1] === '*') {
+      index = skipJavaScriptBlockComment(value, index) - 1;
+    } else if (character === '`') {
+      index = collectTemplateExpressions(value, index + 1, sources) - 1;
+    }
   }
   return sources;
+}
+
+function collectTemplateExpressions(value, index, sources) {
+  while (index < value.length) {
+    if (value[index] === '\\') {
+      index += 2;
+    } else if (value[index] === '`') {
+      return index + 1;
+    } else if (value[index] === '$' && value[index + 1] === '{') {
+      const expressionStart = index + 2;
+      const expressionEnd = collectJavaScriptExpression(value, expressionStart, sources);
+      sources.push(value.slice(expressionStart, expressionEnd - 1));
+      index = expressionEnd;
+    } else {
+      index += 1;
+    }
+  }
+  return value.length;
+}
+
+function collectJavaScriptExpression(value, index, sources) {
+  let depth = 1;
+  while (index < value.length) {
+    const character = value[index];
+    if (character === '"' || character === "'") {
+      index = skipJavaScriptQuoted(value, index, character);
+    } else if (character === '/' && value[index + 1] === '/') {
+      index = skipJavaScriptLineComment(value, index);
+    } else if (character === '/' && value[index + 1] === '*') {
+      index = skipJavaScriptBlockComment(value, index);
+    } else if (character === '`') {
+      index = collectTemplateExpressions(value, index + 1, sources);
+    } else if (character === '{') {
+      depth += 1;
+      index += 1;
+    } else if (character === '}') {
+      depth -= 1;
+      index += 1;
+      if (depth === 0) return index;
+    } else {
+      index += 1;
+    }
+  }
+  return value.length;
+}
+
+function skipJavaScriptQuoted(value, index, quote) {
+  index += 1;
+  while (index < value.length) {
+    if (value[index] === '\\') index += 2;
+    else if (value[index++] === quote) return index;
+  }
+  return value.length;
+}
+
+function skipJavaScriptLineComment(value, index) {
+  const end = value.indexOf('\n', index + 2);
+  return end < 0 ? value.length : end;
+}
+
+function skipJavaScriptBlockComment(value, index) {
+  const end = value.indexOf('*/', index + 2);
+  return end < 0 ? value.length : end + 2;
 }
 
 function stripJavaScriptComments(value) {
