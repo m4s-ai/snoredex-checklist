@@ -162,6 +162,7 @@ test('rejects meta-refresh navigations regardless of CSP ordering', async () => 
     `<head><!-- <!-- --> <meta http-equiv="refresh" content="0; url=https://evil.invalid/"><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     `<head><!-- --!><meta http-equiv="refresh" content="0; url=https://evil.invalid/"><!-- --><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     `<head><!--><meta http-equiv="refresh" content="0; url=https://evil.invalid/"><!-- --><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
+    `<head><!---><meta http-equiv="refresh" content="0; url=https://evil.invalid/"><!-- --><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-meta-refresh-test-'));
     try {
@@ -172,6 +173,19 @@ test('rejects meta-refresh navigations regardless of CSP ordering', async () => 
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  }
+});
+
+test('rejects CSP-looking attributes on malformed tag names', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-malformed-tag-test-'));
+  try {
+    const indexMeta = `<head><meta? http-equiv="Content-Security-Policy" content="${csp}"></head>`;
+    await writeValidArtifact(directory, { indexMeta, indexScript: '' });
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_CSP_MISSING: index\.html/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });
 

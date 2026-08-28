@@ -89,7 +89,7 @@ function* htmlTags(html) {
         quote = character;
       } else if (character === '>') {
         const raw = html.slice(start, cursor + 1);
-        const match = /^<(?:(\/)[\s]*)?([a-z][\w:-]*)/iu.exec(raw);
+        const match = /^<(?:(\/)[\s]*)?([a-z][\w:-]*)(?=[\t\n\f\r />])/iu.exec(raw);
         if (match) yield { closing: match[1] !== undefined, name: match[2].toLowerCase(), raw, index: start };
         index = cursor + 1;
         break;
@@ -105,11 +105,13 @@ function stripHtmlComments(html) {
   let index = 0;
   let commentDepth = 0;
   let commentStart = false;
+  let commentStartDash = false;
   while (index < html.length) {
     if (commentDepth === 0) {
       if (html.startsWith('<!--', index)) {
         commentDepth = 1;
         commentStart = true;
+        commentStartDash = false;
         index += 4;
       } else {
         output += html[index];
@@ -117,20 +119,28 @@ function stripHtmlComments(html) {
       }
       continue;
     }
-    if (commentStart && html[index] === '>') {
+    if (html.startsWith('--!>', index)) {
       commentDepth -= 1;
       commentStart = false;
-      index += 1;
-    } else if (html.startsWith('--!>', index)) {
-      commentDepth -= 1;
-      commentStart = false;
+      commentStartDash = false;
       index += 4;
     } else if (html.startsWith('-->', index)) {
       commentDepth -= 1;
       commentStart = false;
+      commentStartDash = false;
       index += 3;
+    } else if ((commentStart || commentStartDash) && html[index] === '>') {
+      commentDepth -= 1;
+      commentStart = false;
+      commentStartDash = false;
+      index += 1;
+    } else if (commentStart && html[index] === '-') {
+      commentStart = false;
+      commentStartDash = true;
+      index += 1;
     } else {
       commentStart = false;
+      commentStartDash = false;
       index += 1;
     }
   }
