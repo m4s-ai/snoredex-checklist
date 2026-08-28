@@ -594,7 +594,32 @@ function isJavaScriptRegexStart(value, index) {
 }
 
 function isJavaScriptFunctionExpression(prefix) {
-  const functionToken = /(?:async\s+)?function(?:\s*\*)?(?:\s+[a-z_$][\w$]*)?\s*\([^)]*\)\s*$/iu.exec(prefix);
+  let close = prefix.length - 1;
+  while (close >= 0 && /\s/u.test(prefix[close])) close -= 1;
+  if (prefix[close] !== ')') return false;
+  let depth = 0;
+  let open = -1;
+  for (let index = close; index >= 0; index -= 1) {
+    const character = prefix[index];
+    if (character === '"' || character === "'") {
+      index = skipJavaScriptQuotedBackward(prefix, index);
+      continue;
+    }
+    if (character === '`') {
+      index = skipJavaScriptTemplateBackward(prefix, index);
+      continue;
+    }
+    if (character === ')') depth += 1;
+    else if (character === '(') {
+      depth -= 1;
+      if (depth === 0) {
+        open = index;
+        break;
+      }
+    }
+  }
+  if (open < 0) return false;
+  const functionToken = /(?:async\s+)?function(?:\s*\*)?(?:\s+[a-z_$][\w$]*)?\s*$/iu.exec(prefix.slice(0, open));
   if (functionToken === null) return false;
   let beforeFunction = functionToken.index - 1;
   while (beforeFunction >= 0 && /\s/u.test(prefix[beforeFunction])) beforeFunction -= 1;
