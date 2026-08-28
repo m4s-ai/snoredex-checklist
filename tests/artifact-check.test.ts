@@ -566,6 +566,10 @@ test('keeps classic await and yield identifiers out of regex context', async () 
     ['await-parameter', 'function f(await){const foo=2; const x=await / foo; import("/outside.js")} f(4)\n'],
     ['yield-catch', 'try {} catch (yield) { const foo=2; const x=yield / foo; import("/outside.js") }\n'],
     [
+      'await-parameter-regex-default',
+      'function f(x=/[)]/, await){const foo=2; const y=await / foo; import("/outside.js")} f()\n',
+    ],
+    [
       'yield-function-scope',
       'function f(yield){} function* g(){yield /[/*]/; import("/outside.js")} const i=g();i.next();i.next();\n',
     ],

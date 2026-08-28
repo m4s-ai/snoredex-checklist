@@ -828,6 +828,13 @@ function findJavaScriptOpeningParen(value, closeIndex) {
       index = skipJavaScriptTemplateBackward(value, index);
       continue;
     }
+    if (character === '/') {
+      const regexStart = skipJavaScriptRegexBackward(value, index);
+      if (regexStart >= 0) {
+        index = regexStart;
+        continue;
+      }
+    }
     if (character === ')') {
       depth += 1;
     } else if (character === '(') {
