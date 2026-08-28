@@ -135,6 +135,7 @@ test('requires an active first-applicable CSP before controlled resources', asyn
     `<template><template></template><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></template>`,
     `<template><xmp></template><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></xmp>`,
     `<template><script src="x"></template></script><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></template>`,
+    `<template><script src="theme.js"><!--<script src="theme.js"></script></template><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></script></template>`,
     `<script src="theme.js"></script><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     `<meta charset="utf-8">text<meta http-equiv="Content-Security-Policy" content="${csp}"><body>`,
     `<head>text<meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
@@ -187,6 +188,33 @@ test('rejects CSP-looking attributes on malformed tag names', async () => {
     assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_CSP_MISSING: index\.html/u);
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('keeps stylesheet links and CSS imports inside the artifact', async () => {
+  const cases = [
+    {
+      indexMeta: `<head><meta http-equiv="Content-Security-Policy" content="${csp}"><link rel="stylesheet" href="../../outside.css"></head>`,
+      css: '',
+      error: /ARTIFACT_EXTERNAL_STYLESHEET_PRESENT: index\.html/u,
+    },
+    {
+      indexMeta: `<head><meta http-equiv="Content-Security-Policy" content="${csp}"><link rel="stylesheet" href="styles.css"></head>`,
+      css: '@import url("../../outside.css");',
+      error: /ARTIFACT_EXTERNAL_CSS_IMPORT_PRESENT: styles\.css/u,
+    },
+  ];
+  for (const { indexMeta, css, error } of cases) {
+    const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-stylesheet-test-'));
+    try {
+      await writeValidArtifact(directory, { indexMeta, indexScript: '' });
+      await writeFile(join(directory, 'styles.css'), css);
+      const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+      assert.notEqual(result.status, 0);
+      assert.match(`${result.stdout}${result.stderr}`, error);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   }
 });
 

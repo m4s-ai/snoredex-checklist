@@ -98,6 +98,77 @@ function parseHtmlTagAt(html, start) {
   return { end: html.length };
 }
 
+function hasTagNameAt(html, index, name) {
+  const prefix = `<${name}`;
+  return (
+    html.slice(index, index + prefix.length).toLowerCase() === prefix &&
+    /[\t\n\f\r />]/u.test(html[index + prefix.length] ?? '')
+  );
+}
+
+function rawTextClosingEnd(html, index, name) {
+  const prefix = `</${name}`;
+  if (
+    html.slice(index, index + prefix.length).toLowerCase() !== prefix ||
+    !/[\t\n\f\r />]/u.test(html[index + prefix.length] ?? '')
+  ) {
+    return -1;
+  }
+  const end = html.indexOf('>', index + prefix.length);
+  return end < 0 ? -1 : end + 1;
+}
+
+function findRawTextEnd(html, index, name) {
+  if (name === 'plaintext') return { end: html.length };
+  if (name !== 'script') {
+    while (index < html.length) {
+      const end = rawTextClosingEnd(html, index, name);
+      if (end >= 0) return { end, closeStart: index };
+      index += 1;
+    }
+    return { end: html.length };
+  }
+  let state = 'data';
+  while (index < html.length) {
+    if (state === 'data') {
+      if (html.startsWith('<!--', index)) {
+        state = 'escaped';
+        index += 4;
+      } else {
+        const end = rawTextClosingEnd(html, index, name);
+        if (end >= 0) return { end, closeStart: index };
+        index += 1;
+      }
+    } else if (state === 'escaped') {
+      const end = rawTextClosingEnd(html, index, name);
+      if (end >= 0) return { end, closeStart: index };
+      if (hasTagNameAt(html, index, 'script')) {
+        state = 'double-escaped';
+        index += 1;
+      } else if (html.startsWith('-->', index)) {
+        state = 'data';
+        index += 3;
+      } else {
+        index += 1;
+      }
+    } else {
+      const end = rawTextClosingEnd(html, index, name);
+      if (end >= 0) {
+        state = 'escaped';
+        index = end;
+      } else if (hasTagNameAt(html, index, 'script')) {
+        index += 1;
+      } else if (html.startsWith('-->', index)) {
+        state = 'escaped';
+        index += 3;
+      } else {
+        index += 1;
+      }
+    }
+  }
+  return { end: html.length };
+}
+
 function* htmlTags(html) {
   let index = 0;
   while (index < html.length) {
@@ -132,20 +203,11 @@ function stripHtmlComments(html) {
   while (index < html.length) {
     if (commentDepth === 0) {
       if (rawTextTag !== undefined) {
-        const closePattern = new RegExp(`</${rawTextTag}(?=[\\t\\n\\f\\r />])`, 'iu');
-        const close = closePattern.exec(html.slice(index));
-        if (close === null) {
-          output += html.slice(index);
-          break;
-        }
-        const closeStart = index + close.index;
-        const closeEnd = html.indexOf('>', closeStart);
-        if (closeEnd < 0) {
-          output += html.slice(index);
-          break;
-        }
-        output += html.slice(index, closeEnd + 1);
-        index = closeEnd + 1;
+        const rawText = findRawTextEnd(html, index, rawTextTag);
+        const contentEnd = rawText.closeStart ?? rawText.end;
+        output += html.slice(index, contentEnd).replaceAll('<', '\u0000');
+        if (rawText.closeStart !== undefined) output += html.slice(rawText.closeStart, rawText.end);
+        index = rawText.end;
         rawTextTag = undefined;
         continue;
       }
@@ -198,7 +260,7 @@ function stripHtmlComments(html) {
   return output;
 }
 
-function isArtifactScriptTarget(source, page, relativeFiles) {
+function isArtifactAssetTarget(source, page, relativeFiles) {
   const pathPart = source.split(/[?#]/u, 1)[0];
   let decodedPath;
   try {
@@ -443,18 +505,47 @@ try {
         source.startsWith('/') ||
         /^[a-z][a-z\d+.-]*:/iu.test(source) ||
         source.includes('\\') ||
-        !isArtifactScriptTarget(source, page, relativeFiles)
+        !isArtifactAssetTarget(source, page, relativeFiles)
       )
         throw new Error(`ARTIFACT_EXTERNAL_SCRIPT_PRESENT: ${page}`);
+    }
+    for (const match of html.matchAll(/<link\b[^>]*>/giu)) {
+      const rel = decodeHtmlAttribute(readAttribute(match[0], 'rel') ?? '')
+        .trim()
+        .toLowerCase()
+        .split(/[\t\n\f\r ]+/u)
+        .filter(Boolean);
+      if (!rel.includes('stylesheet')) continue;
+      const encodedSource = readAttribute(match[0], 'href');
+      const source = encodedSource === undefined ? '' : decodeHtmlAttribute(encodedSource);
+      if (
+        !source ||
+        source !== source.trim() ||
+        /[\u0000-\u0020\u007f]/u.test(source) ||
+        source.includes('\\') ||
+        !isArtifactAssetTarget(source, page, relativeFiles)
+      )
+        throw new Error(`ARTIFACT_EXTERNAL_STYLESHEET_PRESENT: ${page}`);
     }
   }
   for (const file of allFiles) {
     const bytes = await readFile(file);
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    if (forbiddenContent.test(text)) throw new Error(`ARTIFACT_PRIVATE_CONTENT_PRESENT: ${relative(root, file)}`);
+    const relativePath = relative(root, file).replaceAll('\\', '/');
+    if (/\.css$/iu.test(relativePath)) {
+      for (const match of text.matchAll(
+        /@import\s+(?:url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s)]+))\s*\)|"([^"]*)"|'([^']*)')/giu,
+      )) {
+        const source = decodeHtmlAttribute(match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? '');
+        if (!source || !isArtifactAssetTarget(source, relativePath, relativeFiles)) {
+          throw new Error(`ARTIFACT_EXTERNAL_CSS_IMPORT_PRESENT: ${relativePath}`);
+        }
+      }
+    }
+    if (forbiddenContent.test(text)) throw new Error(`ARTIFACT_PRIVATE_CONTENT_PRESENT: ${relativePath}`);
     try {
       if (containsPrivateStateSchema(JSON.parse(text))) {
-        throw new Error(`ARTIFACT_PRIVATE_STATE_SCHEMA_PRESENT: ${relative(root, file)}`);
+        throw new Error(`ARTIFACT_PRIVATE_STATE_SCHEMA_PRESENT: ${relativePath}`);
       }
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('ARTIFACT_PRIVATE_STATE_SCHEMA_PRESENT:')) throw error;
