@@ -512,6 +512,8 @@ function extractTemplateExpressions(value) {
       index = skipJavaScriptLineComment(value, index) - 1;
     } else if (character === '/' && value[index + 1] === '*') {
       index = skipJavaScriptBlockComment(value, index) - 1;
+    } else if (character === '/' && isJavaScriptRegexStart(value, index)) {
+      index = skipJavaScriptRegex(value, index) - 1;
     } else if (character === '`') {
       index = collectTemplateExpressions(value, index + 1, sources) - 1;
     }
@@ -743,8 +745,12 @@ function isJavaScriptLabeledBlock(value, prefix) {
   const label = /([a-z_$][\w$]*)\s*:\s*$/iu.exec(prefix);
   if (label === null) return false;
   let beforeLabel = label.index - 1;
-  while (beforeLabel >= 0 && /\s/u.test(prefix[beforeLabel])) beforeLabel -= 1;
-  if (beforeLabel < 0 || /[;\n]/u.test(prefix[beforeLabel])) return true;
+  let lineTerminator = false;
+  while (beforeLabel >= 0 && /\s/u.test(prefix[beforeLabel])) {
+    if (isJavaScriptLineTerminator(prefix[beforeLabel])) lineTerminator = true;
+    beforeLabel -= 1;
+  }
+  if (lineTerminator || beforeLabel < 0 || /[;\n]/u.test(prefix[beforeLabel])) return true;
   return prefix[beforeLabel] === '{' && isJavaScriptBlockOpen(value, beforeLabel);
 }
 
