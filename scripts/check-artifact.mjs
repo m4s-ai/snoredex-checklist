@@ -614,9 +614,15 @@ function isJavaScriptBlockEnd(value, closeIndex) {
     if (value[before] === '>' && value[before - 1] === '=') return true;
     if (value[before] === ')') return true;
     const prefix = value.slice(0, before + 1);
+    if (/(?:^|\s)(?:catch|do|else|finally|try)\s*$/iu.test(prefix)) return true;
+    const classToken = /\bclass(?:\s+[a-z_$][\w$]*)?(?:\s+extends[\s\S]*)?\s*$/iu.exec(prefix);
+    if (classToken === null) return false;
+    let beforeClass = classToken.index - 1;
+    while (beforeClass >= 0 && /\s/u.test(prefix[beforeClass])) beforeClass -= 1;
     return (
-      /(?:^|\s)(?:catch|do|else|finally|try)\s*$/iu.test(prefix) ||
-      /(?:^|\s)class(?:\s+[a-z_$][\w$]*)?(?:\s+extends[\s\S]*)?\s*$/iu.test(prefix)
+      beforeClass < 0 ||
+      /[;}]/u.test(prefix[beforeClass]) ||
+      /(?:^|\s)export(?:\s+default)?\s*$/iu.test(prefix.slice(0, beforeClass + 1))
     );
   }
   return false;
