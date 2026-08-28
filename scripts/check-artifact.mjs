@@ -104,10 +104,12 @@ function stripHtmlComments(html) {
   let output = '';
   let index = 0;
   let commentDepth = 0;
+  let commentStart = false;
   while (index < html.length) {
     if (commentDepth === 0) {
       if (html.startsWith('<!--', index)) {
         commentDepth = 1;
+        commentStart = true;
         index += 4;
       } else {
         output += html[index];
@@ -115,13 +117,20 @@ function stripHtmlComments(html) {
       }
       continue;
     }
-    if (html.startsWith('--!>', index)) {
+    if (commentStart && html[index] === '>') {
       commentDepth -= 1;
+      commentStart = false;
+      index += 1;
+    } else if (html.startsWith('--!>', index)) {
+      commentDepth -= 1;
+      commentStart = false;
       index += 4;
     } else if (html.startsWith('-->', index)) {
       commentDepth -= 1;
+      commentStart = false;
       index += 3;
     } else {
+      commentStart = false;
       index += 1;
     }
   }
