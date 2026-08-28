@@ -21,7 +21,7 @@ Important data boundaries:
 ## Catalogue data and provenance
 
 - [Snoredex Data LLM guide](https://m4s-ai.github.io/snoredex-data/llms.txt): Follow this authoritative guide for public catalogue, evidence, locality, release, physical-printing, migration and provenance semantics.
-- Snoredex Data owns catalogue, evidence, locality, release, physical-printing, relation, migration and provenance truth. This consumer renders the validated pinned snapshot and must not reconstruct or duplicate those meanings.
+- Snoredex Data owns catalogue, evidence, locality, release, physical-printing, relation, migration and provenance truth. A future accepted production integration may render its validated pinned snapshot; this current build must not be read as producer truth, and the consumer must not reconstruct or duplicate those meanings.
 
 ## Optional
 
