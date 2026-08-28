@@ -236,6 +236,47 @@ function findChain(
   return paths.length > 1 ? "ambiguous" : paths[0];
 }
 
+function isCurrentKnownTarget(
+  targetItemClasses: ReadonlyMap<string, "current-known" | "research">,
+  itemId: string,
+): boolean {
+  try {
+    return targetItemClasses.get(itemId) === "current-known";
+  } catch {
+    return false;
+  }
+}
+
+/** Validate producer links that are otherwise skipped when no owned record follows them. */
+function migrationChainLinksAreValid(
+  chain: readonly ReconciliationMigration[],
+  context: ReconciliationContext,
+): boolean {
+  for (let index = 0; index < chain.length; index += 1) {
+    const migration = chain[index];
+    const isFinalStep = index === chain.length - 1;
+    const nextSources = isFinalStep
+      ? undefined
+      : new Set(chain[index + 1].transitions.flatMap((transition) => transitionSources(transition)));
+    for (const transition of migration.transitions) {
+      if (!isFinalStep && transition.toItemIds.some((itemId) => !nextSources?.has(itemId))) {
+        return false;
+      }
+      if (isFinalStep) {
+        if (context.knownTargetItemIds !== undefined
+          && transition.toItemIds.some((itemId) => !context.knownTargetItemIds?.has(itemId))) {
+          return false;
+        }
+        if (context.targetItemClasses !== undefined
+          && transition.toItemIds.some((itemId) => !isCurrentKnownTarget(context.targetItemClasses!, itemId))) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 function expectedForTransition(
   transition: ReconciliationTransition,
 ): ClassifiedRecord["kind"] | undefined {
@@ -413,7 +454,9 @@ export function reconcilePrivateState(
 ): ReconciliationResult {
   if (!isObjectRecord(context)
     || (context.knownTargetItemIds !== undefined && typeof context.knownTargetItemIds.has !== "function")
-    || (context.targetItemClasses !== undefined && typeof context.targetItemClasses[Symbol.iterator] !== "function")) {
+    || (context.targetItemClasses !== undefined
+      && (typeof context.targetItemClasses[Symbol.iterator] !== "function"
+        || typeof context.targetItemClasses.get !== "function"))) {
     return fail("STATE_RECONCILIATION_BLOCKED");
   }
   const validated = validatePrivateState(input);
@@ -424,6 +467,10 @@ export function reconcilePrivateState(
   if (state.catalogueFingerprint === targetFingerprint) {
     if (context.knownTargetItemIds !== undefined
       && state.items.some((item) => !context.knownTargetItemIds?.has(item.itemId))) {
+      return fail("STATE_RECONCILIATION_BLOCKED");
+    }
+    if (context.targetItemClasses !== undefined
+      && state.items.some((item) => !isCurrentKnownTarget(context.targetItemClasses!, item.itemId))) {
       return fail("STATE_RECONCILIATION_BLOCKED");
     }
     const mappedTargetIds = new Set(state.items.map((item) => item.itemId));
@@ -449,13 +496,7 @@ export function reconcilePrivateState(
   const chain = findChain(state.catalogueFingerprint, targetFingerprint, migrations);
   if (chain === "ambiguous") return blockedSource(state, targetFingerprint, "STATE_RECONCILIATION_BLOCKED", "ambiguous-chain");
   if (chain === undefined || chain.length === 0) return unsupportedSource(state, targetFingerprint);
-  if (context.knownTargetItemIds !== undefined) {
-    const finalMigration = chain[chain.length - 1];
-    if (finalMigration.transitions.some((transition) =>
-      transition.toItemIds.some((itemId) => !context.knownTargetItemIds?.has(itemId)))) {
-      return fail("STATE_RECONCILIATION_BLOCKED");
-    }
-  }
+  if (!migrationChainLinksAreValid(chain, context)) return fail("STATE_RECONCILIATION_BLOCKED");
 
   let working = new Map<string, WorkingRecord>(state.items.map((item) => [item.itemId, {
     state: cloneItem(item),

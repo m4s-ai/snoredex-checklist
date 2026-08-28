@@ -237,6 +237,41 @@ test("rejects unknown, future and incomplete chains before mutation", () => {
   });
   assert.deepEqual(hiddenDanglingTarget, { ok: false, error: "STATE_RECONCILIATION_BLOCKED" });
 
+  const researchTarget = reconcilePrivateState(state(oldFingerprint, [
+    { itemId: oldA, status: "have", quantityOwned: 1, quantityOrdered: 0 },
+  ]), targetFingerprint, {
+    migrations: [migration(oldFingerprint, targetFingerprint, [
+      transition(oldA, [targetA], "rekey-1:1", "preserve", "one-to-one-preserve"),
+    ])],
+    knownTargetItemIds: new Set([targetA]),
+    targetItemClasses: new Map([[targetA, "research"]]),
+  });
+  assert.deepEqual(researchTarget, { ok: false, error: "STATE_RECONCILIATION_BLOCKED" });
+
+  const missingTargetClass = reconcilePrivateState(state(oldFingerprint, [
+    { itemId: oldA, status: "have", quantityOwned: 1, quantityOrdered: 0 },
+  ]), targetFingerprint, {
+    migrations: [migration(oldFingerprint, targetFingerprint, [
+      transition(oldA, [targetA], "rekey-1:1", "preserve", "one-to-one-preserve"),
+    ])],
+    knownTargetItemIds: new Set([targetA]),
+    targetItemClasses: new Map(),
+  });
+  assert.deepEqual(missingTargetClass, { ok: false, error: "STATE_RECONCILIATION_BLOCKED" });
+
+  const brokenIntermediateLink = reconcilePrivateState(state(oldFingerprint), targetFingerprint, {
+    migrations: [
+      migration(oldFingerprint, middleFingerprint, [
+        transition(oldA, [oldB], "rekey-1:1", "preserve", "one-to-one-preserve"),
+      ]),
+      migration(middleFingerprint, targetFingerprint, [
+        transition(oldC, [targetA], "rekey-1:1", "preserve", "one-to-one-preserve"),
+      ]),
+    ],
+    knownTargetItemIds: new Set([targetA]),
+  });
+  assert.deepEqual(brokenIntermediateLink, { ok: false, error: "STATE_RECONCILIATION_BLOCKED" });
+
   const mismatchedRetained = reconcilePrivateState(state(oldFingerprint, [
     { itemId: oldA, status: "have", quantityOwned: 1, quantityOrdered: 0 },
   ]), targetFingerprint, {
