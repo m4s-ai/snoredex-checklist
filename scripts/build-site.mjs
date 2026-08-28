@@ -67,6 +67,7 @@ try {
   await cp(resolve(root, "site-src/index.html"), resolve(staging, "index.html"));
   await mkdir(resolve(staging, "collection"), { recursive: true });
   await cp(resolve(root, "site-src/collection/index.html"), resolve(staging, "collection/index.html"));
+  await cp(resolve(root, "site-src/llms.txt"), resolve(staging, "llms.txt"));
   await cp(resolve(root, "site-src/styles.css"), resolve(staging, "styles.css"));
   await cp(resolve(root, "LICENSE.md"), resolve(staging, "LICENSE.md"));
   await cp(resolve(root, "THIRD_PARTY_NOTICES.md"), resolve(staging, "THIRD_PARTY_NOTICES.md"));
