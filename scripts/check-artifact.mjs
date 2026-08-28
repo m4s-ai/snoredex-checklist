@@ -335,15 +335,68 @@ function stripCssComments(value) {
 }
 
 function moduleDependencySources(value) {
+  const source = stripJavaScriptComments(value);
   const sources = [];
   for (const pattern of [
     /\bimport\s*\(\s*(['"])([^'"]+)\1/gu,
     /\bimport\s*(['"])([^'"]+)\1/gu,
     /\b(?:import|export)\s+[\s\S]{0,200}?\bfrom\s*(['"])([^'"]+)\1/gu,
   ]) {
-    for (const match of value.matchAll(pattern)) sources.push(match[2]);
+    for (const match of source.matchAll(pattern)) sources.push(match[2]);
   }
   return sources;
+}
+
+function stripJavaScriptComments(value) {
+  let output = '';
+  let quote;
+  let lineComment = false;
+  let blockComment = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (quote !== undefined) {
+      output += character;
+      if (character === '\\' && index + 1 < value.length) {
+        output += value[index + 1];
+        index += 1;
+      } else if (character === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (lineComment) {
+      if (character === '\n' || character === '\r') {
+        lineComment = false;
+        output += character;
+      }
+      continue;
+    }
+    if (blockComment) {
+      if (character === '*' && value[index + 1] === '/') {
+        blockComment = false;
+        output += ' ';
+        index += 1;
+      } else if (character === '\n' || character === '\r') {
+        output += character;
+      }
+      continue;
+    }
+    if (character === '"' || character === "'" || character === '`') {
+      quote = character;
+      output += character;
+    } else if (character === '/' && value[index + 1] === '/') {
+      lineComment = true;
+      output += ' ';
+      index += 1;
+    } else if (character === '/' && value[index + 1] === '*') {
+      blockComment = true;
+      output += ' ';
+      index += 1;
+    } else {
+      output += character;
+    }
+  }
+  return output;
 }
 
 function hasMetaRefresh(html) {
