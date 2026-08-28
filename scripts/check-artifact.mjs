@@ -23,11 +23,11 @@ function containsPrivateStateSchema(value) {
 
 function decodeHtmlAttribute(value) {
   return value
-    .replace(/&#x([\da-f]+);/giu, (_, hex) => {
+    .replace(/&#x([\da-f]+);?/giu, (_, hex) => {
       const codePoint = Number.parseInt(hex, 16);
       return Number.isSafeInteger(codePoint) && codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : '\ufffd';
     })
-    .replace(/&#(\d+);/gu, (_, decimal) => {
+    .replace(/&#(\d+);?/gu, (_, decimal) => {
       const codePoint = Number.parseInt(decimal, 10);
       return Number.isSafeInteger(codePoint) && codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : '\ufffd';
     })
