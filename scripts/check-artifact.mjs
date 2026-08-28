@@ -775,7 +775,7 @@ function isJavaScriptRegexStart(value, index) {
 
 function isJavaScriptDeclaredIdentifier(value, name, beforeIndex) {
   const prefix = value.slice(0, beforeIndex);
-  const declaration = new RegExp(`(?:^|[;{},])\\s*(?:const|let|var)\\s+${name}\\b`, 'iu');
+  const declaration = new RegExp(`(?:^|[;{},])\\s*(?:const|let|var)\\b[^;]*\\b${name}\\b\\s*(?==|[,;])`, 'iu');
   return declaration.test(prefix);
 }
 

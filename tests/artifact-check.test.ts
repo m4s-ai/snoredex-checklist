@@ -560,6 +560,7 @@ test('keeps classic await and yield identifiers out of regex context', async () 
   for (const [name, source] of [
     ['await', 'const await=4, foo=2; const x=await / foo; import("/outside.js");\n'],
     ['yield', 'const yield=4, foo=2; const x=yield / foo; import("/outside.js");\n'],
+    ['await-comma', 'const foo=2, await=4; const x=await / foo; import("/outside.js");\n'],
   ]) {
     const directory = await mkdtemp(join(tmpdir(), `snoredex-artifact-${name}-identifier-test-`));
     try {
