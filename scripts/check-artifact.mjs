@@ -617,12 +617,38 @@ function isJavaScriptRegexStart(value, index) {
     (value[beforeToken] === '?' && value[beforeToken - 1] === '.')
   )
     return false;
+  if (token[1].toLowerCase() === 'of' && !isJavaScriptForOfKeyword(value, token.index)) return false;
   return (
     /^(?:await|case|default|delete|do|else|extends|in|instanceof|new|of|return|throw|typeof|void|yield)$/iu.test(
       token[1],
     ) ||
     (lineTerminator && /^(?:break|continue|debugger)$/iu.test(token[1]))
   );
+}
+
+function isJavaScriptForOfKeyword(value, tokenStart) {
+  let cursor = tokenStart - 1;
+  while (cursor >= 0 && /\s/u.test(value[cursor])) cursor -= 1;
+  if (cursor < 0 || !/[\w$}\]]/u.test(value[cursor])) return false;
+  let nestedParentheses = 0;
+  let openParenthesis = -1;
+  for (let index = cursor; index >= 0; index -= 1) {
+    if (value[index] === ')') {
+      nestedParentheses += 1;
+    } else if (value[index] === '(') {
+      if (nestedParentheses > 0) nestedParentheses -= 1;
+      else {
+        openParenthesis = index;
+        break;
+      }
+    }
+  }
+  if (openParenthesis < 0) return false;
+  let beforeOpen = openParenthesis - 1;
+  while (beforeOpen >= 0 && /\s/u.test(value[beforeOpen])) beforeOpen -= 1;
+  if (!/(?:^|[^\w$])for(?:\s+await)?\s*$/iu.test(value.slice(0, beforeOpen + 1))) return false;
+  const header = value.slice(openParenthesis + 1, tokenStart);
+  return /\S/u.test(header) && !/[;]/u.test(header);
 }
 
 function skipJavaScriptRegexBackward(value, closeIndex) {
@@ -750,7 +776,10 @@ function isJavaScriptLabeledBlock(value, prefix) {
     if (isJavaScriptLineTerminator(prefix[beforeLabel])) lineTerminator = true;
     beforeLabel -= 1;
   }
-  if (lineTerminator || beforeLabel < 0 || /[;\n]/u.test(prefix[beforeLabel])) return true;
+  if (lineTerminator) {
+    return prefix[beforeLabel] !== '{' || isJavaScriptBlockOpen(value, beforeLabel);
+  }
+  if (beforeLabel < 0 || /[;\n]/u.test(prefix[beforeLabel])) return true;
   return prefix[beforeLabel] === '{' && isJavaScriptBlockOpen(value, beforeLabel);
 }
 
