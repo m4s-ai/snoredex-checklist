@@ -100,6 +100,39 @@ test("counts catalogue targets independently of private holdings", () => {
   assert.equal(result.value.report.accounting.newResearch, 1);
 });
 
+test("counts only targets reachable from the original catalogue", () => {
+  const middleA = "item-00000000-0000-5000-8000-000000000011";
+  const middleNew = "item-00000000-0000-5000-8000-000000000012";
+  const finalA = "item-00000000-0000-5000-8000-000000000013";
+  const finalNew = "item-00000000-0000-5000-8000-000000000014";
+  const result = reconcilePrivateState(state(oldFingerprint, [{
+    itemId: oldA,
+    status: "have",
+    quantityOwned: 1,
+    quantityOrdered: 0,
+  }]), targetFingerprint, {
+    migrations: [
+      migration(oldFingerprint, middleFingerprint, [
+        transition(oldA, [middleA], "rekey-1:1", "preserve", "one-to-one-preserve"),
+      ]),
+      migration(middleFingerprint, targetFingerprint, [
+        transition(middleA, [finalA], "rekey-1:1", "preserve", "one-to-one-preserve"),
+        transition(middleNew, [finalNew], "rekey-1:1", "preserve", "one-to-one-preserve"),
+      ]),
+    ],
+    knownTargetItemIds: new Set([finalA, finalNew, targetC]),
+    targetItemClasses: new Map([
+      [finalA, "current-known"],
+      [finalNew, "current-known"],
+      [targetC, "research"],
+    ]),
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.value.report.accounting.newCurrentKnown, 1);
+  assert.equal(result.value.report.accounting.newResearch, 1);
+});
+
 test("preserves retired records as private orphan candidates", () => {
   const result = reconcilePrivateState(state(oldFingerprint, [{ itemId: oldA, status: "skip", quantityOwned: 0, quantityOrdered: 0 }]), targetFingerprint, {
     migrations: [migration(oldFingerprint, targetFingerprint, [

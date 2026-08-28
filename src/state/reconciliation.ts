@@ -277,6 +277,23 @@ function migrationChainLinksAreValid(
   return true;
 }
 
+/** Keep only targets descended from IDs in the original catalogue. */
+function mappedTargetsForChain(
+  chain: readonly ReconciliationMigration[],
+): ReadonlySet<string> {
+  let reachable = new Set<string>();
+  for (const [stepIndex, migration] of chain.entries()) {
+    const next = new Set<string>();
+    for (const transition of migration.transitions) {
+      const sources = transitionSources(transition);
+      if (stepIndex > 0 && sources.some((sourceId) => !reachable.has(sourceId))) continue;
+      for (const targetId of transition.toItemIds) next.add(targetId);
+    }
+    reachable = next;
+  }
+  return reachable;
+}
+
 function expectedForTransition(
   transition: ReconciliationTransition,
 ): ClassifiedRecord["kind"] | undefined {
@@ -590,8 +607,7 @@ export function reconcilePrivateState(
     working = next;
   }
 
-  const finalMigration = chain[chain.length - 1];
-  const mappedTargetIds = new Set(finalMigration.transitions.flatMap((transition) => transition.toItemIds));
+  const mappedTargetIds = mappedTargetsForChain(chain);
   const report = reportFor(state.catalogueFingerprint, targetFingerprint, chain.length, reports, state.items.length, context.targetItemClasses, mappedTargetIds);
   if (blocked || !report.accounting.conservationSatisfied || conflicted.length > 0 || report.accounting.unresolved > 0) {
     return fail("STATE_RECONCILIATION_BLOCKED", report);
