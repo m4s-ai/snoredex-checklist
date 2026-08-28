@@ -100,6 +100,34 @@ function* htmlTags(html) {
   }
 }
 
+function stripHtmlComments(html) {
+  let output = '';
+  let index = 0;
+  let commentDepth = 0;
+  while (index < html.length) {
+    if (commentDepth === 0) {
+      if (html.startsWith('<!--', index)) {
+        commentDepth = 1;
+        index += 4;
+      } else {
+        output += html[index];
+        index += 1;
+      }
+      continue;
+    }
+    if (html.startsWith('<!--', index)) {
+      commentDepth += 1;
+      index += 4;
+    } else if (html.startsWith('-->', index)) {
+      commentDepth -= 1;
+      index += 3;
+    } else {
+      index += 1;
+    }
+  }
+  return output;
+}
+
 function isArtifactScriptTarget(source, page, relativeFiles) {
   const pathPart = source.split(/[?#]/u, 1)[0];
   let decodedPath;
@@ -281,7 +309,7 @@ try {
     "default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'none'; media-src 'none'; manifest-src 'none'";
   for (const page of ['index.html', 'collection/index.html']) {
     const html = await readFile(join(root, page), 'utf8');
-    const withoutComments = html.replace(/<!--[\s\S]*?(?:-->|$)/gu, '');
+    const withoutComments = stripHtmlComments(html);
     const head = extractHead(withoutComments);
     const hasCspMeta = hasActiveCspMeta(head, csp);
     if (!hasCspMeta) throw new Error(`ARTIFACT_CSP_MISSING: ${page}`);
