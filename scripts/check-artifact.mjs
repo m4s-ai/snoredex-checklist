@@ -437,10 +437,10 @@ function isJavaScriptRegexStart(value, index) {
   let previous = index - 1;
   while (previous >= 0 && /\s/u.test(value[previous])) previous -= 1;
   if (previous < 0 || /[({[=,:;!?&|+\-*%^~<>]/u.test(value[previous])) return true;
-  const keyword = /(?:^|\s)(?:await|case|delete|do|else|in|instanceof|of|return|throw|typeof|void|yield)$/u.exec(
-    value.slice(0, previous + 1),
+  const token = /([a-z_$][\w$]*)$/iu.exec(value.slice(0, previous + 1));
+  return (
+    token !== null && /^(?:await|case|delete|do|else|in|instanceof|of|return|throw|typeof|void|yield)$/iu.test(token[1])
   );
-  return keyword !== null;
 }
 
 function skipJavaScriptRegex(value, index) {
