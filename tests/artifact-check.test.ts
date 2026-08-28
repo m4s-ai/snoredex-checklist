@@ -92,6 +92,25 @@ test('rejects external scripts in single-quoted and unquoted src attributes', as
   }
 });
 
+test('parses active scripts at SVG HTML integration points', async () => {
+  for (const indexScript of [
+    '<svg><title><script src="/outside.js"></script></title></svg>',
+    '<svg><desc><script src="/outside.js"></script></desc></svg>',
+    '<svg><foreignObject><div><script src="/outside.js"></script></div></foreignObject></svg>',
+    '<svg><foreignObject><svg><title><script src="/outside.js"></script></title></svg></foreignObject></svg>',
+  ]) {
+    const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-svg-script-test-'));
+    try {
+      await writeValidArtifact(directory, { indexScript });
+      const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+      assert.notEqual(result.status, 0);
+      assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_EXTERNAL_SCRIPT_PRESENT: index\.html/u);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+});
+
 test('ignores inert script text during inline-script checks', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-inert-script-test-'));
   try {

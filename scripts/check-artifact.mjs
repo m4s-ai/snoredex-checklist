@@ -228,6 +228,24 @@ function stripHtmlComments(html) {
   let rawTextTag;
   let selectDepth = 0;
   let framesetDepth = 0;
+  const namespaceStack = [{ name: '', namespace: 'html', integrationPoint: false }];
+  const svgIntegrationPoints = new Set(['desc', 'foreignobject', 'title']);
+  const htmlVoidElements = new Set([
+    'area',
+    'base',
+    'br',
+    'col',
+    'embed',
+    'hr',
+    'img',
+    'input',
+    'link',
+    'meta',
+    'param',
+    'source',
+    'track',
+    'wbr',
+  ]);
   const rawTextElements = new Set([
     'iframe',
     'noembed',
@@ -240,13 +258,29 @@ function stripHtmlComments(html) {
     'title',
     'xmp',
   ]);
+  const resolveNamespace = (name) => {
+    const parent = namespaceStack.at(-1);
+    if (parent.namespace === 'html' || parent.integrationPoint) return name === 'svg' ? 'svg' : 'html';
+    return 'svg';
+  };
+  const popNamespace = (name) => {
+    for (let stackIndex = namespaceStack.length - 1; stackIndex > 0; stackIndex -= 1) {
+      if (namespaceStack[stackIndex].name === name) {
+        namespaceStack.length = stackIndex;
+        return;
+      }
+    }
+  };
   while (index < html.length) {
     if (commentDepth === 0) {
       if (rawTextTag !== undefined) {
         const rawText = findRawTextEnd(html, index, rawTextTag);
         const contentEnd = rawText.closeStart ?? rawText.end;
         output += html.slice(index, contentEnd).replaceAll('<', '\u0000');
-        if (rawText.closeStart !== undefined) output += html.slice(rawText.closeStart, rawText.end);
+        if (rawText.closeStart !== undefined) {
+          output += html.slice(rawText.closeStart, rawText.end);
+          popNamespace(rawTextTag);
+        }
         index = rawText.end;
         rawTextTag = undefined;
         continue;
@@ -261,10 +295,17 @@ function stripHtmlComments(html) {
         if (tag.name !== undefined) {
           output += tag.raw;
           index = tag.end;
-          if (tag.name === 'select') selectDepth = Math.max(0, selectDepth + (tag.closing ? -1 : 1));
-          if (tag.name === 'frameset') framesetDepth = Math.max(0, framesetDepth + (tag.closing ? -1 : 1));
+          if (tag.closing) {
+            if (tag.name === 'select') selectDepth = Math.max(0, selectDepth - 1);
+            if (tag.name === 'frameset') framesetDepth = Math.max(0, framesetDepth - 1);
+            popNamespace(tag.name);
+            continue;
+          }
+          const namespace = resolveNamespace(tag.name);
+          if (tag.name === 'select') selectDepth += 1;
+          if (tag.name === 'frameset') framesetDepth += 1;
           if (
-            !tag.closing &&
+            namespace === 'html' &&
             rawTextElements.has(tag.name) &&
             !(
               (selectDepth > 0 && tag.name !== 'script') ||
@@ -272,6 +313,14 @@ function stripHtmlComments(html) {
             )
           )
             rawTextTag = tag.name;
+          const selfClosing = /\/\s*>$/u.test(tag.raw);
+          if (!selfClosing && !(namespace === 'html' && htmlVoidElements.has(tag.name))) {
+            namespaceStack.push({
+              name: tag.name,
+              namespace,
+              integrationPoint: namespace === 'svg' && svgIntegrationPoints.has(tag.name),
+            });
+          }
         } else {
           output += html[index];
           index += 1;
