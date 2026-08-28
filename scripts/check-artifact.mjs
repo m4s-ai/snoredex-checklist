@@ -577,7 +577,12 @@ function isJavaScriptRegexStart(value, index) {
   if (token === null) return false;
   let beforeToken = token.index - 1;
   while (beforeToken >= 0 && /\s/u.test(value[beforeToken])) beforeToken -= 1;
-  if (value[beforeToken] === '.' || (value[beforeToken] === '?' && value[beforeToken - 1] === '.')) return false;
+  if (
+    value[beforeToken] === '.' ||
+    value[beforeToken] === '#' ||
+    (value[beforeToken] === '?' && value[beforeToken - 1] === '.')
+  )
+    return false;
   return /^(?:await|case|default|delete|do|else|extends|in|instanceof|new|of|return|throw|typeof|void|yield)$/iu.test(
     token[1],
   );
