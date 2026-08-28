@@ -597,7 +597,12 @@ function isJavaScriptRegexStart(value, index) {
     if (isJavaScriptLineTerminator(value[previous])) lineTerminator = true;
     previous -= 1;
   }
-  if (previous < 0 || /[({[=,:;!?&|+\-*%^~<>]/u.test(value[previous])) return true;
+  if (
+    previous < 0 ||
+    /[({[=,:;!?&|+\-*%^~<>]/u.test(value[previous]) ||
+    (value[previous] === '.' && value.slice(previous - 2, previous + 1) === '...')
+  )
+    return true;
   if (value[previous] === ')') return isControlConditionEnd(value, previous);
   if (value[previous] === '}') return isJavaScriptBlockEnd(value, previous);
   const token = /([a-z_$][\w$]*)$/iu.exec(value.slice(0, previous + 1));
