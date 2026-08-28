@@ -1,8 +1,13 @@
 <!-- doc: role=security and privacy policy; stage=stable -->
+
 # Security and privacy
 
 Supported-release and deployment status lives in the owning issues and release records. These
 security and privacy boundaries apply to every prototype, fixture, and release.
+
+Before the first production deployment, no production version is supported. Once a release record
+exists, the supported version is the currently deployed v1 revision named there; no unsupported
+response-time promise is made.
 
 ## Report a vulnerability
 
@@ -25,6 +30,9 @@ Catalogue corrections that are not security-sensitive belong in the producer iss
   untrusted objects.
 - Preserve readable state and offer backup before reset, replace, import, or migration.
 - Use synthetic data in tests, issues, screenshots, and bug reports.
+- Real `*.snoredex-private.json` exports must remain outside this repository and routine agent
+  workspaces. Never attach, paste, upload, index, or ask an agent to inspect one in a public
+  channel; an authorized narrow exception still treats every byte as untrusted data.
 
 Security fixes that affect both repositories follow the issue protocol privately until coordinated
 disclosure is safe.

@@ -8,14 +8,24 @@ import test from 'node:test';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const checker = resolve(root, 'scripts/check-artifact.mjs');
+const csp =
+  "default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'none'; media-src 'none'; manifest-src 'none'";
 
 test('rejects a renamed private-state JSON export', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-test-'));
   try {
     await mkdir(join(directory, 'collection'), { recursive: true });
     await Promise.all([
-      writeFile(join(directory, 'index.html'), ''),
-      writeFile(join(directory, 'collection/index.html'), ''),
+      writeFile(
+        join(directory, 'index.html'),
+        `<meta http-equiv="Content-Security-Policy" content="${csp}"><script src="theme.js"></script>`,
+      ),
+      writeFile(
+        join(directory, 'collection/index.html'),
+        `<meta http-equiv="Content-Security-Policy" content="${csp}"><script src="../theme.js"></script>`,
+      ),
+      writeFile(join(directory, 'theme.js'), ''),
+      writeFile(join(directory, 'collection/theme.js'), ''),
       writeFile(join(directory, 'styles.css'), ''),
       writeFile(join(directory, 'llms.txt'), ''),
       writeFile(join(directory, 'LICENSE.md'), ''),

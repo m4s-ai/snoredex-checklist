@@ -6,6 +6,8 @@ const root = resolve(process.cwd(), process.argv[2] ?? 'dist/site');
 const required = [
   'index.html',
   'collection/index.html',
+  'theme.js',
+  'collection/theme.js',
   'styles.css',
   'llms.txt',
   'LICENSE.md',
@@ -63,6 +65,21 @@ try {
   }
 
   const forbiddenContent = /\.snoredex-private\.json|synthetic-secret|PRIVATE-NOTE-DO-NOT-LOG/iu;
+  const csp =
+    "default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'none'; media-src 'none'; manifest-src 'none'";
+  for (const page of ['index.html', 'collection/index.html']) {
+    const html = await readFile(join(root, page), 'utf8');
+    if (!html.includes('http-equiv="Content-Security-Policy"') || !html.includes(`content="${csp}"`))
+      throw new Error(`ARTIFACT_CSP_MISSING: ${page}`);
+    if (/<script(?![^>]*\bsrc=)[^>]*>/iu.test(html)) throw new Error(`ARTIFACT_INLINE_SCRIPT_PRESENT: ${page}`);
+    if (/\b(?:unsafe-inline|unsafe-eval)\b/iu.test(html)) throw new Error(`ARTIFACT_CSP_UNSAFE_DIRECTIVE: ${page}`);
+    if (/\son[a-z]+\s*=/iu.test(html)) throw new Error(`ARTIFACT_INLINE_HANDLER_PRESENT: ${page}`);
+    for (const match of html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"[^>]*>/giu)) {
+      const source = match[1];
+      if (!source || source.startsWith('/') || /^[a-z][a-z\d+.-]*:/iu.test(source) || source.includes('\\'))
+        throw new Error(`ARTIFACT_EXTERNAL_SCRIPT_PRESENT: ${page}`);
+    }
+  }
   for (const file of allFiles) {
     const bytes = await readFile(file);
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);

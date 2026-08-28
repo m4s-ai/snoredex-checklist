@@ -120,8 +120,10 @@ try {
     throw new Error('site snapshot failed browser boundary validation');
 
   await cp(resolve(root, 'site-src/index.html'), resolve(staging, 'index.html'));
+  await cp(resolve(root, 'site-src/theme.js'), resolve(staging, 'theme.js'));
   await mkdir(resolve(staging, 'collection'), { recursive: true });
   await cp(resolve(root, 'site-src/collection/index.html'), resolve(staging, 'collection/index.html'));
+  await cp(resolve(root, 'site-src/theme.js'), resolve(staging, 'collection/theme.js'));
   await cp(resolve(root, 'site-src/llms.txt'), resolve(staging, 'llms.txt'));
   await cp(resolve(root, 'site-src/styles.css'), resolve(staging, 'styles.css'));
   await cp(resolve(root, 'LICENSE.md'), resolve(staging, 'LICENSE.md'));

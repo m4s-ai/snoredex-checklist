@@ -26,7 +26,7 @@
     "format:check": "node scripts/format-changed.mjs --check",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:unit && npm run test:contract",
-    "test:unit": "node --test tests/state-domain.test.ts tests/state-storage.test.ts tests/state-backup.test.ts tests/state-reconciliation.test.ts tests/site-query.test.ts tests/site-filter.test.ts tests/site-catalogue.test.ts tests/site-item-presentation.test.ts tests/site-assets.test.ts tests/site-private-state.test.ts tests/site-collection-state.test.ts tests/llms-guide.test.ts tests/build-site.test.ts tests/artifact-check.test.ts",
+    "test:unit": "node --test tests/state-domain.test.ts tests/state-storage.test.ts tests/state-backup.test.ts tests/state-reconciliation.test.ts tests/site-query.test.ts tests/site-filter.test.ts tests/site-catalogue.test.ts tests/site-item-presentation.test.ts tests/site-assets.test.ts tests/site-private-state.test.ts tests/site-collection-state.test.ts tests/llms-guide.test.ts tests/build-site.test.ts tests/artifact-check.test.ts tests/security-boundaries.test.ts",
     "test:contract": "node --test tests/catalogue-validator.test.ts tests/catalogue-sync.test.ts",
     "smoke": "node tests/toolchain-smoke.ts",
     "test:browser": "node tests/browser-smoke.mjs",

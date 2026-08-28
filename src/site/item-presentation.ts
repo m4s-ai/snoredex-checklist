@@ -1,9 +1,9 @@
-import type { SnapshotItem } from "./catalogue.js";
+import type { SnapshotItem } from './catalogue.js';
 
 /** Keep presentation text readable without turning producer labels into identities. */
 export function presentText(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.normalize("NFC").trim().replace(/\s+/gu, " ");
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.normalize('NFC').trim().replace(/\s+/gu, ' ');
   return normalized || undefined;
 }
 
@@ -15,27 +15,27 @@ export function collectorNumberLabel(item: SnapshotItem): string | undefined {
 }
 
 export function imageScopeLabel(item: SnapshotItem, placeholder: boolean): string {
-  if (item.imageScope === "exact-printing") {
-    return placeholder ? "Exact-printing placeholder" : "Exact printing image";
+  if (item.imageScope === 'exact-printing') {
+    return placeholder ? 'Exact-printing placeholder' : 'Exact printing image';
   }
-  if (item.imageScope === "card-release") {
-    return placeholder ? "Card-release placeholder (broader release)" : "Card-release image (broader release)";
+  if (item.imageScope === 'card-release') {
+    return placeholder ? 'Card-release placeholder (broader release)' : 'Card-release image (broader release)';
   }
-  return "Authored placeholder (image scope unknown)";
+  return 'Authored placeholder (image scope unknown)';
 }
 
 export function itemKindLabel(item: SnapshotItem): string {
-  if (item.itemKind === "verified-printing") return "Verified printing";
-  if (item.itemKind === "finish-candidate") return "Finish candidate";
-  if (item.itemKind === "research-placeholder") return "Research placeholder";
-  return "Catalogue item";
+  if (item.itemKind === 'verified-printing') return 'Verified printing';
+  if (item.itemKind === 'finish-candidate') return 'Finish candidate';
+  if (item.itemKind === 'research-placeholder') return 'Research placeholder';
+  return 'Catalogue item';
 }
 
 export function itemCueLabel(item: SnapshotItem): string {
-  if (item.progressClass === "research") {
+  if (item.progressClass === 'research') {
     return `Research · ${itemKindLabel(item)} · read-only`;
   }
-  return item.itemKind === "verified-printing" ? "Current-known · verified printing" : "Current-known";
+  return item.itemKind === 'verified-printing' ? 'Current-known · verified printing' : 'Current-known';
 }
 
 export function evidenceCueLabel(item: SnapshotItem): string | undefined {
@@ -44,10 +44,13 @@ export function evidenceCueLabel(item: SnapshotItem): string | undefined {
 }
 
 export function safeExternalUrl(value: unknown): string | undefined {
-  if (typeof value !== "string" || !value.trim()) return undefined;
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  if (/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(value)) return undefined;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:" ? url.href : undefined;
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined;
+    if (!url.hostname || url.username || url.password) return undefined;
+    return url.href;
   } catch {
     return undefined;
   }
