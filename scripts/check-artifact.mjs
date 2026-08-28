@@ -104,6 +104,7 @@ function parseHtmlTagAt(html, start) {
         cursor += 1;
         continue;
       }
+      if (cursor === start + 1 && !/^[a-z]$/iu.test(character)) return { end: cursor };
       if (!tagNameValid) {
         if (/^[a-z]$/iu.test(character)) tagNameValid = true;
       } else if (/^[\w:-]$/u.test(character)) {
@@ -615,6 +616,7 @@ function isJavaScriptBlockEnd(value, closeIndex) {
     if (value[before] === ')') return true;
     const prefix = value.slice(0, before + 1);
     if (/(?:^|\s)(?:catch|do|else|finally|try)\s*$/iu.test(prefix)) return true;
+    if (/(?:^|[;\n])\s*[a-z_$][\w$]*\s*:\s*$/iu.test(prefix)) return true;
     const classToken = /\bclass(?:\s+[a-z_$][\w$]*)?(?:\s+extends[\s\S]*)?\s*$/iu.exec(prefix);
     if (classToken === null) return false;
     let beforeClass = classToken.index - 1;

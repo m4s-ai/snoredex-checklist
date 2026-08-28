@@ -166,6 +166,7 @@ test('rejects meta-refresh navigations regardless of CSP ordering', async () => 
     `<head><!-- --!><meta http-equiv="refresh" content="0; url=https://evil.invalid/"><!-- --><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     `<head><!--><meta http-equiv="refresh" content="0; url=https://evil.invalid/"><!-- --><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     `<head><!---><meta http-equiv="refresh" content="0; url=https://evil.invalid/"><!-- --><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
+    `<head><meta http-equiv="Content-Security-Policy" content="${csp}"></head><body><"<meta http-equiv="refresh" content="0;url=https://evil.invalid">`,
     `<head><meta http-equiv="Content-Security-Policy" content="${csp}"></head><body><script src="theme.js"><!--</script><meta http-equiv="refresh" content="0;url=https://evil.invalid"><!-- --></body>`,
     `<head><meta http-equiv="Content-Security-Policy" content="${csp}"></head><body><script src="theme.js"><!--<script></script data-x="</script>"><meta http-equiv="refresh" content="0;url=https://evil.invalid"><!-- --></body>`,
     `<head><meta http-equiv="Content-Security-Policy" content="${csp}"></head><body><script src="theme.js"></script data-x=\"> <!--\"><meta http-equiv="refresh" content="0;url=https://evil.invalid"><!-- --></body>`,
@@ -314,6 +315,7 @@ test('rejects external JavaScript module dependencies', async () => {
     'class X { #new=2; f(foo){ return this.#new / foo; } } import("/outside.js");\n',
     'if (true) {} /[/*]/.test("*"); import("/outside.js");\n',
     'const foo=1; const C = class {} / foo; import("/outside.js");\n',
+    'label: {} /[/*]/.test("*"); import("/outside.js");\n',
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-module-test-'));
     try {
