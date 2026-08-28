@@ -437,10 +437,28 @@ function isJavaScriptRegexStart(value, index) {
   let previous = index - 1;
   while (previous >= 0 && /\s/u.test(value[previous])) previous -= 1;
   if (previous < 0 || /[({[=,:;!?&|+\-*%^~<>]/u.test(value[previous])) return true;
+  if (value[previous] === ')') return isControlConditionEnd(value, previous);
   const token = /([a-z_$][\w$]*)$/iu.exec(value.slice(0, previous + 1));
   return (
     token !== null && /^(?:await|case|delete|do|else|in|instanceof|of|return|throw|typeof|void|yield)$/iu.test(token[1])
   );
+}
+
+function isControlConditionEnd(value, closeIndex) {
+  let depth = 0;
+  for (let index = closeIndex; index >= 0; index -= 1) {
+    if (value[index] === ')') depth += 1;
+    else if (value[index] === '(') {
+      depth -= 1;
+      if (depth === 0) {
+        let before = index - 1;
+        while (before >= 0 && /\s/u.test(value[before])) before -= 1;
+        const token = /([a-z_$][\w$]*)$/iu.exec(value.slice(0, before + 1));
+        return token !== null && /^(?:catch|for|if|switch|while|with)$/iu.test(token[1]);
+      }
+    }
+  }
+  return false;
 }
 
 function skipJavaScriptRegex(value, index) {
