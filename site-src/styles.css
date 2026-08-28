@@ -385,6 +385,10 @@ select {
 }
 .item-local-name {
   color: var(--muted);
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .item-muted,
 .item-cue,
