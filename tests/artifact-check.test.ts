@@ -556,6 +556,50 @@ test('does not extend labeled jumps across a line terminator', async () => {
   }
 });
 
+test('keeps classic await and yield identifiers out of regex context', async () => {
+  for (const [name, source] of [
+    ['await', 'const await=4, foo=2; const x=await / foo; import("/outside.js");\n'],
+    ['yield', 'const yield=4, foo=2; const x=yield / foo; import("/outside.js");\n'],
+  ]) {
+    const directory = await mkdtemp(join(tmpdir(), `snoredex-artifact-${name}-identifier-test-`));
+    try {
+      await writeValidArtifact(directory);
+      await writeFile(join(directory, 'theme.js'), source);
+      const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+      assert.notEqual(result.status, 0);
+      assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_EXTERNAL_MODULE_PRESENT: theme\.js/u);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test('recognizes modified methods after semicolonless class fields', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-modified-class-method-test-'));
+  try {
+    await writeValidArtifact(directory);
+    await writeFile(join(directory, 'theme.js'), 'class C { x=1\nstatic import() {} }\n');
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.equal(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /artifact ok:/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('recognizes generator methods after semicolonless class fields', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-generator-class-method-test-'));
+  try {
+    await writeValidArtifact(directory);
+    await writeFile(join(directory, 'theme.js'), 'class C { x=1\n*import() {} }\n');
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.equal(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /artifact ok:/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('treats static initialization bodies as statement blocks', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-static-block-test-'));
   try {

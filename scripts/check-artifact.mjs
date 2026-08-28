@@ -691,14 +691,20 @@ function isJavaScriptMethodNameContext(value, tokenStart) {
   for (;;) {
     if (previous >= 0 && value[previous] === '*') {
       previous -= 1;
-      while (previous >= 0 && /\s/u.test(value[previous])) previous -= 1;
+      while (previous >= 0 && /\s/u.test(value[previous])) {
+        if (isJavaScriptLineTerminator(value[previous])) lineTerminatorBefore = true;
+        previous -= 1;
+      }
       continue;
     }
     const token = /([a-z_$][\w$]*)$/iu.exec(value.slice(0, previous + 1));
     if (token === null) break;
     if (!/^(?:accessor|async|get|set|static)$/iu.test(token[1])) break;
     previous = token.index - 1;
-    while (previous >= 0 && /\s/u.test(value[previous])) previous -= 1;
+    while (previous >= 0 && /\s/u.test(value[previous])) {
+      if (isJavaScriptLineTerminator(value[previous])) lineTerminatorBefore = true;
+      previous -= 1;
+    }
   }
   if (previous < 0 || value[previous] === '{') {
     if (previous < 0) return false;
@@ -756,6 +762,8 @@ function isJavaScriptRegexStart(value, index) {
   )
     return false;
   if (token[1].toLowerCase() === 'of' && !isJavaScriptForOfKeyword(value, token.index)) return false;
+  if (/^(?:await|yield)$/iu.test(token[1]) && isJavaScriptDeclaredIdentifier(value, token[1], token.index))
+    return false;
   return (
     /^(?:await|case|default|delete|do|else|extends|in|instanceof|new|of|return|throw|typeof|void|yield)$/iu.test(
       token[1],
@@ -763,6 +771,12 @@ function isJavaScriptRegexStart(value, index) {
     (lineTerminator &&
       (/^(?:break|continue|debugger)$/iu.test(token[1]) || isJavaScriptLabeledJump(value, token.index)))
   );
+}
+
+function isJavaScriptDeclaredIdentifier(value, name, beforeIndex) {
+  const prefix = value.slice(0, beforeIndex);
+  const declaration = new RegExp(`(?:^|[;{},])\\s*(?:const|let|var)\\s+${name}\\b`, 'iu');
+  return declaration.test(prefix);
 }
 
 function isJavaScriptLabeledJump(value, labelStart) {
