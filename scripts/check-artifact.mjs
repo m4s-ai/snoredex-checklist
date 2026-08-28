@@ -261,7 +261,11 @@ function stripHtmlComments(html) {
           output += tag.raw;
           index = tag.end;
           if (tag.name === 'select') selectDepth = Math.max(0, selectDepth + (tag.closing ? -1 : 1));
-          if (!tag.closing && rawTextElements.has(tag.name) && !(tag.name === 'plaintext' && selectDepth > 0))
+          if (
+            !tag.closing &&
+            rawTextElements.has(tag.name) &&
+            !(selectDepth > 0 && ['plaintext', 'style'].includes(tag.name))
+          )
             rawTextTag = tag.name;
         } else {
           output += html[index];
@@ -602,7 +606,7 @@ function isJavaScriptRegexStart(value, index) {
     /^(?:await|case|default|delete|do|else|extends|in|instanceof|new|of|return|throw|typeof|void|yield)$/iu.test(
       token[1],
     ) ||
-    (lineTerminator && /^(?:break|continue)$/iu.test(token[1]))
+    (lineTerminator && /^(?:break|continue|debugger)$/iu.test(token[1]))
   );
 }
 

@@ -341,6 +341,7 @@ test('rejects external JavaScript module dependencies', async () => {
     'while(false){continue\u2029/[/*]/.test("*");} import("/outside.js");\n',
     '// comment\u2028import("/outside.js");\n',
     '// comment\u2029import("/outside.js");\n',
+    'debugger\n/[/*]/.test("*"); import("/outside.js");\n',
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-module-test-'));
     try {
@@ -360,6 +361,20 @@ test('preserves script-supporting elements after invalid plaintext in select con
   try {
     await writeValidArtifact(directory, {
       indexScript: '<select><plaintext><script src="/outside.js"></script>',
+    });
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_EXTERNAL_SCRIPT_PRESENT: index\.html/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('preserves script-supporting elements after invalid style in select context', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-select-style-test-'));
+  try {
+    await writeValidArtifact(directory, {
+      indexScript: '<select><style><script src="/outside.js"></script>',
     });
     const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
     assert.notEqual(result.status, 0);
