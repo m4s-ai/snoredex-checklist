@@ -13,6 +13,12 @@ const required = [
   'provenance.json',
 ];
 
+function containsPrivateStateSchema(value) {
+  if (!value || typeof value !== 'object') return false;
+  if (!Array.isArray(value) && value.schema === 'snoredex-collection-state') return true;
+  return Object.values(value).some((entry) => containsPrivateStateSchema(entry));
+}
+
 async function filesIn(directory) {
   const output = [];
   async function visit(current) {
@@ -61,6 +67,15 @@ try {
     const bytes = await readFile(file);
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     if (forbiddenContent.test(text)) throw new Error(`ARTIFACT_PRIVATE_CONTENT_PRESENT: ${relative(root, file)}`);
+    if (file.toLowerCase().endsWith('.json')) {
+      try {
+        if (containsPrivateStateSchema(JSON.parse(text))) {
+          throw new Error(`ARTIFACT_PRIVATE_STATE_SCHEMA_PRESENT: ${relative(root, file)}`);
+        }
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('ARTIFACT_PRIVATE_STATE_SCHEMA_PRESENT:')) throw error;
+      }
+    }
   }
   console.log(
     `artifact ok: ${relativeFiles.length} files; app ${provenance.appRevision}; catalogue ${catalogue.catalogueFingerprint}`,
