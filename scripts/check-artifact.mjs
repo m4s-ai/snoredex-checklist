@@ -37,10 +37,75 @@ function decodeHtmlAttribute(value) {
     });
 }
 
-function readAttribute(tag, name) {
+function readAttributeLegacy(tag, name) {
   const pattern = new RegExp(`(?:^|[\\t\\n\\f\\r /])${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>\`]+))`, 'iu');
   const match = pattern.exec(tag);
   return match?.[1] ?? match?.[2] ?? match?.[3];
+}
+
+function readAttribute(tag, name) {
+  const target = name.toLowerCase();
+  let index = 1;
+  while (index < tag.length && !/[\t\n\f\r />]/u.test(tag[index])) index += 1;
+  while (index < tag.length) {
+    while (index < tag.length && /[\t\n\f\r /]/u.test(tag[index])) index += 1;
+    if (index >= tag.length || tag[index] === '>') break;
+    const start = index;
+    while (index < tag.length && !/[\t\n\f\r />=]/u.test(tag[index])) index += 1;
+    const attributeName = tag.slice(start, index).toLowerCase();
+    while (index < tag.length && /[\t\n\f\r ]/u.test(tag[index])) index += 1;
+    let value;
+    if (tag[index] === '=') {
+      index += 1;
+      while (index < tag.length && /[\t\n\f\r ]/u.test(tag[index])) index += 1;
+      const quote = tag[index] === '"' || tag[index] === "'" ? tag[index++] : undefined;
+      const valueStart = index;
+      if (quote !== undefined) {
+        while (index < tag.length && tag[index] !== quote) index += 1;
+      } else {
+        while (index < tag.length && !/[\t\n\f\r >]/u.test(tag[index])) index += 1;
+      }
+      value = tag.slice(valueStart, index);
+      if (quote !== undefined && tag[index] === quote) index += 1;
+    }
+    if (attributeName === target) return value;
+    if (index === start) index += 1;
+  }
+  return undefined;
+}
+
+function extractHead(html) {
+  const rawTextElements = new Set(['noscript', 'script', 'style', 'textarea', 'title']);
+  const inertElements = new Set(['template']);
+  let rawTextTag;
+  let inertTag;
+  let headStart = -1;
+  for (const match of html.matchAll(/<(?:(\/)\s*)?([a-z][\w:-]*)(?:\s[^>]*)?>/giu)) {
+    const closing = match[1] !== undefined;
+    const name = match[2].toLowerCase();
+    if (rawTextTag !== undefined) {
+      if (closing && name === rawTextTag) rawTextTag = undefined;
+      continue;
+    }
+    if (inertTag !== undefined) {
+      if (closing && name === inertTag) inertTag = undefined;
+      continue;
+    }
+    if (closing) {
+      if (headStart >= 0 && name === 'head') return html.slice(headStart, match.index);
+      continue;
+    }
+    if (rawTextElements.has(name)) {
+      rawTextTag = name;
+      continue;
+    }
+    if (inertElements.has(name)) {
+      inertTag = name;
+      continue;
+    }
+    if (headStart < 0 && name === 'head') headStart = match.index + match[0].length;
+  }
+  return '';
 }
 
 function hasActiveCspMeta(head, expectedCsp) {
@@ -137,7 +202,7 @@ try {
   for (const page of ['index.html', 'collection/index.html']) {
     const html = await readFile(join(root, page), 'utf8');
     const withoutComments = html.replace(/<!--[\s\S]*?(?:-->|$)/gu, '');
-    const head = /<head\b[^>]*>([\s\S]*?)<\/head\s*>/iu.exec(withoutComments)?.[1] ?? '';
+    const head = extractHead(withoutComments);
     const hasCspMeta = hasActiveCspMeta(head, csp);
     if (!hasCspMeta) throw new Error(`ARTIFACT_CSP_MISSING: ${page}`);
     if (/\b(?:unsafe-inline|unsafe-eval)\b/iu.test(html)) throw new Error(`ARTIFACT_CSP_UNSAFE_DIRECTIVE: ${page}`);
@@ -162,14 +227,12 @@ try {
     const bytes = await readFile(file);
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     if (forbiddenContent.test(text)) throw new Error(`ARTIFACT_PRIVATE_CONTENT_PRESENT: ${relative(root, file)}`);
-    if (file.toLowerCase().endsWith('.json')) {
-      try {
-        if (containsPrivateStateSchema(JSON.parse(text))) {
-          throw new Error(`ARTIFACT_PRIVATE_STATE_SCHEMA_PRESENT: ${relative(root, file)}`);
-        }
-      } catch (error) {
-        if (error instanceof Error && error.message.startsWith('ARTIFACT_PRIVATE_STATE_SCHEMA_PRESENT:')) throw error;
+    try {
+      if (containsPrivateStateSchema(JSON.parse(text))) {
+        throw new Error(`ARTIFACT_PRIVATE_STATE_SCHEMA_PRESENT: ${relative(root, file)}`);
       }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('ARTIFACT_PRIVATE_STATE_SCHEMA_PRESENT:')) throw error;
     }
   }
   console.log(

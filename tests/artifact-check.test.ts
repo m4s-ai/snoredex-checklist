@@ -54,7 +54,7 @@ test('rejects a renamed private-state JSON export', async () => {
   try {
     await writeValidArtifact(directory);
     await writeFile(
-      join(directory, 'leak.json'),
+      join(directory, 'renamed-export.txt'),
       JSON.stringify({
         schema: 'snoredex-collection-state',
         schemaVersion: '1.0.0',
@@ -65,7 +65,7 @@ test('rejects a renamed private-state JSON export', async () => {
     );
     const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
     assert.notEqual(result.status, 0);
-    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_PRIVATE_STATE_SCHEMA_PRESENT: leak\.json/u);
+    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_PRIVATE_STATE_SCHEMA_PRESENT: renamed-export\.txt/u);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -125,6 +125,7 @@ test('requires an active first-applicable CSP before controlled resources', asyn
     `<head><noscript><meta http-equiv="Content-Security-Policy" content="${csp}"></noscript></head>`,
     `<head><noscript /><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     `<head><p></p><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
+    `<script src="theme.js"><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></script>`,
     `<head><script src="theme.js"></script><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-csp-order-test-'));
@@ -136,6 +137,20 @@ test('requires an active first-applicable CSP before controlled resources', asyn
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  }
+});
+
+test('parses CSP attributes at actual tag boundaries', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-csp-attributes-test-'));
+  try {
+    await writeValidArtifact(directory, {
+      indexMeta: `<head><meta data-x=' http-equiv=Content-Security-Policy content="${csp}"'></head>`,
+    });
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_CSP_MISSING: index\.html/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });
 
