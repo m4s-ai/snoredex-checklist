@@ -91,6 +91,11 @@ textarea:focus-visible {
   flex-wrap: wrap;
   padding-block: 2rem;
 }
+.site-footer > span,
+.breadcrumb > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .brand {
   color: var(--ink);
   font-weight: 700;
