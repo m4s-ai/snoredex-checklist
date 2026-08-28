@@ -123,6 +123,7 @@ test('requires an active first-applicable CSP before controlled resources', asyn
   for (const indexMeta of [
     `<head><template><meta http-equiv="Content-Security-Policy" content="${csp}"></template></head>`,
     `<head><noscript><meta http-equiv="Content-Security-Policy" content="${csp}"></noscript></head>`,
+    `<head><noscript /><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     `<head><script src="theme.js"></script><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-csp-order-test-'));

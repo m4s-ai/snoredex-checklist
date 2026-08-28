@@ -80,7 +80,7 @@ function hasActiveCspMeta(head, expectedCsp) {
     ) {
       cspSeen = true;
     }
-    if (!voidElements.has(name) && !/\/\s*>$/u.test(tag)) stack.push(name);
+    if (!voidElements.has(name)) stack.push(name);
   }
   return cspSeen && !controlledResourceBeforeCsp;
 }
