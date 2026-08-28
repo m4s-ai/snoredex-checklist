@@ -762,7 +762,11 @@ function isJavaScriptRegexStart(value, index) {
   )
     return false;
   if (token[1].toLowerCase() === 'of' && !isJavaScriptForOfKeyword(value, token.index)) return false;
-  if (/^(?:await|yield)$/iu.test(token[1]) && isJavaScriptDeclaredIdentifier(value, token[1], token.index))
+  if (
+    /^(?:await|yield)$/iu.test(token[1]) &&
+    (isJavaScriptDeclaredIdentifier(value, token[1], token.index) ||
+      isJavaScriptParameterIdentifier(value, token[1], token.index))
+  )
     return false;
   return (
     /^(?:await|case|default|delete|do|else|extends|in|instanceof|new|of|return|throw|typeof|void|yield)$/iu.test(
@@ -775,14 +779,24 @@ function isJavaScriptRegexStart(value, index) {
 
 function isJavaScriptDeclaredIdentifier(value, name, beforeIndex) {
   const prefix = value.slice(0, beforeIndex);
-  const declaration = new RegExp(`(?:^|[;{},])\\s*(?:const|let|var)\\b[^;]*\\b${name}\\b\\s*(?==|[,;}])`, 'iu');
-  if (!declaration.test(prefix)) return false;
-  if (value[beforeIndex + name.length] !== '}') return true;
-  const brace = prefix.lastIndexOf('{');
-  if (brace < 0) return false;
-  let beforeBrace = brace - 1;
-  while (beforeBrace >= 0 && /\\s/u.test(prefix[beforeBrace])) beforeBrace -= 1;
-  return value[beforeBrace] === ',' || /(?:^|\\b(?:const|let|var))\\s*$/iu.test(prefix.slice(0, brace));
+  const declaration = new RegExp(`(?:^|[;{},])\\s*(?:const|let|var)\\b[^;]*\\b${name}\\b\\s*(?==|[,;}])`, 'giu');
+  for (const match of prefix.matchAll(declaration)) {
+    const nameOffset = match[0].search(new RegExp(`\\b${name}\\b`, 'iu'));
+    const bindingIndex = (match.index ?? 0) + nameOffset;
+    if (value[bindingIndex + name.length] !== '}') return true;
+    const brace = prefix.lastIndexOf('{', bindingIndex);
+    if (brace < 0) continue;
+    let beforeBrace = brace - 1;
+    while (beforeBrace >= 0 && /\s/u.test(prefix[beforeBrace])) beforeBrace -= 1;
+    if (value[beforeBrace] === ',' || /(?:^|\b(?:const|let|var))\s*$/iu.test(prefix.slice(0, brace))) return true;
+  }
+  return false;
+}
+
+function isJavaScriptParameterIdentifier(value, name, beforeIndex) {
+  const prefix = value.slice(0, beforeIndex);
+  const parameter = new RegExp(`(?:function\\b[^{}()]*\\(|catch\\s*\\()[^{};]*\\b${name}\\b\\s*[),]`, 'iu');
+  return parameter.test(prefix);
 }
 
 function isJavaScriptLabeledJump(value, labelStart) {
