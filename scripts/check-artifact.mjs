@@ -106,6 +106,7 @@ function extractHead(html) {
   let rawTextTag;
   let inertTag;
   let headStart = -1;
+  let bodyStarted = false;
   for (const tag of htmlTags(html)) {
     const { closing, name } = tag;
     if (rawTextTag !== undefined) {
@@ -116,6 +117,12 @@ function extractHead(html) {
       if (closing && name === inertTag) inertTag = undefined;
       continue;
     }
+    if (!closing && name === 'body') {
+      if (headStart >= 0) return html.slice(headStart, tag.index);
+      bodyStarted = true;
+      continue;
+    }
+    if (bodyStarted) continue;
     if (closing) {
       if (headStart >= 0 && name === 'head') return html.slice(headStart, tag.index);
       continue;
