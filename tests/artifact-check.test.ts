@@ -160,6 +160,7 @@ test('rejects meta-refresh navigations regardless of CSP ordering', async () => 
     `<head><meta http-equiv="Content-Security-Policy" content="${csp}"><meta http-equiv="refresh" content="0; url=https://evil.invalid/"></head>`,
     `<head><meta http-equiv="re&#102resh" content="0; url=https://evil.invalid/"><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     `<head><!-- <!-- --> <meta http-equiv="refresh" content="0; url=https://evil.invalid/"><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
+    `<head><!-- --!><meta http-equiv="refresh" content="0; url=https://evil.invalid/"><!-- --><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-meta-refresh-test-'));
     try {

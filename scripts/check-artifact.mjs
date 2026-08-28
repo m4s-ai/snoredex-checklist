@@ -115,7 +115,10 @@ function stripHtmlComments(html) {
       }
       continue;
     }
-    if (html.startsWith('-->', index)) {
+    if (html.startsWith('--!>', index)) {
+      commentDepth -= 1;
+      index += 4;
+    } else if (html.startsWith('-->', index)) {
       commentDepth -= 1;
       index += 3;
     } else {
