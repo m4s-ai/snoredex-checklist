@@ -199,6 +199,11 @@ function extractHead(html) {
       previousEnd = tag.index + tag.raw.length;
       continue;
     }
+    if (closing && headStart < 0 && !bodyStarted) {
+      bodyStarted = true;
+      previousEnd = tag.index + tag.raw.length;
+      continue;
+    }
     if (bodyStarted) {
       previousEnd = tag.index + tag.raw.length;
       continue;
