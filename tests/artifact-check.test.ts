@@ -136,6 +136,7 @@ test('requires an active first-applicable CSP before controlled resources', asyn
     `<template><xmp></template><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></xmp>`,
     `<template><script src="x"></template></script><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></template>`,
     `<template><script src="theme.js"><!--<script src="theme.js"></script></template><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></script></template>`,
+    `<template><script src="theme.js"><!--<script>--></script></template><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></script></template>`,
     `<script src="theme.js"></script><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     `<meta charset="utf-8">text<meta http-equiv="Content-Security-Policy" content="${csp}"><body>`,
     `<head>text<meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
@@ -202,6 +203,16 @@ test('keeps stylesheet links and CSS imports inside the artifact', async () => {
       indexMeta: `<head><meta http-equiv="Content-Security-Policy" content="${csp}"><link rel="stylesheet" href="styles.css"></head>`,
       css: '@import url("../../outside.css");',
       error: /ARTIFACT_EXTERNAL_CSS_IMPORT_PRESENT: styles\.css/u,
+    },
+    {
+      indexMeta: `<head><meta http-equiv="Content-Security-Policy" content="${csp}"><link rel="stylesheet" href="styles.css"></head>`,
+      css: '@\\69mport "../../outside.css";',
+      error: /ARTIFACT_EXTERNAL_CSS_IMPORT_PRESENT: styles\.css/u,
+    },
+    {
+      indexMeta: `<head><meta http-equiv="Content-Security-Policy" content="${csp}"><link data-x=">" rel="stylesheet" href="../../outside.css"></head>`,
+      css: '',
+      error: /ARTIFACT_EXTERNAL_STYLESHEET_PRESENT: index\.html/u,
     },
   ];
   for (const { indexMeta, css, error } of cases) {

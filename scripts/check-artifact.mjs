@@ -158,9 +158,6 @@ function findRawTextEnd(html, index, name) {
         index = end;
       } else if (hasTagNameAt(html, index, 'script')) {
         index += 1;
-      } else if (html.startsWith('-->', index)) {
-        state = 'escaped';
-        index += 3;
       } else {
         index += 1;
       }
@@ -270,6 +267,40 @@ function isArtifactAssetTarget(source, page, relativeFiles) {
   }
   const normalizedPath = posix.normalize(posix.join(posix.dirname(page), decodedPath));
   return normalizedPath !== '..' && !normalizedPath.startsWith('../') && relativeFiles.includes(normalizedPath);
+}
+
+function decodeCssEscapes(value) {
+  let output = '';
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== '\\' || index + 1 >= value.length) {
+      output += value[index] ?? '';
+      continue;
+    }
+    const next = value[index + 1];
+    if (/^[\da-f]$/iu.test(next)) {
+      let end = index + 1;
+      while (end < value.length && end <= index + 6 && /^[\da-f]$/iu.test(value[end])) end += 1;
+      const codePoint = Number.parseInt(value.slice(index + 1, end), 16);
+      output +=
+        Number.isSafeInteger(codePoint) && codePoint > 0 && codePoint <= 0x10ffff
+          ? String.fromCodePoint(codePoint)
+          : '\ufffd';
+      if (/^[\t\n\f\r ]$/u.test(value[end] ?? '')) {
+        if (value[end] === '\r' && value[end + 1] === '\n') end += 1;
+        index = end;
+      } else {
+        index = end - 1;
+      }
+      continue;
+    }
+    if (/^[\n\f\r]$/u.test(next)) {
+      index += next === '\r' && value[index + 2] === '\n' ? 2 : 1;
+      continue;
+    }
+    output += next;
+    index += 1;
+  }
+  return output;
 }
 
 function hasMetaRefresh(html) {
@@ -509,14 +540,15 @@ try {
       )
         throw new Error(`ARTIFACT_EXTERNAL_SCRIPT_PRESENT: ${page}`);
     }
-    for (const match of html.matchAll(/<link\b[^>]*>/giu)) {
-      const rel = decodeHtmlAttribute(readAttribute(match[0], 'rel') ?? '')
+    for (const tag of htmlTags(withoutComments)) {
+      if (tag.closing || tag.name !== 'link') continue;
+      const rel = decodeHtmlAttribute(readAttribute(tag.raw, 'rel') ?? '')
         .trim()
         .toLowerCase()
         .split(/[\t\n\f\r ]+/u)
         .filter(Boolean);
       if (!rel.includes('stylesheet')) continue;
-      const encodedSource = readAttribute(match[0], 'href');
+      const encodedSource = readAttribute(tag.raw, 'href');
       const source = encodedSource === undefined ? '' : decodeHtmlAttribute(encodedSource);
       if (
         !source ||
@@ -533,7 +565,7 @@ try {
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     const relativePath = relative(root, file).replaceAll('\\', '/');
     if (/\.css$/iu.test(relativePath)) {
-      for (const match of text.matchAll(
+      for (const match of decodeCssEscapes(text).matchAll(
         /@import\s+(?:url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s)]+))\s*\)|"([^"]*)"|'([^']*)')/giu,
       )) {
         const source = decodeHtmlAttribute(match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? '');
