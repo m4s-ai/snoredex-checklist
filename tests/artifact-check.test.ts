@@ -13,18 +13,17 @@ const csp =
 
 async function writeValidArtifact(
   directory: string,
-  { indexScript = '<script src="theme.js"></script>', collectionScript = '<script src="../theme.js"></script>' } = {},
+  {
+    indexMeta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`,
+    collectionMeta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`,
+    indexScript = '<script src="theme.js"></script>',
+    collectionScript = '<script src="../theme.js"></script>',
+  } = {},
 ) {
   await mkdir(join(directory, 'collection'), { recursive: true });
   await Promise.all([
-    writeFile(
-      join(directory, 'index.html'),
-      `<meta http-equiv="Content-Security-Policy" content="${csp}">${indexScript}`,
-    ),
-    writeFile(
-      join(directory, 'collection/index.html'),
-      `<meta http-equiv="Content-Security-Policy" content="${csp}">${collectionScript}`,
-    ),
+    writeFile(join(directory, 'index.html'), `${indexMeta}${indexScript}`),
+    writeFile(join(directory, 'collection/index.html'), `${collectionMeta}${collectionScript}`),
     writeFile(join(directory, 'theme.js'), ''),
     writeFile(join(directory, 'collection/theme.js'), ''),
     writeFile(join(directory, 'styles.css'), ''),
@@ -77,6 +76,7 @@ test('rejects external scripts in single-quoted and unquoted src attributes', as
     "'https://evil.invalid/a.js'",
     'https://evil.invalid/a.js',
     '"https&#58;//evil.invalid/a.js"',
+    '"&#9;https://evil.invalid/a.js"',
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-script-test-'));
     try {
@@ -87,5 +87,31 @@ test('rejects external scripts in single-quoted and unquoted src attributes', as
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  }
+});
+
+test('rejects a CSP meta declaration hidden inside an HTML comment', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-csp-test-'));
+  try {
+    await writeValidArtifact(directory, {
+      indexMeta: `<!-- <meta http-equiv="Content-Security-Policy" content="${csp}"> -->`,
+    });
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_CSP_MISSING: index\.html/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects slash-separated inline event-handler attributes', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-handler-test-'));
+  try {
+    await writeValidArtifact(directory, { indexScript: '<img/onerror=alert(1)>' });
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_INLINE_HANDLER_PRESENT: index\.html/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });

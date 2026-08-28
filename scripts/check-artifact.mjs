@@ -37,6 +37,12 @@ function decodeHtmlAttribute(value) {
     });
 }
 
+function readAttribute(tag, name) {
+  const pattern = new RegExp(`(?:^|[\\t\\n\\f\\r /])${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>\`]+))`, 'iu');
+  const match = pattern.exec(tag);
+  return match?.[1] ?? match?.[2] ?? match?.[3];
+}
+
 async function filesIn(directory) {
   const output = [];
   async function visit(current) {
@@ -85,17 +91,24 @@ try {
     "default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'none'; media-src 'none'; manifest-src 'none'";
   for (const page of ['index.html', 'collection/index.html']) {
     const html = await readFile(join(root, page), 'utf8');
-    if (!html.includes('http-equiv="Content-Security-Policy"') || !html.includes(`content="${csp}"`))
-      throw new Error(`ARTIFACT_CSP_MISSING: ${page}`);
+    const withoutComments = html.replace(/<!--[\s\S]*?(?:-->|$)/gu, '');
+    const hasCspMeta = Array.from(withoutComments.matchAll(/<meta\b[^>]*>/giu)).some((match) => {
+      const tag = match[0];
+      return (
+        readAttribute(tag, 'http-equiv')?.toLowerCase() === 'content-security-policy' &&
+        decodeHtmlAttribute(readAttribute(tag, 'content') ?? '') === csp
+      );
+    });
+    if (!hasCspMeta) throw new Error(`ARTIFACT_CSP_MISSING: ${page}`);
     if (/\b(?:unsafe-inline|unsafe-eval)\b/iu.test(html)) throw new Error(`ARTIFACT_CSP_UNSAFE_DIRECTIVE: ${page}`);
-    if (/\son[a-z]+\s*=/iu.test(html)) throw new Error(`ARTIFACT_INLINE_HANDLER_PRESENT: ${page}`);
+    if (/[\s/]on[a-z]+\s*=/iu.test(html)) throw new Error(`ARTIFACT_INLINE_HANDLER_PRESENT: ${page}`);
     for (const match of html.matchAll(/<script\b[^>]*>/giu)) {
-      const src = /(?:^|[\t\n\f\r ])src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/iu.exec(match[0]);
-      if (!src) throw new Error(`ARTIFACT_INLINE_SCRIPT_PRESENT: ${page}`);
-      const encodedSource = src[1] ?? src[2] ?? src[3];
+      const encodedSource = readAttribute(match[0], 'src');
+      if (encodedSource === undefined) throw new Error(`ARTIFACT_INLINE_SCRIPT_PRESENT: ${page}`);
       const source = decodeHtmlAttribute(encodedSource);
       if (
         !source ||
+        source !== source.trim() ||
         source.includes('&') ||
         source.startsWith('/') ||
         /^[a-z][a-z\d+.-]*:/iu.test(source) ||
