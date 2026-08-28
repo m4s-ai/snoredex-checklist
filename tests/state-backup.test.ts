@@ -584,6 +584,7 @@ test("restore fails closed when an orphan would displace the active snapshot", a
     appRevision,
     now: () => exportedAt,
     reconciliation: {
+      knownSourceItemIds: new Set([itemA]),
       migrations: [{
         fromFingerprint: otherFingerprint,
         toFingerprint: fingerprint,
