@@ -140,6 +140,15 @@ function isArtifactScriptTarget(source, page, relativeFiles) {
   return normalizedPath !== '..' && !normalizedPath.startsWith('../') && relativeFiles.includes(normalizedPath);
 }
 
+function hasMetaRefresh(html) {
+  for (const tag of htmlTags(html)) {
+    if (tag.closing || tag.name !== 'meta') continue;
+    const httpEquiv = readAttribute(tag.raw, 'http-equiv');
+    if (httpEquiv !== undefined && decodeHtmlAttribute(httpEquiv).trim().toLowerCase() === 'refresh') return true;
+  }
+  return false;
+}
+
 function extractHead(html) {
   const rawTextElements = new Set([
     'iframe',
@@ -349,6 +358,7 @@ try {
     const head = extractHead(withoutComments);
     const hasCspMeta = hasActiveCspMeta(head, csp);
     if (!hasCspMeta) throw new Error(`ARTIFACT_CSP_MISSING: ${page}`);
+    if (hasMetaRefresh(withoutComments)) throw new Error(`ARTIFACT_META_REFRESH_PRESENT: ${page}`);
     if (/\b(?:unsafe-inline|unsafe-eval)\b/iu.test(html)) throw new Error(`ARTIFACT_CSP_UNSAFE_DIRECTIVE: ${page}`);
     if (/[\s/]on[a-z]+\s*=/iu.test(html)) throw new Error(`ARTIFACT_INLINE_HANDLER_PRESENT: ${page}`);
     for (const match of html.matchAll(/<script\b[^>]*>/giu)) {

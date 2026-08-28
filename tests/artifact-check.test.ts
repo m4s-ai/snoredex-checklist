@@ -154,6 +154,23 @@ test('requires an active first-applicable CSP before controlled resources', asyn
   }
 });
 
+test('rejects meta-refresh navigations regardless of CSP ordering', async () => {
+  for (const indexMeta of [
+    `<head><meta http-equiv="refresh" content="0; url=https://evil.invalid/"><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
+    `<head><meta http-equiv="Content-Security-Policy" content="${csp}"><meta http-equiv="refresh" content="0; url=https://evil.invalid/"></head>`,
+  ]) {
+    const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-meta-refresh-test-'));
+    try {
+      await writeValidArtifact(directory, { indexMeta, indexScript: '' });
+      const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+      assert.notEqual(result.status, 0);
+      assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_META_REFRESH_PRESENT: index\.html/u);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+});
+
 test('parses CSP attributes at actual tag boundaries', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-csp-attributes-test-'));
   try {
