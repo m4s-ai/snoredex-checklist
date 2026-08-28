@@ -1,18 +1,18 @@
-import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import test from "node:test";
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import test from 'node:test';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const guidePath = resolve(root, "site-src/llms.txt");
-const guideUrl = "https://m4s-ai.github.io/snoredex-checklist/llms.txt";
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const guidePath = resolve(root, 'site-src/llms.txt');
+const guideUrl = 'https://m4s-ai.github.io/snoredex-checklist/llms.txt';
 
-test("publishes the hand-authored v2 privacy and provenance guide", async () => {
+test('publishes the hand-authored v2 privacy and provenance guide', async () => {
   const bytes = await readFile(guidePath);
   assert.notDeepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
-  const guide = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  assert.deepEqual(Buffer.from(guide, "utf8"), bytes);
+  const guide = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  assert.deepEqual(Buffer.from(guide, 'utf8'), bytes);
   assert.match(guide, /^# Snoredex Checklist\r?\n\r?\n> /);
   assert.match(guide, /## Use the checklist/);
   assert.match(guide, /## Catalogue data and provenance/);
@@ -31,13 +31,13 @@ test("publishes the hand-authored v2 privacy and provenance guide", async () => 
   assert.match(guide, /https:\/\/m4s-ai\.github\.io\/snoredex-checklist\/collection\//);
   assert.match(guide, /https:\/\/m4s-ai\.github\.io\/snoredex-data\/llms\.txt/);
   assert.match(guide, /https:\/\/llmstxt\.org\//);
-  assert.ok(!guide.includes("synthetic-secret"));
+  assert.ok(!guide.includes('synthetic-secret'));
 });
 
-test("both entry pages advertise the same deployed guide URL", async () => {
+test('both entry pages advertise the same deployed guide URL', async () => {
   const [index, collection] = await Promise.all([
-    readFile(resolve(root, "site-src/index.html"), "utf8"),
-    readFile(resolve(root, "site-src/collection/index.html"), "utf8"),
+    readFile(resolve(root, 'site-src/index.html'), 'utf8'),
+    readFile(resolve(root, 'site-src/collection/index.html'), 'utf8'),
   ]);
   const describedBy = `<link rel="describedby" href="${guideUrl}">`;
   assert.equal((index.match(/rel="describedby"/g) ?? []).length, 1);
@@ -46,7 +46,10 @@ test("both entry pages advertise the same deployed guide URL", async () => {
   assert.ok(collection.includes(describedBy));
 });
 
-test("the site build copies the hand-authored guide to the project root", async () => {
-  const buildScript = await readFile(resolve(root, "scripts/build-site.mjs"), "utf8");
-  assert.match(buildScript, /cp\(resolve\(root, "site-src\/llms\.txt"\), resolve\(staging, "llms\.txt"\)\)/);
+test('the site build copies the hand-authored guide to the project root', async () => {
+  const buildScript = await readFile(resolve(root, 'scripts/build-site.mjs'), 'utf8');
+  assert.match(
+    buildScript,
+    /cp\(resolve\(root, ['"]site-src\/llms\.txt['"]\), resolve\(staging, ['"]llms\.txt['"]\)\)/,
+  );
 });
