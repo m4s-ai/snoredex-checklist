@@ -103,8 +103,20 @@ function* htmlTags(html) {
 function extractHead(html) {
   const rawTextElements = new Set(['noscript', 'script', 'style', 'textarea', 'title']);
   const inertElements = new Set(['template']);
+  const preHeadElements = new Set([
+    'base',
+    'head',
+    'html',
+    'link',
+    'meta',
+    'noscript',
+    'script',
+    'style',
+    'template',
+    'title',
+  ]);
   let rawTextTag;
-  let inertTag;
+  let inertDepth = 0;
   let headStart = -1;
   let bodyStarted = false;
   for (const tag of htmlTags(html)) {
@@ -113,8 +125,8 @@ function extractHead(html) {
       if (closing && name === rawTextTag) rawTextTag = undefined;
       continue;
     }
-    if (inertTag !== undefined) {
-      if (closing && name === inertTag) inertTag = undefined;
+    if (inertDepth > 0) {
+      if (name === 'template') inertDepth += closing ? -1 : 1;
       continue;
     }
     if (!closing && name === 'body') {
@@ -123,6 +135,10 @@ function extractHead(html) {
       continue;
     }
     if (bodyStarted) continue;
+    if (!closing && headStart < 0 && !preHeadElements.has(name)) {
+      bodyStarted = true;
+      continue;
+    }
     if (closing) {
       if (headStart >= 0 && name === 'head') return html.slice(headStart, tag.index);
       continue;
@@ -132,7 +148,7 @@ function extractHead(html) {
       continue;
     }
     if (inertElements.has(name)) {
-      inertTag = name;
+      inertDepth += 1;
       continue;
     }
     if (headStart < 0 && name === 'head') headStart = tag.index + tag.raw.length;
