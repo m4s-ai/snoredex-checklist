@@ -19,16 +19,17 @@ its internal stores. Prototype work may use only reviewed synthetic fixtures.
 
 ## Specification map
 
-| Authority                                                                       | Purpose                                                                                                                                  |
-| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| [`snoredex-checklist#2`](https://github.com/m4s-ai/snoredex-checklist/issues/2) | Canonical product specification, phases, acceptance gates, and consumer handover                                                         |
-| [`snoredex-data#254`](https://github.com/m4s-ai/snoredex-data/issues/254)       | Canonical producer-contract semantics and deliverables                                                                                   |
-| [`snoredex-data#229`](https://github.com/m4s-ai/snoredex-data/issues/229)       | Historical owner decision selecting the standalone site                                                                                  |
-| [`AGENTS.md`](AGENTS.md)                                                        | Stable working rules and safety invariants                                                                                               |
-| [`SPECIFICATIONS.md`](SPECIFICATIONS.md)                                        | How issue-driven specification work becomes executable evidence                                                                          |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md)                                            | Stable system boundaries and data flow                                                                                                   |
-| [`CROSS_REPO_PROTOCOL.md`](CROSS_REPO_PROTOCOL.md)                              | Cross-repository lifecycle and traceability                                                                                              |
-| [`docs/design/README.md`](docs/design/README.md)                                | Owner-approved visual baseline and interactive synthetic reference ([issue #30](https://github.com/m4s-ai/snoredex-checklist/issues/30)) |
+| Authority                                                                       | Purpose                                                                                                                                          |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [`snoredex-checklist#2`](https://github.com/m4s-ai/snoredex-checklist/issues/2) | Canonical product specification, phases, acceptance gates, and consumer handover                                                                 |
+| [`snoredex-data#254`](https://github.com/m4s-ai/snoredex-data/issues/254)       | Canonical producer-contract semantics and deliverables                                                                                           |
+| [`snoredex-data#229`](https://github.com/m4s-ai/snoredex-data/issues/229)       | Historical owner decision selecting the standalone site                                                                                          |
+| [`AGENTS.md`](AGENTS.md)                                                        | Stable working rules and safety invariants                                                                                                       |
+| [`SPECIFICATIONS.md`](SPECIFICATIONS.md)                                        | How issue-driven specification work becomes executable evidence                                                                                  |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md)                                            | Stable system boundaries and data flow                                                                                                           |
+| [`CROSS_REPO_PROTOCOL.md`](CROSS_REPO_PROTOCOL.md)                              | Cross-repository lifecycle and traceability                                                                                                      |
+| [`docs/design/README.md`](docs/design/README.md)                                | Owner-approved visual baseline and interactive synthetic reference ([issue #30](https://github.com/m4s-ai/snoredex-checklist/issues/30))         |
+| [`docs/accessibility/evidence.md`](docs/accessibility/evidence.md)              | Automated accessibility/responsive evidence and manual release-gate record ([issue #27](https://github.com/m4s-ai/snoredex-checklist/issues/27)) |
 
 GitHub issues are the living specifications. Repository documents explain stable operation and link
 to those issues instead of copying changing decisions into a second source of truth.

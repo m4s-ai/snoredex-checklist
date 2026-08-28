@@ -57,3 +57,5 @@ jobs:
         run: npm run build:site
       - name: Run browser smoke gates
         run: npm run test:browser
+      - name: Run accessibility and responsive gates
+        run: npm run test:accessibility

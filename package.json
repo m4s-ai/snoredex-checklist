@@ -30,12 +30,14 @@
     "test:contract": "node --test tests/catalogue-validator.test.ts tests/catalogue-sync.test.ts",
     "smoke": "node tests/toolchain-smoke.ts",
     "test:browser": "node tests/browser-smoke.mjs",
+    "test:accessibility": "node scripts/build-site.mjs && node tests/accessibility-smoke.mjs",
     "sync:catalogue": "node scripts/sync-catalogue.ts",
     "build:site": "node scripts/build-site.mjs",
     "build:reproducible": "node scripts/check-reproducible-build.mjs",
     "artifact:check": "node scripts/check-artifact.mjs"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@playwright/test": "1.62.1",
     "@types/node": "26.3.0",
     "ajv": "8.20.0",
