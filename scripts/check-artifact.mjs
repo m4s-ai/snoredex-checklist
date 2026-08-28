@@ -574,11 +574,12 @@ function isJavaScriptRegexStart(value, index) {
   if (previous < 0 || /[({[=,:;!?&|+\-*%^~<>]/u.test(value[previous])) return true;
   if (value[previous] === ')') return isControlConditionEnd(value, previous);
   const token = /([a-z_$][\w$]*)$/iu.exec(value.slice(0, previous + 1));
-  return (
-    token !== null &&
-    /^(?:await|case|default|delete|do|else|extends|in|instanceof|new|of|return|throw|typeof|void|yield)$/iu.test(
-      token[1],
-    )
+  if (token === null) return false;
+  let beforeToken = token.index - 1;
+  while (beforeToken >= 0 && /\s/u.test(value[beforeToken])) beforeToken -= 1;
+  if (value[beforeToken] === '.' || (value[beforeToken] === '?' && value[beforeToken - 1] === '.')) return false;
+  return /^(?:await|case|default|delete|do|else|extends|in|instanceof|new|of|return|throw|typeof|void|yield)$/iu.test(
+    token[1],
   );
 }
 
