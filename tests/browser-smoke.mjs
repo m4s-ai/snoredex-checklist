@@ -46,6 +46,12 @@ async function assertSecurityBoundary(page, name) {
     `${name}: CSP directives`,
   );
   assert.equal(await page.locator('script:not([src])').count(), 0, `${name}: no inline scripts`);
+  assert.equal(
+    await page.locator('head > script[src$="theme.js"][type="module"]').count(),
+    0,
+    `${name}: theme bootstrap is blocking`,
+  );
+  assert.equal(await page.locator('head > script[src$="theme.js"]').count(), 1, `${name}: one theme bootstrap`);
   const scriptSources = await page
     .locator('script')
     .evaluateAll((scripts) => scripts.map((script) => script.getAttribute('src')));
