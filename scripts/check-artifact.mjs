@@ -574,7 +574,11 @@ function skipJavaScriptBlockComment(value, index) {
 
 function isJavaScriptRegexStart(value, index) {
   let previous = index - 1;
-  while (previous >= 0 && /\s/u.test(value[previous])) previous -= 1;
+  let lineTerminator = false;
+  while (previous >= 0 && /\s/u.test(value[previous])) {
+    if (value[previous] === '\n' || value[previous] === '\r') lineTerminator = true;
+    previous -= 1;
+  }
   if (previous < 0 || /[({[=,:;!?&|+\-*%^~<>]/u.test(value[previous])) return true;
   if (value[previous] === ')') return isControlConditionEnd(value, previous);
   if (value[previous] === '}') return isJavaScriptBlockEnd(value, previous);
@@ -588,8 +592,11 @@ function isJavaScriptRegexStart(value, index) {
     (value[beforeToken] === '?' && value[beforeToken - 1] === '.')
   )
     return false;
-  return /^(?:await|case|default|delete|do|else|extends|in|instanceof|new|of|return|throw|typeof|void|yield)$/iu.test(
-    token[1],
+  return (
+    /^(?:await|case|default|delete|do|else|extends|in|instanceof|new|of|return|throw|typeof|void|yield)$/iu.test(
+      token[1],
+    ) ||
+    (lineTerminator && /^continue$/iu.test(token[1]))
   );
 }
 
