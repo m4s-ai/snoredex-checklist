@@ -438,6 +438,10 @@ function staticModuleDependencies(value) {
       index = collectTemplateExpressions(value, index + 1, []) - 1;
       continue;
     }
+    if (character === '/' && isJavaScriptRegexStart(value, index)) {
+      index = skipJavaScriptRegex(value, index) - 1;
+      continue;
+    }
     const token = /\b(?:import|export)\b/gu.exec(value.slice(index));
     if (token?.index !== 0) continue;
     const dependency = staticModuleDependency(value, index + token[0].length);
@@ -572,7 +576,7 @@ function isJavaScriptRegexStart(value, index) {
   const token = /([a-z_$][\w$]*)$/iu.exec(value.slice(0, previous + 1));
   return (
     token !== null &&
-    /^(?:await|case|default|delete|do|else|in|instanceof|of|return|throw|typeof|void|yield)$/iu.test(token[1])
+    /^(?:await|case|default|delete|do|else|extends|in|instanceof|of|return|throw|typeof|void|yield)$/iu.test(token[1])
   );
 }
 

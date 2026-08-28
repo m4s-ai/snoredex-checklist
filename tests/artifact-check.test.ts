@@ -308,6 +308,7 @@ test('rejects external JavaScript module dependencies', async () => {
     'import "./catalogue.js"; console.log(\' from "/not-a-module.js"\');\n',
     '/[/*]/.test("*"); import("/outside.js");\n',
     'const x = /*c*/ /[/*]/.test("*"); import("/outside.js");\n',
+    'class X extends /[/*]/.constructor {}; import("/outside.js");\n',
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-module-test-'));
     try {
@@ -327,6 +328,19 @@ test('ignores from text inside JavaScript regex literals', async () => {
   try {
     await writeValidArtifact(directory);
     await writeFile(join(directory, 'theme.js'), 'export default /from "\\/outside.js"/;\n');
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.equal(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /artifact ok:/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('ignores import text inside JavaScript regex literals during outer scanning', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-module-outer-regex-test-'));
+  try {
+    await writeValidArtifact(directory);
+    await writeFile(join(directory, 'theme.js'), 'const r = /import from "\\/outside.js"/;\n');
     const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
     assert.equal(result.status, 0);
     assert.match(`${result.stdout}${result.stderr}`, /artifact ok:/u);
