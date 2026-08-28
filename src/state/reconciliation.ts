@@ -286,7 +286,7 @@ function mappedTargetsForChain(
     const next = new Set<string>();
     for (const transition of migration.transitions) {
       const sources = transitionSources(transition);
-      if (stepIndex > 0 && sources.some((sourceId) => !reachable.has(sourceId))) continue;
+      if (stepIndex > 0 && !sources.some((sourceId) => reachable.has(sourceId))) continue;
       for (const targetId of transition.toItemIds) next.add(targetId);
     }
     reachable = next;

@@ -133,6 +133,27 @@ test("counts only targets reachable from the original catalogue", () => {
   assert.equal(result.value.report.accounting.newResearch, 1);
 });
 
+test("counts mixed-source merge targets as mapped when one source is original", () => {
+  const middleA = "item-00000000-0000-5000-8000-000000000021";
+  const middleNew = "item-00000000-0000-5000-8000-000000000022";
+  const finalMerge = "item-00000000-0000-5000-8000-000000000023";
+  const result = reconcilePrivateState(state(), targetFingerprint, {
+    migrations: [
+      migration(oldFingerprint, middleFingerprint, [
+        transition(oldA, [middleA], "rekey-1:1", "preserve", "one-to-one-preserve"),
+      ]),
+      migration(middleFingerprint, targetFingerprint, [
+        transition(middleA, [finalMerge], "merge-N:1", "none", "requires-user-resolution", [middleA, middleNew]),
+      ]),
+    ],
+    knownTargetItemIds: new Set([finalMerge]),
+    targetItemClasses: new Map([[finalMerge, "current-known"]]),
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.value.report.accounting.newCurrentKnown, 0);
+});
+
 test("preserves retired records as private orphan candidates", () => {
   const result = reconcilePrivateState(state(oldFingerprint, [{ itemId: oldA, status: "skip", quantityOwned: 0, quantityOrdered: 0 }]), targetFingerprint, {
     migrations: [migration(oldFingerprint, targetFingerprint, [
