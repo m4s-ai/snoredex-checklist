@@ -74,15 +74,40 @@ function readAttribute(tag, name) {
   return undefined;
 }
 
+function* htmlTags(html) {
+  let index = 0;
+  while (index < html.length) {
+    const start = html.indexOf('<', index);
+    if (start < 0) return;
+    let cursor = start + 1;
+    let quote;
+    while (cursor < html.length) {
+      const character = html[cursor];
+      if (quote !== undefined) {
+        if (character === quote) quote = undefined;
+      } else if (character === '"' || character === "'") {
+        quote = character;
+      } else if (character === '>') {
+        const raw = html.slice(start, cursor + 1);
+        const match = /^<(?:(\/)[\s]*)?([a-z][\w:-]*)/iu.exec(raw);
+        if (match) yield { closing: match[1] !== undefined, name: match[2].toLowerCase(), raw, index: start };
+        index = cursor + 1;
+        break;
+      }
+      cursor += 1;
+    }
+    if (cursor >= html.length) return;
+  }
+}
+
 function extractHead(html) {
   const rawTextElements = new Set(['noscript', 'script', 'style', 'textarea', 'title']);
   const inertElements = new Set(['template']);
   let rawTextTag;
   let inertTag;
   let headStart = -1;
-  for (const match of html.matchAll(/<(?:(\/)\s*)?([a-z][\w:-]*)(?:\s[^>]*)?>/giu)) {
-    const closing = match[1] !== undefined;
-    const name = match[2].toLowerCase();
+  for (const tag of htmlTags(html)) {
+    const { closing, name } = tag;
     if (rawTextTag !== undefined) {
       if (closing && name === rawTextTag) rawTextTag = undefined;
       continue;
@@ -92,7 +117,7 @@ function extractHead(html) {
       continue;
     }
     if (closing) {
-      if (headStart >= 0 && name === 'head') return html.slice(headStart, match.index);
+      if (headStart >= 0 && name === 'head') return html.slice(headStart, tag.index);
       continue;
     }
     if (rawTextElements.has(name)) {
@@ -103,7 +128,7 @@ function extractHead(html) {
       inertTag = name;
       continue;
     }
-    if (headStart < 0 && name === 'head') headStart = match.index + match[0].length;
+    if (headStart < 0 && name === 'head') headStart = tag.index + tag.raw.length;
   }
   return '';
 }
@@ -130,10 +155,8 @@ function hasActiveCspMeta(head, expectedCsp) {
   let cspSeen = false;
   let controlledResourceBeforeCsp = false;
   let headTerminated = false;
-  for (const match of head.matchAll(/<(?:(\/)\s*)?([a-z][\w:-]*)(?:\s[^>]*)?>/giu)) {
-    const tag = match[0];
-    const closing = match[1] !== undefined;
-    const name = match[2].toLowerCase();
+  for (const tag of htmlTags(head)) {
+    const { closing, name, raw } = tag;
     if (closing) {
       if (stack.at(-1) === name) stack.pop();
       continue;
@@ -143,8 +166,8 @@ function hasActiveCspMeta(head, expectedCsp) {
     if (
       name === 'meta' &&
       stack.length === 0 &&
-      readAttribute(tag, 'http-equiv')?.toLowerCase() === 'content-security-policy' &&
-      decodeHtmlAttribute(readAttribute(tag, 'content') ?? '') === expectedCsp
+      readAttribute(raw, 'http-equiv')?.toLowerCase() === 'content-security-policy' &&
+      decodeHtmlAttribute(readAttribute(raw, 'content') ?? '') === expectedCsp
     ) {
       cspSeen = true;
     }

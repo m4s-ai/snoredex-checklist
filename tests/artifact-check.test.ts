@@ -125,6 +125,7 @@ test('requires an active first-applicable CSP before controlled resources', asyn
     `<head><noscript><meta http-equiv="Content-Security-Policy" content="${csp}"></noscript></head>`,
     `<head><noscript /><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     `<head><p></p><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
+    `<head><meta data-x=\"><meta http-equiv="Content-Security-Policy" content="${csp}">\"></head>`,
     `<script src="theme.js"><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></script>`,
     `<head><script src="theme.js"></script><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
   ]) {
