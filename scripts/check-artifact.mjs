@@ -576,7 +576,7 @@ function isJavaScriptRegexStart(value, index) {
   let previous = index - 1;
   let lineTerminator = false;
   while (previous >= 0 && /\s/u.test(value[previous])) {
-    if (value[previous] === '\n' || value[previous] === '\r') lineTerminator = true;
+    if (/\r|\n|\u2028|\u2029/u.test(value[previous])) lineTerminator = true;
     previous -= 1;
   }
   if (previous < 0 || /[({[=,:;!?&|+\-*%^~<>]/u.test(value[previous])) return true;

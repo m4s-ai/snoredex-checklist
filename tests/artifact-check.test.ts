@@ -337,6 +337,8 @@ test('rejects external JavaScript module dependencies', async () => {
     'const foo=1; const f=function(a=/[(]/){} / foo; import("/outside.js");\n',
     'while(false){continue\n/[/*]/.test("*");} import("/outside.js");\n',
     'while(false){break\n/[/*]/.test("*");} import("/outside.js");\n',
+    'while(false){break\u2028/[/*]/.test("*");} import("/outside.js");\n',
+    'while(false){continue\u2029/[/*]/.test("*");} import("/outside.js");\n',
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-module-test-'));
     try {
