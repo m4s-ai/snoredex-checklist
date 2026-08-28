@@ -616,7 +616,7 @@ function isJavaScriptBlockEnd(value, closeIndex) {
     if (value[before] === ')') return true;
     const prefix = value.slice(0, before + 1);
     if (/(?:^|\s)(?:catch|do|else|finally|try)\s*$/iu.test(prefix)) return true;
-    if (/(?:^|[;\n])\s*[a-z_$][\w$]*\s*:\s*$/iu.test(prefix)) return true;
+    if (isJavaScriptLabeledBlock(value, prefix)) return true;
     const classToken = /\bclass(?:\s+[a-z_$][\w$]*)?(?:\s+extends[\s\S]*)?\s*$/iu.exec(prefix);
     if (classToken === null) return false;
     let beforeClass = classToken.index - 1;
@@ -628,6 +628,32 @@ function isJavaScriptBlockEnd(value, closeIndex) {
     );
   }
   return false;
+}
+
+function isJavaScriptLabeledBlock(value, prefix) {
+  const label = /([a-z_$][\w$]*)\s*:\s*$/iu.exec(prefix);
+  if (label === null) return false;
+  let beforeLabel = label.index - 1;
+  while (beforeLabel >= 0 && /\s/u.test(prefix[beforeLabel])) beforeLabel -= 1;
+  if (beforeLabel < 0 || /[;\n]/u.test(prefix[beforeLabel])) return true;
+  return prefix[beforeLabel] === '{' && isJavaScriptBlockOpen(value, beforeLabel);
+}
+
+function isJavaScriptBlockOpen(value, openIndex) {
+  let before = openIndex - 1;
+  while (before >= 0 && /\s/u.test(value[before])) before -= 1;
+  if (before < 0 || /[;}]/u.test(value[before])) return true;
+  if (value[before] === ')' || (value[before] === '>' && value[before - 1] === '=')) return true;
+  const prefix = value.slice(0, before + 1);
+  if (/(?:^|\s)(?:catch|do|else|finally|try)\s*$/iu.test(prefix)) return true;
+  const classToken = /\bclass(?:\s+[a-z_$][\w$]*)?(?:\s+extends[\s\S]*)?\s*$/iu.exec(prefix);
+  if (classToken !== null) {
+    let beforeClass = classToken.index - 1;
+    while (beforeClass >= 0 && /\s/u.test(prefix[beforeClass])) beforeClass -= 1;
+    if (beforeClass < 0 || /[;}]/u.test(prefix[beforeClass])) return true;
+    if (/(?:^|\s)export(?:\s+default)?\s*$/iu.test(prefix.slice(0, beforeClass + 1))) return true;
+  }
+  return isJavaScriptLabeledBlock(value, prefix);
 }
 
 function isControlConditionEnd(value, closeIndex) {
@@ -976,7 +1002,7 @@ try {
     if (hasMetaRefresh(withoutComments)) throw new Error(`ARTIFACT_META_REFRESH_PRESENT: ${page}`);
     if (/\b(?:unsafe-inline|unsafe-eval)\b/iu.test(html)) throw new Error(`ARTIFACT_CSP_UNSAFE_DIRECTIVE: ${page}`);
     if (/[\s/]on[a-z]+\s*=/iu.test(html)) throw new Error(`ARTIFACT_INLINE_HANDLER_PRESENT: ${page}`);
-    for (const match of html.matchAll(/<script\b[^>]*>/giu)) {
+    for (const match of stripHtmlComments(html).matchAll(/<script\b[^>]*>/giu)) {
       const encodedSource = readAttribute(match[0], 'src');
       if (encodedSource === undefined) throw new Error(`ARTIFACT_INLINE_SCRIPT_PRESENT: ${page}`);
       const source = decodeHtmlAttribute(encodedSource);

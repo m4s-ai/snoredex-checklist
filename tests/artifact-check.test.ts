@@ -92,6 +92,21 @@ test('rejects external scripts in single-quoted and unquoted src attributes', as
   }
 });
 
+test('ignores inert script text during inline-script checks', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-inert-script-test-'));
+  try {
+    await writeValidArtifact(directory, {
+      indexScript:
+        '<textarea><script>example</script></textarea><!-- <script>comment</script> --><script src="theme.js"></script>',
+    });
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.equal(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /artifact ok:/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('rejects a CSP meta declaration hidden inside an HTML comment', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-csp-test-'));
   try {
@@ -316,6 +331,7 @@ test('rejects external JavaScript module dependencies', async () => {
     'if (true) {} /[/*]/.test("*"); import("/outside.js");\n',
     'const foo=1; const C = class {} / foo; import("/outside.js");\n',
     'label: {} /[/*]/.test("*"); import("/outside.js");\n',
+    'if (true) { label: {} /[/*]/.test("*"); import("/outside.js"); }\n',
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-module-test-'));
     try {
