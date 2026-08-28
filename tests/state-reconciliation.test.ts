@@ -54,6 +54,7 @@ test("reconciles retained and explicit one-to-one state without mutation", () =>
     migrations: [migration(oldFingerprint, targetFingerprint, [
       transition(oldA, [targetA], "rekey-1:1", "preserve", "one-to-one-preserve"),
     ])],
+    knownSourceItemIds: new Set([oldA]),
     knownTargetItemIds: new Set([targetA]),
     targetItemClasses: new Map([[targetA, "current-known"], [targetB, "research"]]),
   });
@@ -87,6 +88,7 @@ test("counts catalogue targets independently of private holdings", () => {
       transition(oldA, [targetA], "rekey-1:1", "preserve", "one-to-one-preserve"),
       transition(oldB, [targetB], "rekey-1:1", "preserve", "one-to-one-preserve"),
     ])],
+    knownSourceItemIds: new Set([oldA, oldB]),
     knownTargetItemIds: new Set([targetA, targetB, targetC]),
     targetItemClasses: new Map([
       [targetA, "current-known"],
@@ -98,6 +100,17 @@ test("counts catalogue targets independently of private holdings", () => {
   if (!result.ok) return;
   assert.equal(result.value.report.accounting.newCurrentKnown, 0);
   assert.equal(result.value.report.accounting.newResearch, 1);
+});
+
+test("blocks a migration that omits a source-catalogue item", () => {
+  const result = reconcilePrivateState(state(), targetFingerprint, {
+    migrations: [migration(oldFingerprint, targetFingerprint, [
+      transition(oldA, [targetA], "rekey-1:1", "preserve", "one-to-one-preserve"),
+    ])],
+    knownSourceItemIds: new Set([oldA, oldB]),
+    knownTargetItemIds: new Set([targetA]),
+  });
+  assert.deepEqual(result, { ok: false, error: "STATE_RECONCILIATION_BLOCKED" });
 });
 
 test("counts only targets reachable from the original catalogue", () => {
@@ -120,6 +133,7 @@ test("counts only targets reachable from the original catalogue", () => {
         transition(middleNew, [finalNew], "rekey-1:1", "preserve", "one-to-one-preserve"),
       ]),
     ],
+    knownSourceItemIds: new Set([oldA]),
     knownTargetItemIds: new Set([finalA, finalNew, targetC]),
     targetItemClasses: new Map([
       [finalA, "current-known"],
@@ -146,6 +160,7 @@ test("counts mixed-source merge targets as mapped when one source is original", 
         transition(middleA, [finalMerge], "merge-N:1", "none", "requires-user-resolution", [middleA, middleNew]),
       ]),
     ],
+    knownSourceItemIds: new Set([oldA]),
     knownTargetItemIds: new Set([finalMerge]),
     targetItemClasses: new Map([[finalMerge, "current-known"]]),
   });
@@ -159,6 +174,7 @@ test("preserves retired records as private orphan candidates", () => {
     migrations: [migration(oldFingerprint, targetFingerprint, [
       transition(oldA, [], "retired-1:0", "none", "retire-to-orphan"),
     ])],
+    knownSourceItemIds: new Set([oldA]),
   });
   assert.equal(result.ok, true);
   if (!result.ok) return;
@@ -178,6 +194,7 @@ test("preserves the original identity through a multi-step retired chain", () =>
         transition(oldB, [], "retired-1:0", "none", "retire-to-orphan"),
       ]),
     ],
+    knownSourceItemIds: new Set([oldA]),
   });
   assert.equal(result.ok, true);
   if (!result.ok) return;
@@ -209,6 +226,7 @@ test("preserves the source disposition through a rekey then retained chain", () 
         transition(oldB, [oldB], "retained", "preserve", "identity-retained"),
       ]),
     ],
+    knownSourceItemIds: new Set([oldA]),
     knownTargetItemIds: new Set([oldB]),
   });
   assert.equal(result.ok, true);
@@ -228,6 +246,7 @@ test("preserves the source disposition through a rekey then retained chain", () 
 test("fails closed for split, merge, unresolved and unaccounted records", () => {
   const split = reconcilePrivateState(state(oldFingerprint, [{ itemId: oldA, status: "have", quantityOwned: 1, quantityOrdered: 0 }]), targetFingerprint, {
     migrations: [migration(oldFingerprint, targetFingerprint, [transition(oldA, [targetA, targetB], "split-1:N", "none", "requires-user-resolution")])],
+    knownSourceItemIds: new Set([oldA]),
   });
   assert.deepEqual(split, { ok: false, error: "STATE_RECONCILIATION_BLOCKED", report: split.ok ? undefined : split.report });
   assert.equal(split.ok, false);
@@ -239,6 +258,7 @@ test("fails closed for split, merge, unresolved and unaccounted records", () => 
     migrations: [migration(oldFingerprint, targetFingerprint, [
       transition(oldA, [targetA], "merge-N:1", "none", "requires-user-resolution", [oldA, oldB]),
     ])],
+    knownSourceItemIds: new Set([oldA, oldB]),
   });
   assert.equal(merge.ok, false);
   if (!merge.ok) {
@@ -272,6 +292,7 @@ test("reports original IDs for chained merge conflicts", () => {
         transition(middleA, [targetC], "merge-N:1", "none", "requires-user-resolution", [middleA, middleB]),
       ]),
     ],
+    knownSourceItemIds: new Set([oldA, oldB]),
     knownTargetItemIds: new Set([targetC]),
   });
   assert.equal(result.ok, false);
@@ -321,6 +342,7 @@ test("rejects unknown, future and incomplete chains before mutation", () => {
     { itemId: oldA, status: "have", quantityOwned: 1, quantityOrdered: 0 },
   ]), targetFingerprint, {
     migrations: manifest,
+    knownSourceItemIds: new Set([oldA]),
     knownTargetItemIds: new Set([targetA]),
   });
   assert.equal(acceptedManifest.ok, true);
@@ -461,6 +483,7 @@ test("follows a deterministic multi-step chain and is idempotent", () => {
       migration(oldFingerprint, middleFingerprint, [transition(oldA, [oldB], "rekey-1:1", "preserve", "one-to-one-preserve")]),
       migration(middleFingerprint, targetFingerprint, [transition(oldB, [targetC], "rekey-1:1", "preserve", "one-to-one-preserve")]),
     ],
+    knownSourceItemIds: new Set([oldA]),
     knownTargetItemIds: new Set([targetC]),
   };
   const first = reconcilePrivateState(source, targetFingerprint, context);

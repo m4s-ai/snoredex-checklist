@@ -169,6 +169,7 @@ test("gates older imports through the shared reconciliation chain", () => {
     appRevision,
     now: () => exportedAt,
     reconciliation: {
+      knownSourceItemIds: new Set([itemA]),
       migrations: [{
         fromFingerprint: otherFingerprint,
         toFingerprint: fingerprint,
@@ -206,6 +207,7 @@ test("never previews or writes a conflicting migration", () => {
   const lifecycle = new PrivateStateLifecycle(storage, {
     appRevision,
     reconciliation: {
+      knownSourceItemIds: new Set([itemA]),
       migrations: [{
         fromFingerprint: otherFingerprint,
         toFingerprint: fingerprint,
@@ -244,6 +246,7 @@ test("rechecks the same reconciliation before committing an import", async () =>
   const lifecycle = new PrivateStateLifecycle(storage, {
     appRevision,
     reconciliation: {
+      knownSourceItemIds: new Set([itemA]),
       migrations: [{ fromFingerprint: otherFingerprint, toFingerprint: fingerprint, transitions }],
     },
   });
@@ -461,6 +464,7 @@ test("restore preserves retired orphans in the recovery slot", async () => {
     appRevision,
     now: () => exportedAt,
     reconciliation: {
+      knownSourceItemIds: new Set([itemA]),
       migrations: [{
         fromFingerprint: otherFingerprint,
         toFingerprint: fingerprint,
@@ -495,6 +499,7 @@ test("restore keeps the original source identity through a retired chain", async
     appRevision,
     now: () => exportedAt,
     reconciliation: {
+      knownSourceItemIds: new Set([itemA]),
       migrations: [
         {
           fromFingerprint: otherFingerprint,
@@ -541,6 +546,7 @@ test("import preserves retired orphans in the recovery slot", async () => {
     appRevision,
     now: () => exportedAt,
     reconciliation: {
+      knownSourceItemIds: new Set([itemA]),
       migrations: [{
         fromFingerprint: otherFingerprint,
         toFingerprint: fingerprint,

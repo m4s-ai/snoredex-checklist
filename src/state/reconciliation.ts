@@ -42,6 +42,11 @@ export interface ReconciliationManifest {
 
 export interface ReconciliationContext {
   readonly migrations: readonly ReconciliationMigration[] | ReconciliationManifest;
+  /**
+   * Complete source-catalogue membership for the fingerprint being migrated.
+   * Required when fingerprints differ so omitted first-step transitions fail closed.
+   */
+  readonly knownSourceItemIds?: ReadonlySet<string>;
   /** Optional final-catalogue membership. If supplied, every mapped target must be present. */
   readonly knownTargetItemIds?: ReadonlySet<string>;
   readonly targetItemClasses?: ReadonlyMap<string, "current-known" | "research">;
@@ -277,6 +282,25 @@ function migrationChainLinksAreValid(
   return true;
 }
 
+/** Require every source-catalogue item to appear exactly once in the first hop. */
+function firstStepCoversSourceCatalogue(
+  chain: readonly ReconciliationMigration[],
+  knownSourceItemIds: ReadonlySet<string> | undefined,
+): boolean {
+  if (chain.length === 0 || knownSourceItemIds === undefined) return false;
+  try {
+    const known = [...knownSourceItemIds];
+    if (known.some((itemId) => !isItemId(itemId))) return false;
+    const firstStepSources = new Set(
+      chain[0].transitions.flatMap((transition) => transitionSources(transition)),
+    );
+    return known.length === firstStepSources.size
+      && known.every((itemId) => firstStepSources.has(itemId));
+  } catch {
+    return false;
+  }
+}
+
 /** Keep only targets descended from IDs in the original catalogue. */
 function mappedTargetsForChain(
   chain: readonly ReconciliationMigration[],
@@ -470,6 +494,9 @@ export function reconcilePrivateState(
   context: ReconciliationContext,
 ): ReconciliationResult {
   if (!isObjectRecord(context)
+    || (context.knownSourceItemIds !== undefined
+      && (typeof context.knownSourceItemIds.has !== "function"
+        || typeof context.knownSourceItemIds[Symbol.iterator] !== "function"))
     || (context.knownTargetItemIds !== undefined && typeof context.knownTargetItemIds.has !== "function")
     || (context.targetItemClasses !== undefined
       && (typeof context.targetItemClasses[Symbol.iterator] !== "function"
@@ -515,6 +542,9 @@ export function reconcilePrivateState(
   const chain = findChain(state.catalogueFingerprint, targetFingerprint, migrations);
   if (chain === "ambiguous") return blockedSource(state, targetFingerprint, "STATE_RECONCILIATION_BLOCKED", "ambiguous-chain");
   if (chain === undefined || chain.length === 0) return unsupportedSource(state, targetFingerprint);
+  if (!firstStepCoversSourceCatalogue(chain, context.knownSourceItemIds)) {
+    return fail("STATE_RECONCILIATION_BLOCKED");
+  }
   if (!migrationChainLinksAreValid(chain, context)) return fail("STATE_RECONCILIATION_BLOCKED");
 
   let working = new Map<string, WorkingRecord>(state.items.map((item) => [item.itemId, {
