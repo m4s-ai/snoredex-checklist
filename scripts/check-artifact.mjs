@@ -794,9 +794,48 @@ function isJavaScriptDeclaredIdentifier(value, name, beforeIndex) {
 }
 
 function isJavaScriptParameterIdentifier(value, name, beforeIndex) {
-  const prefix = value.slice(0, beforeIndex);
-  const parameter = new RegExp(`(?:function\\b[^{}()]*\\(|catch\\s*\\()[^{};]*\\b${name}\\b\\s*[),]`, 'iu');
-  return parameter.test(prefix);
+  let bodyOpen = findEnclosingJavaScriptBrace(value, beforeIndex - 1);
+  while (bodyOpen >= 0) {
+    let close = bodyOpen - 1;
+    while (close >= 0 && /\s/u.test(value[close])) close -= 1;
+    if (value[close] === ')') {
+      const open = findJavaScriptOpeningParen(value, close);
+      if (open >= 0) {
+        const prefix = value.slice(0, open);
+        const isFunction = /\bfunction(?:\s*\*)?(?:\s+[a-z_$][\w$]*)?\s*$/iu.test(prefix);
+        const isCatch = /\bcatch\s*$/iu.test(prefix);
+        if (isFunction || isCatch) {
+          const parameters = value.slice(open + 1, close);
+          const binding = new RegExp(`(?:^|[,\\{])\\s*(?:\\.\\.\\.)?\\s*${name}\\b\\s*(?=[=,}\\]]|$)`, 'iu');
+          if (binding.test(parameters)) return true;
+        }
+      }
+    }
+    bodyOpen = findEnclosingJavaScriptBrace(value, bodyOpen - 1);
+  }
+  return false;
+}
+
+function findJavaScriptOpeningParen(value, closeIndex) {
+  let depth = 0;
+  for (let index = closeIndex; index >= 0; index -= 1) {
+    const character = value[index];
+    if (character === '"' || character === "'") {
+      index = skipJavaScriptQuotedBackward(value, index);
+      continue;
+    }
+    if (character === '`') {
+      index = skipJavaScriptTemplateBackward(value, index);
+      continue;
+    }
+    if (character === ')') {
+      depth += 1;
+    } else if (character === '(') {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
 }
 
 function isJavaScriptLabeledJump(value, labelStart) {
