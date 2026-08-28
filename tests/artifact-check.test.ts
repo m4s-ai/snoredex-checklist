@@ -11,56 +11,77 @@ const checker = resolve(root, 'scripts/check-artifact.mjs');
 const csp =
   "default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'none'; media-src 'none'; manifest-src 'none'";
 
+async function writeValidArtifact(
+  directory: string,
+  { indexScript = '<script src="theme.js"></script>', collectionScript = '<script src="../theme.js"></script>' } = {},
+) {
+  await mkdir(join(directory, 'collection'), { recursive: true });
+  await Promise.all([
+    writeFile(
+      join(directory, 'index.html'),
+      `<meta http-equiv="Content-Security-Policy" content="${csp}">${indexScript}`,
+    ),
+    writeFile(
+      join(directory, 'collection/index.html'),
+      `<meta http-equiv="Content-Security-Policy" content="${csp}">${collectionScript}`,
+    ),
+    writeFile(join(directory, 'theme.js'), ''),
+    writeFile(join(directory, 'collection/theme.js'), ''),
+    writeFile(join(directory, 'styles.css'), ''),
+    writeFile(join(directory, 'llms.txt'), ''),
+    writeFile(join(directory, 'LICENSE.md'), ''),
+    writeFile(join(directory, 'THIRD_PARTY_NOTICES.md'), ''),
+    writeFile(
+      join(directory, 'provenance.json'),
+      JSON.stringify({
+        schema: 'snoredex-site-provenance',
+        schemaVersion: '1.0.0',
+        appRevision: '0'.repeat(40),
+        catalogue: {
+          mode: 'synthetic-fixture',
+          sourceCommit: 'synthetic-fixture',
+          sourceRepository: 'https://github.com/m4s-ai/snoredex-data',
+          contractVersion: '1.0.0',
+          catalogueFingerprint: `sha256:${'0'.repeat(64)}`,
+          lock: null,
+        },
+      }),
+    ),
+  ]);
+}
+
 test('rejects a renamed private-state JSON export', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-test-'));
   try {
-    await mkdir(join(directory, 'collection'), { recursive: true });
-    await Promise.all([
-      writeFile(
-        join(directory, 'index.html'),
-        `<meta http-equiv="Content-Security-Policy" content="${csp}"><script src="theme.js"></script>`,
-      ),
-      writeFile(
-        join(directory, 'collection/index.html'),
-        `<meta http-equiv="Content-Security-Policy" content="${csp}"><script src="../theme.js"></script>`,
-      ),
-      writeFile(join(directory, 'theme.js'), ''),
-      writeFile(join(directory, 'collection/theme.js'), ''),
-      writeFile(join(directory, 'styles.css'), ''),
-      writeFile(join(directory, 'llms.txt'), ''),
-      writeFile(join(directory, 'LICENSE.md'), ''),
-      writeFile(join(directory, 'THIRD_PARTY_NOTICES.md'), ''),
-      writeFile(
-        join(directory, 'provenance.json'),
-        JSON.stringify({
-          schema: 'snoredex-site-provenance',
-          schemaVersion: '1.0.0',
-          appRevision: '0'.repeat(40),
-          catalogue: {
-            mode: 'synthetic-fixture',
-            sourceCommit: 'synthetic-fixture',
-            sourceRepository: 'https://github.com/m4s-ai/snoredex-data',
-            contractVersion: '1.0.0',
-            catalogueFingerprint: `sha256:${'0'.repeat(64)}`,
-            lock: null,
-          },
-        }),
-      ),
-      writeFile(
-        join(directory, 'leak.json'),
-        JSON.stringify({
-          schema: 'snoredex-collection-state',
-          schemaVersion: '1.0.0',
-          datasetId: 'private-dataset',
-          catalogueFingerprint: `sha256:${'0'.repeat(64)}`,
-          items: [],
-        }),
-      ),
-    ]);
+    await writeValidArtifact(directory);
+    await writeFile(
+      join(directory, 'leak.json'),
+      JSON.stringify({
+        schema: 'snoredex-collection-state',
+        schemaVersion: '1.0.0',
+        datasetId: 'private-dataset',
+        catalogueFingerprint: `sha256:${'0'.repeat(64)}`,
+        items: [],
+      }),
+    );
     const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
     assert.notEqual(result.status, 0);
     assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_PRIVATE_STATE_SCHEMA_PRESENT: leak\.json/u);
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects external scripts in single-quoted and unquoted src attributes', async () => {
+  for (const source of ["'https://evil.invalid/a.js'", 'https://evil.invalid/a.js']) {
+    const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-script-test-'));
+    try {
+      await writeValidArtifact(directory, { indexScript: `<script src=${source}></script>` });
+      const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+      assert.notEqual(result.status, 0);
+      assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_EXTERNAL_SCRIPT_PRESENT: index\.html/u);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   }
 });

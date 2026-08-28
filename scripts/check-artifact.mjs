@@ -71,11 +71,12 @@ try {
     const html = await readFile(join(root, page), 'utf8');
     if (!html.includes('http-equiv="Content-Security-Policy"') || !html.includes(`content="${csp}"`))
       throw new Error(`ARTIFACT_CSP_MISSING: ${page}`);
-    if (/<script(?![^>]*\bsrc=)[^>]*>/iu.test(html)) throw new Error(`ARTIFACT_INLINE_SCRIPT_PRESENT: ${page}`);
     if (/\b(?:unsafe-inline|unsafe-eval)\b/iu.test(html)) throw new Error(`ARTIFACT_CSP_UNSAFE_DIRECTIVE: ${page}`);
     if (/\son[a-z]+\s*=/iu.test(html)) throw new Error(`ARTIFACT_INLINE_HANDLER_PRESENT: ${page}`);
-    for (const match of html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"[^>]*>/giu)) {
-      const source = match[1];
+    for (const match of html.matchAll(/<script\b[^>]*>/giu)) {
+      const src = /(?:^|[\t\n\f\r ])src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/iu.exec(match[0]);
+      if (!src) throw new Error(`ARTIFACT_INLINE_SCRIPT_PRESENT: ${page}`);
+      const source = src[1] ?? src[2] ?? src[3];
       if (!source || source.startsWith('/') || /^[a-z][a-z\d+.-]*:/iu.test(source) || source.includes('\\'))
         throw new Error(`ARTIFACT_EXTERNAL_SCRIPT_PRESENT: ${page}`);
     }
