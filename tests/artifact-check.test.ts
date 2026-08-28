@@ -195,6 +195,19 @@ test('finds meta refresh after quotes in malformed tag names', async () => {
   }
 });
 
+test('finds meta refresh after equals in malformed tag names', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-malformed-equals-test-'));
+  try {
+    const indexMeta = `<head><meta http-equiv="Content-Security-Policy" content="${csp}"></head><body><x="><meta http-equiv="refresh" content="0;url=https://evil.invalid">`;
+    await writeValidArtifact(directory, { indexMeta, indexScript: '' });
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_META_REFRESH_PRESENT: index\.html/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('rejects CSP-looking attributes on malformed tag names', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-malformed-tag-test-'));
   try {
@@ -272,6 +285,7 @@ test('rejects external JavaScript module dependencies', async () => {
     'const expression = `${(()=>{return /}/.test("x")})() || import/**/("/outside.js")}`;\n',
     'const expression = `${(()=>{if(true) /}/.test("x")})() || import/**/("/outside.js")}`;\n',
     'const expression = `${(()=>{if(("(") ) /}/.test("x")})() || import/**/("/outside.js")}`;\n',
+    'const expression = `${(()=>{if((`(`) ) /}/.test("x")})() || import/**/("/outside.js")}`;\n',
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-module-test-'));
     try {
