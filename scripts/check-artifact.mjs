@@ -647,8 +647,29 @@ function isJavaScriptForOfKeyword(value, tokenStart) {
   let beforeOpen = openParenthesis - 1;
   while (beforeOpen >= 0 && /\s/u.test(value[beforeOpen])) beforeOpen -= 1;
   if (!/(?:^|[^\w$])for(?:\s+await)?\s*$/iu.test(value.slice(0, beforeOpen + 1))) return false;
-  const header = value.slice(openParenthesis + 1, tokenStart);
-  return /\S/u.test(header) && !/[;]/u.test(header);
+  const headerStart = openParenthesis + 1;
+  const header = value.slice(headerStart, tokenStart);
+  return /\S/u.test(header) && !hasJavaScriptStatementSeparator(value, headerStart, tokenStart);
+}
+
+function hasJavaScriptStatementSeparator(value, start, end) {
+  for (let index = start; index < end; index += 1) {
+    const character = value[index];
+    if (character === '"' || character === "'") {
+      index = Math.min(skipJavaScriptQuoted(value, index, character), end) - 1;
+    } else if (character === '/' && value[index + 1] === '/') {
+      index = Math.min(skipJavaScriptLineComment(value, index), end) - 1;
+    } else if (character === '/' && value[index + 1] === '*') {
+      index = Math.min(skipJavaScriptBlockComment(value, index), end) - 1;
+    } else if (character === '`') {
+      index = Math.min(collectTemplateExpressions(value, index + 1, []), end) - 1;
+    } else if (character === '/' && isJavaScriptRegexStart(value, index)) {
+      index = Math.min(skipJavaScriptRegex(value, index), end) - 1;
+    } else if (character === ';') {
+      return true;
+    }
+  }
+  return false;
 }
 
 function skipJavaScriptRegexBackward(value, closeIndex) {
@@ -777,10 +798,46 @@ function isJavaScriptLabeledBlock(value, prefix) {
     beforeLabel -= 1;
   }
   if (lineTerminator) {
-    return prefix[beforeLabel] !== '{' || isJavaScriptBlockOpen(value, beforeLabel);
+    if (prefix[beforeLabel] === '{') return isJavaScriptBlockOpen(value, beforeLabel);
+    return !isJavaScriptObjectPropertyContext(value, prefix);
   }
   if (beforeLabel < 0 || /[;\n]/u.test(prefix[beforeLabel])) return true;
+  if (prefix[beforeLabel] === ',') return !isJavaScriptObjectPropertyContext(value, prefix);
   return prefix[beforeLabel] === '{' && isJavaScriptBlockOpen(value, beforeLabel);
+}
+
+function isJavaScriptObjectPropertyContext(value, prefix) {
+  const open = findEnclosingJavaScriptBrace(prefix, prefix.length - 1);
+  return open >= 0 && !isJavaScriptBlockOpen(value, open);
+}
+
+function findEnclosingJavaScriptBrace(value, index) {
+  let depth = 0;
+  for (let cursor = index; cursor >= 0; cursor -= 1) {
+    const character = value[cursor];
+    if (character === '"' || character === "'") {
+      cursor = skipJavaScriptQuotedBackward(value, cursor);
+      continue;
+    }
+    if (character === '`') {
+      cursor = skipJavaScriptTemplateBackward(value, cursor);
+      continue;
+    }
+    if (character === '/') {
+      const regexStart = skipJavaScriptRegexBackward(value, cursor);
+      if (regexStart >= 0) {
+        cursor = regexStart;
+        continue;
+      }
+    }
+    if (character === '}') {
+      depth += 1;
+    } else if (character === '{') {
+      if (depth === 0) return cursor;
+      depth -= 1;
+    }
+  }
+  return -1;
 }
 
 function isJavaScriptBlockOpen(value, openIndex) {
