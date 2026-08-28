@@ -85,7 +85,7 @@ function parseHtmlTagAt(html, start) {
       quote = character;
     } else if (character === '>') {
       const raw = html.slice(start, cursor + 1);
-      const match = /^<(?:(\/)[\s]*)?([a-z][\w:-]*)(?=[\t\n\f\r />])/iu.exec(raw);
+      const match = /^<(?:(\/))?([a-z][\w:-]*)(?=[\t\n\f\r />])/iu.exec(raw);
       return {
         closing: match?.[1] !== undefined,
         name: match?.[2]?.toLowerCase(),
