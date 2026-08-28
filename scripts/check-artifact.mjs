@@ -576,7 +576,9 @@ function isJavaScriptRegexStart(value, index) {
   const token = /([a-z_$][\w$]*)$/iu.exec(value.slice(0, previous + 1));
   return (
     token !== null &&
-    /^(?:await|case|default|delete|do|else|extends|in|instanceof|of|return|throw|typeof|void|yield)$/iu.test(token[1])
+    /^(?:await|case|default|delete|do|else|extends|in|instanceof|new|of|return|throw|typeof|void|yield)$/iu.test(
+      token[1],
+    )
   );
 }
 
