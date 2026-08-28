@@ -53,6 +53,13 @@ body {
 a {
   color: var(--primary);
   text-underline-offset: 0.18em;
+  min-height: 44px;
+  min-width: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+summary {
+  min-height: 44px;
 }
 a:focus-visible,
 button:focus-visible,

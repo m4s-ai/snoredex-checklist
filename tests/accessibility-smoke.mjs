@@ -32,18 +32,24 @@ async function expectNoSeriousAxeViolations(page, engine, viewport, route) {
 }
 
 async function expectTouchTargets(page, engine, viewport, route) {
-  assert.equal(
-    await page
-      .locator('button:visible, select:visible, input:not([type="radio"]):visible, textarea:visible')
-      .evaluateAll((elements) =>
-        elements.every((element) => {
+  const shortTargets = await page
+    .locator(
+      'a:visible, summary:visible, button:visible, select:visible, input:not([type="radio"]):visible, textarea:visible',
+    )
+    .evaluateAll((elements) =>
+      elements
+        .map((element) => {
           const rect = element.getBoundingClientRect();
-          return rect.width >= 44 && rect.height >= 44;
-        }),
-      ),
-    true,
-    `${engine}/${viewport}/${route}: touch targets`,
-  );
+          return {
+            tag: element.tagName.toLowerCase(),
+            text: element.textContent?.trim(),
+            width: rect.width,
+            height: rect.height,
+          };
+        })
+        .filter(({ width, height }) => width < 44 || height < 44),
+    );
+  assert.deepEqual(shortTargets, [], `${engine}/${viewport}/${route}: touch targets`);
   assert.equal(
     await page.locator('input[type="radio"]:visible').evaluateAll((elements) =>
       elements.every((element) => {
@@ -208,6 +214,19 @@ try {
             localName.textContent = '超長いローカライズ名 — 非常に長い表示テキスト';
             element.append(localName);
           });
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        assert.equal(
+          await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
+          true,
+          `${engineName}/${viewportName}: reduced motion media`,
+        );
+        assert.ok(
+          (await page
+            .locator('.image-button img')
+            .first()
+            .evaluate((image) => Number.parseFloat(getComputedStyle(image).transitionDuration))) <= 0.01,
+          `${engineName}/${viewportName}: reduced motion transition`,
+        );
         await page.evaluate(() => {
           document.documentElement.style.fontSize = '200%';
         });
@@ -234,12 +253,6 @@ try {
           await page.getByRole('heading', { name: 'Invalid checklist link' }).count(),
           1,
           `${engineName}/${viewportName}: invalid-link recovery`,
-        );
-        await page.emulateMedia({ reducedMotion: 'reduce' });
-        assert.equal(
-          await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
-          true,
-          `${engineName}/${viewportName}: reduced motion media`,
         );
         assert.equal(unexpected.length, 0, `${engineName}/${viewportName}: unexpected network requests`);
         await context.close();
