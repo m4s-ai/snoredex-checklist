@@ -775,8 +775,14 @@ function isJavaScriptRegexStart(value, index) {
 
 function isJavaScriptDeclaredIdentifier(value, name, beforeIndex) {
   const prefix = value.slice(0, beforeIndex);
-  const declaration = new RegExp(`(?:^|[;{},])\\s*(?:const|let|var)\\b[^;]*\\b${name}\\b\\s*(?==|[,;])`, 'iu');
-  return declaration.test(prefix);
+  const declaration = new RegExp(`(?:^|[;{},])\\s*(?:const|let|var)\\b[^;]*\\b${name}\\b\\s*(?==|[,;}])`, 'iu');
+  if (!declaration.test(prefix)) return false;
+  if (value[beforeIndex + name.length] !== '}') return true;
+  const brace = prefix.lastIndexOf('{');
+  if (brace < 0) return false;
+  let beforeBrace = brace - 1;
+  while (beforeBrace >= 0 && /\\s/u.test(prefix[beforeBrace])) beforeBrace -= 1;
+  return value[beforeBrace] === ',' || /(?:^|\\b(?:const|let|var))\\s*$/iu.test(prefix.slice(0, brace));
 }
 
 function isJavaScriptLabeledJump(value, labelStart) {
