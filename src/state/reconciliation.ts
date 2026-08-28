@@ -473,7 +473,9 @@ export function reconcilePrivateState(
       && state.items.some((item) => !isCurrentKnownTarget(context.targetItemClasses!, item.itemId))) {
       return fail("STATE_RECONCILIATION_BLOCKED");
     }
-    const mappedTargetIds = new Set(state.items.map((item) => item.itemId));
+    const mappedTargetIds = context.targetItemClasses === undefined
+      ? new Set<string>()
+      : new Set([...context.targetItemClasses].map(([itemId]) => itemId));
     const withRecords = reportFor(state.catalogueFingerprint, targetFingerprint, 0, state.items.map((item) => ({
       fromItemIds: [item.itemId],
       toItemIds: [item.itemId],
@@ -529,17 +531,25 @@ export function reconcilePrivateState(
       }
       const fromIds = transitionSources(transition);
       if (fromIds.length > 1 && fromIds.some((id) => !working.has(id))) {
-        const classified = transitionRecord(transition, current.state, "conflict");
+        const classified = transitionRecord(
+          reportTransition(transition, current.sourceItemId, current.hadRekey),
+          current.state,
+          "conflict",
+        );
         reports.push(classified.record);
-        conflicted.push(cloneItem(current.state));
+        conflicted.push(cloneItem(current.state, current.sourceItemId));
         blocked = true;
         continue;
       }
       if (fromIds.length > 1) {
         // A many-to-one transition is always a conflict, never a partial merge.
-        const classified = transitionRecord(transition, current.state, "conflict");
+        const classified = transitionRecord(
+          reportTransition(transition, current.sourceItemId, current.hadRekey),
+          current.state,
+          "conflict",
+        );
         reports.push(classified.record);
-        conflicted.push(cloneItem(current.state));
+        conflicted.push(cloneItem(current.state, current.sourceItemId));
         blocked = true;
         continue;
       }
@@ -580,7 +590,8 @@ export function reconcilePrivateState(
     working = next;
   }
 
-  const mappedTargetIds = new Set(working.keys());
+  const finalMigration = chain[chain.length - 1];
+  const mappedTargetIds = new Set(finalMigration.transitions.flatMap((transition) => transition.toItemIds));
   const report = reportFor(state.catalogueFingerprint, targetFingerprint, chain.length, reports, state.items.length, context.targetItemClasses, mappedTargetIds);
   if (blocked || !report.accounting.conservationSatisfied || conflicted.length > 0 || report.accounting.unresolved > 0) {
     return fail("STATE_RECONCILIATION_BLOCKED", report);

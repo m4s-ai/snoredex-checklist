@@ -76,6 +76,30 @@ test("reconciles retained and explicit one-to-one state without mutation", () =>
   assert.equal(JSON.stringify(result.value.report).includes("private"), false);
 });
 
+test("counts catalogue targets independently of private holdings", () => {
+  const result = reconcilePrivateState(state(oldFingerprint, [{
+    itemId: oldA,
+    status: "have",
+    quantityOwned: 1,
+    quantityOrdered: 0,
+  }]), targetFingerprint, {
+    migrations: [migration(oldFingerprint, targetFingerprint, [
+      transition(oldA, [targetA], "rekey-1:1", "preserve", "one-to-one-preserve"),
+      transition(oldB, [targetB], "rekey-1:1", "preserve", "one-to-one-preserve"),
+    ])],
+    knownTargetItemIds: new Set([targetA, targetB, targetC]),
+    targetItemClasses: new Map([
+      [targetA, "current-known"],
+      [targetB, "current-known"],
+      [targetC, "research"],
+    ]),
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.value.report.accounting.newCurrentKnown, 0);
+  assert.equal(result.value.report.accounting.newResearch, 1);
+});
+
 test("preserves retired records as private orphan candidates", () => {
   const result = reconcilePrivateState(state(oldFingerprint, [{ itemId: oldA, status: "skip", quantityOwned: 0, quantityOrdered: 0 }]), targetFingerprint, {
     migrations: [migration(oldFingerprint, targetFingerprint, [
@@ -167,7 +191,7 @@ test("fails closed for split, merge, unresolved and unaccounted records", () => 
     assert.equal(merge.error, "STATE_RECONCILIATION_BLOCKED");
     assert.equal(merge.report?.accounting.conflicts, 2);
     assert.equal(merge.report?.accounting.conservationSatisfied, true);
-    assert.equal(merge.report?.records[0]?.disposition, "orphans-and-conflict");
+    assert.equal(merge.report?.records[0]?.disposition, "orphan-and-conflict");
   }
 
   const unaccounted = reconcilePrivateState(state(oldFingerprint, [{ itemId: oldC, status: "skip", quantityOwned: 0, quantityOrdered: 0 }]), targetFingerprint, {
@@ -175,6 +199,39 @@ test("fails closed for split, merge, unresolved and unaccounted records", () => 
   });
   assert.equal(unaccounted.ok, false);
   if (!unaccounted.ok) assert.equal(unaccounted.error, "STATE_RECONCILIATION_BLOCKED");
+});
+
+test("reports original IDs for chained merge conflicts", () => {
+  const middleA = "item-00000000-0000-5000-8000-000000000011";
+  const middleB = "item-00000000-0000-5000-8000-000000000012";
+  const source = state(oldFingerprint, [
+    { itemId: oldA, status: "have", quantityOwned: 1, quantityOrdered: 0 },
+    { itemId: oldB, status: "ordered", quantityOwned: 0, quantityOrdered: 2 },
+  ]);
+  const result = reconcilePrivateState(source, targetFingerprint, {
+    migrations: [
+      migration(oldFingerprint, middleFingerprint, [
+        transition(oldA, [middleA], "rekey-1:1", "preserve", "one-to-one-preserve"),
+        transition(oldB, [middleB], "rekey-1:1", "preserve", "one-to-one-preserve"),
+      ]),
+      migration(middleFingerprint, targetFingerprint, [
+        transition(middleA, [targetC], "merge-N:1", "none", "requires-user-resolution", [middleA, middleB]),
+      ]),
+    ],
+    knownTargetItemIds: new Set([targetC]),
+  });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.deepEqual(result.report?.records.map((record) => record.fromItemIds), [[oldA], [oldB]]);
+  assert.deepEqual(result.report?.records.map((record) => record.toItemIds), [[targetC], [targetC]]);
+  assert.deepEqual(result.report?.records.map((record) => record.disposition), ["orphan-and-conflict", "orphan-and-conflict"]);
+  assert.equal(result.report?.records.length, 2);
+  assert.equal(result.report?.accounting.conflicts, 2);
+  assert.equal(result.report?.accounting.conservationSatisfied, true);
+  assert.equal(result.report?.accounting.unresolved, 2);
+  assert.equal(result.report?.accounting.accountedOldRecords, 2);
+  assert.equal(result.report?.accounting.newCurrentKnown, 0);
+  assert.equal(result.report?.accounting.newResearch, 0);
 });
 
 test("rejects unknown, future and incomplete chains before mutation", () => {
