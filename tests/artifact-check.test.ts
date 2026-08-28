@@ -530,6 +530,32 @@ test('recognizes regexes after labeled jump statements', async () => {
   }
 });
 
+test('does not treat a newline block after dynamic import as a method body', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-import-block-test-'));
+  try {
+    await writeValidArtifact(directory);
+    await writeFile(join(directory, 'theme.js'), 'import("/outside.js")\n{}\n');
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_EXTERNAL_MODULE_PRESENT: theme\.js/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('does not extend labeled jumps across a line terminator', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-jump-label-line-test-'));
+  try {
+    await writeValidArtifact(directory);
+    await writeFile(join(directory, 'theme.js'), 'while(false){break\nfoo\n/bar;} import("/outside.js");\n');
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_EXTERNAL_MODULE_PRESENT: theme\.js/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('rejects absolute stylesheet URLs before path normalization', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-absolute-stylesheet-test-'));
   try {

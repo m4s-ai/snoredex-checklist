@@ -472,7 +472,7 @@ function dynamicModuleDependencies(value) {
     let cursor = index + token[0].length;
     while (/\s/u.test(value[cursor] ?? '')) cursor += 1;
     const dynamicImport = value[cursor] === '(';
-    if (dynamicImport && isJavaScriptMethodDeclaration(value, cursor)) {
+    if (dynamicImport && isJavaScriptMethodDeclaration(value, index, cursor)) {
       index += token[0].length - 1;
       continue;
     }
@@ -650,7 +650,8 @@ function isJavaScriptMemberAccess(value, tokenStart) {
   return value[previous] === '.' || value[previous] === '#' || (value[previous] === '?' && value[previous - 1] === '.');
 }
 
-function isJavaScriptMethodDeclaration(value, openParenthesis) {
+function isJavaScriptMethodDeclaration(value, tokenStart, openParenthesis) {
+  if (!isJavaScriptMethodNameContext(value, tokenStart)) return false;
   let depth = 0;
   for (let index = openParenthesis; index < value.length; index += 1) {
     const character = value[index];
@@ -678,6 +679,42 @@ function isJavaScriptMethodDeclaration(value, openParenthesis) {
     return value[next] === '{';
   }
   return false;
+}
+
+function isJavaScriptMethodNameContext(value, tokenStart) {
+  let previous = tokenStart - 1;
+  while (previous >= 0 && /\s/u.test(value[previous])) previous -= 1;
+  for (;;) {
+    if (previous >= 0 && value[previous] === '*') {
+      previous -= 1;
+      while (previous >= 0 && /\s/u.test(value[previous])) previous -= 1;
+      continue;
+    }
+    const token = /([a-z_$][\w$]*)$/iu.exec(value.slice(0, previous + 1));
+    if (token === null) break;
+    if (!/^(?:accessor|async|get|set|static)$/iu.test(token[1])) break;
+    previous = token.index - 1;
+    while (previous >= 0 && /\s/u.test(value[previous])) previous -= 1;
+  }
+  if (previous < 0 || value[previous] === '{') {
+    if (previous < 0) return false;
+    return !isJavaScriptBlockOpen(value, previous) || isJavaScriptClassBody(value, previous);
+  }
+  if (value[previous] === ',') {
+    const open = findEnclosingJavaScriptBrace(value, previous);
+    return open >= 0 && !isJavaScriptBlockOpen(value, open);
+  }
+  if (value[previous] === '}' || value[previous] === ';') {
+    const open = findEnclosingJavaScriptBrace(value, previous);
+    return open >= 0 && isJavaScriptClassBody(value, open);
+  }
+  return false;
+}
+
+function isJavaScriptClassBody(value, openIndex) {
+  let before = openIndex - 1;
+  while (before >= 0 && /\s/u.test(value[before])) before -= 1;
+  return /\bclass(?:\s+[a-z_$][\w$]*)?(?:\s+extends[\s\S]*)?\s*$/iu.test(value.slice(0, before + 1));
 }
 
 function skipJavaScriptBlockComment(value, index) {
@@ -722,7 +759,10 @@ function isJavaScriptRegexStart(value, index) {
 
 function isJavaScriptLabeledJump(value, labelStart) {
   let end = labelStart;
-  while (end > 0 && /\s/u.test(value[end - 1])) end -= 1;
+  while (end > 0 && /\s/u.test(value[end - 1])) {
+    if (isJavaScriptLineTerminator(value[end - 1])) return false;
+    end -= 1;
+  }
   const token = /([a-z_$][\w$]*)$/iu.exec(value.slice(0, end));
   return token !== null && /^(?:break|continue)$/iu.test(token[1]);
 }
