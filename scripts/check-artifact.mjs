@@ -573,6 +573,7 @@ function isJavaScriptRegexStart(value, index) {
   while (previous >= 0 && /\s/u.test(value[previous])) previous -= 1;
   if (previous < 0 || /[({[=,:;!?&|+\-*%^~<>]/u.test(value[previous])) return true;
   if (value[previous] === ')') return isControlConditionEnd(value, previous);
+  if (value[previous] === '}') return isJavaScriptBlockEnd(value, previous);
   const token = /([a-z_$][\w$]*)$/iu.exec(value.slice(0, previous + 1));
   if (token === null) return false;
   let beforeToken = token.index - 1;
@@ -586,6 +587,39 @@ function isJavaScriptRegexStart(value, index) {
   return /^(?:await|case|default|delete|do|else|extends|in|instanceof|new|of|return|throw|typeof|void|yield)$/iu.test(
     token[1],
   );
+}
+
+function isJavaScriptBlockEnd(value, closeIndex) {
+  let depth = 0;
+  for (let index = closeIndex; index >= 0; index -= 1) {
+    const character = value[index];
+    if (character === '"' || character === "'") {
+      index = skipJavaScriptQuotedBackward(value, index);
+      continue;
+    }
+    if (character === '`') {
+      index = skipJavaScriptTemplateBackward(value, index);
+      continue;
+    }
+    if (character === '}') {
+      depth += 1;
+      continue;
+    }
+    if (character !== '{') continue;
+    depth -= 1;
+    if (depth !== 0) continue;
+    let before = index - 1;
+    while (before >= 0 && /\s/u.test(value[before])) before -= 1;
+    if (before < 0 || /[;}]/u.test(value[before])) return true;
+    if (value[before] === '>' && value[before - 1] === '=') return true;
+    if (value[before] === ')') return true;
+    const prefix = value.slice(0, before + 1);
+    return (
+      /(?:^|\s)(?:catch|do|else|finally|try)\s*$/iu.test(prefix) ||
+      /(?:^|\s)class(?:\s+[a-z_$][\w$]*)?(?:\s+extends[\s\S]*)?\s*$/iu.test(prefix)
+    );
+  }
+  return false;
 }
 
 function isControlConditionEnd(value, closeIndex) {
