@@ -179,8 +179,8 @@ function extractHead(html) {
     if (
       rawTextTag === undefined &&
       inertDepth === 0 &&
-      headStart < 0 &&
       !bodyStarted &&
+      (headStart < 0 || implicitHead) &&
       /\S/u.test(html.slice(previousEnd, tag.index).replace(/<![^>]*>/gu, ''))
     ) {
       bodyStarted = true;
@@ -197,7 +197,7 @@ function extractHead(html) {
       continue;
     }
     if (!closing && name === 'body') {
-      if (headStart >= 0) return html.slice(headStart, tag.index);
+      if (headStart >= 0) return bodyStarted ? '' : html.slice(headStart, tag.index);
       bodyStarted = true;
       previousEnd = tag.index + tag.raw.length;
       continue;
