@@ -43,6 +43,48 @@ function readAttribute(tag, name) {
   return match?.[1] ?? match?.[2] ?? match?.[3];
 }
 
+function hasActiveCspMeta(head, expectedCsp) {
+  const voidElements = new Set([
+    'area',
+    'base',
+    'br',
+    'col',
+    'embed',
+    'hr',
+    'img',
+    'input',
+    'link',
+    'meta',
+    'param',
+    'source',
+    'track',
+    'wbr',
+  ]);
+  const stack = [];
+  let cspSeen = false;
+  let controlledResourceBeforeCsp = false;
+  for (const match of head.matchAll(/<(?:(\/)\s*)?([a-z][\w:-]*)(?:\s[^>]*)?>/giu)) {
+    const tag = match[0];
+    const closing = match[1] !== undefined;
+    const name = match[2].toLowerCase();
+    if (closing) {
+      if (stack.at(-1) === name) stack.pop();
+      continue;
+    }
+    if (['base', 'link', 'script', 'style'].includes(name) && !cspSeen) controlledResourceBeforeCsp = true;
+    if (
+      name === 'meta' &&
+      stack.length === 0 &&
+      readAttribute(tag, 'http-equiv')?.toLowerCase() === 'content-security-policy' &&
+      decodeHtmlAttribute(readAttribute(tag, 'content') ?? '') === expectedCsp
+    ) {
+      cspSeen = true;
+    }
+    if (!voidElements.has(name) && !/\/\s*>$/u.test(tag)) stack.push(name);
+  }
+  return cspSeen && !controlledResourceBeforeCsp;
+}
+
 async function filesIn(directory) {
   const output = [];
   async function visit(current) {
@@ -93,19 +135,7 @@ try {
     const html = await readFile(join(root, page), 'utf8');
     const withoutComments = html.replace(/<!--[\s\S]*?(?:-->|$)/gu, '');
     const head = /<head\b[^>]*>([\s\S]*?)<\/head\s*>/iu.exec(withoutComments)?.[1] ?? '';
-    const activeHead = head.replace(/<template\b[^>]*>[\s\S]*?<\/template\s*>/giu, '');
-    const hasTemplate = /<\/?template\b/iu.test(head);
-    const firstControlledResource = activeHead.search(/<(?:base|link|script|style)\b/iu);
-    const hasCspMeta =
-      !hasTemplate &&
-      Array.from(activeHead.matchAll(/<meta\b[^>]*>/giu)).some((match) => {
-        const tag = match[0];
-        return (
-          (firstControlledResource < 0 || match.index <= firstControlledResource) &&
-          readAttribute(tag, 'http-equiv')?.toLowerCase() === 'content-security-policy' &&
-          decodeHtmlAttribute(readAttribute(tag, 'content') ?? '') === csp
-        );
-      });
+    const hasCspMeta = hasActiveCspMeta(head, csp);
     if (!hasCspMeta) throw new Error(`ARTIFACT_CSP_MISSING: ${page}`);
     if (/\b(?:unsafe-inline|unsafe-eval)\b/iu.test(html)) throw new Error(`ARTIFACT_CSP_UNSAFE_DIRECTIVE: ${page}`);
     if (/[\s/]on[a-z]+\s*=/iu.test(html)) throw new Error(`ARTIFACT_INLINE_HANDLER_PRESENT: ${page}`);
