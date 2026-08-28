@@ -424,6 +424,10 @@ function staticModuleDependency(value, index) {
       cursor = collectTemplateExpressions(value, cursor + 1, []) - 1;
       continue;
     }
+    if (character === '/' && isJavaScriptRegexStart(value, cursor)) {
+      cursor = skipJavaScriptRegex(value, cursor) - 1;
+      continue;
+    }
     if (character === '{') {
       braceDepth += 1;
       continue;
@@ -532,7 +536,8 @@ function isJavaScriptRegexStart(value, index) {
   if (value[previous] === ')') return isControlConditionEnd(value, previous);
   const token = /([a-z_$][\w$]*)$/iu.exec(value.slice(0, previous + 1));
   return (
-    token !== null && /^(?:await|case|delete|do|else|in|instanceof|of|return|throw|typeof|void|yield)$/iu.test(token[1])
+    token !== null &&
+    /^(?:await|case|default|delete|do|else|in|instanceof|of|return|throw|typeof|void|yield)$/iu.test(token[1])
   );
 }
 
