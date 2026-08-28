@@ -345,6 +345,7 @@ test('rejects external JavaScript module dependencies', async () => {
     'const source = "/outside.js"; import(source);\n',
     'if (/[(]/.test("(")) /[/*]/.test("*"); import("/outside.js");\n',
     'class X { x=/}/; } /[/*]/.test("*"); import("/outside.js");\n',
+    'class X { x=/\\}/; } /[/*]/.test("*"); import("/outside.js");\n',
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-module-test-'));
     try {
@@ -410,6 +411,20 @@ test('preserves script-supporting elements after invalid xmp in frameset context
     const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
     assert.notEqual(result.status, 0);
     assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_EXTERNAL_SCRIPT_PRESENT: index\.html/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('preserves noframes raw text inside frameset context', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-frameset-noframes-test-'));
+  try {
+    await writeValidArtifact(directory, {
+      indexScript: '<frameset><noframes><script>example</script></noframes></frameset>',
+    });
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.equal(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /artifact ok:/u);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

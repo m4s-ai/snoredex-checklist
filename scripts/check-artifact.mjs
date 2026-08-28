@@ -266,7 +266,10 @@ function stripHtmlComments(html) {
           if (
             !tag.closing &&
             rawTextElements.has(tag.name) &&
-            !((selectDepth > 0 || framesetDepth > 0) && tag.name !== 'script')
+            !(
+              (selectDepth > 0 && tag.name !== 'script') ||
+              (framesetDepth > 0 && tag.name !== 'script' && tag.name !== 'noframes')
+            )
           )
             rawTextTag = tag.name;
         } else {
@@ -619,9 +622,8 @@ function skipJavaScriptRegexBackward(value, closeIndex) {
   let inCharacterClass = false;
   for (let index = closeIndex - 1; index >= 0; index -= 1) {
     const character = value[index];
-    if (character === '\\') {
-      index -= 1;
-    } else if (inCharacterClass) {
+    if (character !== '\\' && isJavaScriptCharacterEscaped(value, index)) continue;
+    if (inCharacterClass) {
       if (character === '[') inCharacterClass = false;
     } else if (character === ']') {
       inCharacterClass = true;
@@ -630,6 +632,12 @@ function skipJavaScriptRegexBackward(value, closeIndex) {
     }
   }
   return -1;
+}
+
+function isJavaScriptCharacterEscaped(value, index) {
+  let slashCount = 0;
+  for (let cursor = index - 1; cursor >= 0 && value[cursor] === '\\'; cursor -= 1) slashCount += 1;
+  return slashCount % 2 === 1;
 }
 
 function isJavaScriptFunctionExpression(prefix) {
