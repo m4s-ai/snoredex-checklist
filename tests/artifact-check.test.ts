@@ -498,6 +498,38 @@ test('ignores dynamic-import text inside JavaScript strings', async () => {
   }
 });
 
+test('ignores ordinary methods and member calls named import', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-member-import-test-'));
+  try {
+    await writeValidArtifact(directory);
+    await writeFile(
+      join(directory, 'theme.js'),
+      'const helper={import(value){return value}}; helper.import("/not-a-module.js");\n',
+    );
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.equal(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /artifact ok:/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('recognizes regexes after labeled jump statements', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-labeled-jump-test-'));
+  try {
+    await writeValidArtifact(directory);
+    await writeFile(
+      join(directory, 'theme.js'),
+      'label: while(false){ break label\n/[/*]/.test("*"); } import("/outside.js");\n',
+    );
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_EXTERNAL_MODULE_PRESENT: theme\.js/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('rejects absolute stylesheet URLs before path normalization', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-absolute-stylesheet-test-'));
   try {

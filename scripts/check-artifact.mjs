@@ -465,9 +465,17 @@ function dynamicModuleDependencies(value) {
     }
     const token = /\bimport\b/gu.exec(value.slice(index));
     if (token?.index !== 0) continue;
+    if (isJavaScriptMemberAccess(value, index)) {
+      index += token[0].length - 1;
+      continue;
+    }
     let cursor = index + token[0].length;
     while (/\s/u.test(value[cursor] ?? '')) cursor += 1;
     const dynamicImport = value[cursor] === '(';
+    if (dynamicImport && isJavaScriptMethodDeclaration(value, cursor)) {
+      index += token[0].length - 1;
+      continue;
+    }
     if (dynamicImport) {
       cursor += 1;
       while (/\s/u.test(value[cursor] ?? '')) cursor += 1;
@@ -636,6 +644,42 @@ function isJavaScriptLineTerminator(character) {
   return character === '\n' || character === '\r' || character === '\u2028' || character === '\u2029';
 }
 
+function isJavaScriptMemberAccess(value, tokenStart) {
+  let previous = tokenStart - 1;
+  while (previous >= 0 && /\s/u.test(value[previous])) previous -= 1;
+  return value[previous] === '.' || value[previous] === '#' || (value[previous] === '?' && value[previous - 1] === '.');
+}
+
+function isJavaScriptMethodDeclaration(value, openParenthesis) {
+  let depth = 0;
+  for (let index = openParenthesis; index < value.length; index += 1) {
+    const character = value[index];
+    if (character === '"' || character === "'") {
+      index = skipJavaScriptQuoted(value, index, character) - 1;
+      continue;
+    }
+    if (character === '`') {
+      index = collectTemplateExpressions(value, index + 1, []) - 1;
+      continue;
+    }
+    if (character === '/' && isJavaScriptRegexStart(value, index)) {
+      index = skipJavaScriptRegex(value, index) - 1;
+      continue;
+    }
+    if (character === '(') {
+      depth += 1;
+      continue;
+    }
+    if (character !== ')') continue;
+    depth -= 1;
+    if (depth !== 0) continue;
+    let next = index + 1;
+    while (/\s/u.test(value[next] ?? '')) next += 1;
+    return value[next] === '{';
+  }
+  return false;
+}
+
 function skipJavaScriptBlockComment(value, index) {
   const end = value.indexOf('*/', index + 2);
   return end < 0 ? value.length : end + 2;
@@ -671,8 +715,16 @@ function isJavaScriptRegexStart(value, index) {
     /^(?:await|case|default|delete|do|else|extends|in|instanceof|new|of|return|throw|typeof|void|yield)$/iu.test(
       token[1],
     ) ||
-    (lineTerminator && /^(?:break|continue|debugger)$/iu.test(token[1]))
+    (lineTerminator &&
+      (/^(?:break|continue|debugger)$/iu.test(token[1]) || isJavaScriptLabeledJump(value, token.index)))
   );
+}
+
+function isJavaScriptLabeledJump(value, labelStart) {
+  let end = labelStart;
+  while (end > 0 && /\s/u.test(value[end - 1])) end -= 1;
+  const token = /([a-z_$][\w$]*)$/iu.exec(value.slice(0, end));
+  return token !== null && /^(?:break|continue)$/iu.test(token[1]);
 }
 
 function isJavaScriptForOfKeyword(value, tokenStart) {
