@@ -379,14 +379,49 @@ function moduleDependencySources(value) {
   const sources = [stripJavaScriptComments(value), ...extractTemplateExpressions(value).map(stripJavaScriptComments)];
   const dependencies = [];
   for (const source of sources) {
-    for (const pattern of [
-      /\bimport\s*\(\s*(['"])([^'"]+)\1/gu,
-      /\bimport\s*(['"])([^'"]+)\1/gu,
-      /\bimport\s*\(\s*(\x60)([^\x60$]*)\1/gu,
-    ]) {
-      for (const match of source.matchAll(pattern)) dependencies.push(match[2]);
-    }
+    dependencies.push(...dynamicModuleDependencies(source));
     dependencies.push(...staticModuleDependencies(source));
+  }
+  return dependencies;
+}
+
+function dynamicModuleDependencies(value) {
+  const dependencies = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (character === '"' || character === "'") {
+      index = skipJavaScriptQuoted(value, index, character) - 1;
+      continue;
+    }
+    if (character === '`') {
+      index = collectTemplateExpressions(value, index + 1, []) - 1;
+      continue;
+    }
+    if (character === '/' && isJavaScriptRegexStart(value, index)) {
+      index = skipJavaScriptRegex(value, index) - 1;
+      continue;
+    }
+    const token = /\bimport\b/gu.exec(value.slice(index));
+    if (token?.index !== 0) continue;
+    let cursor = index + token[0].length;
+    while (/\s/u.test(value[cursor] ?? '')) cursor += 1;
+    if (value[cursor] === '(') {
+      cursor += 1;
+      while (/\s/u.test(value[cursor] ?? '')) cursor += 1;
+    }
+    const quote = value[cursor];
+    if (quote === '"' || quote === "'") {
+      const end = skipJavaScriptQuoted(value, cursor, quote);
+      dependencies.push(value.slice(cursor + 1, end - 1));
+      index = end - 1;
+      continue;
+    }
+    if (value[cursor] === '`') {
+      const end = collectTemplateExpressions(value, cursor + 1, []);
+      const source = value.slice(cursor + 1, end - 1);
+      if (!source.includes('$')) dependencies.push(source);
+      index = end - 1;
+    }
   }
   return dependencies;
 }
@@ -403,7 +438,7 @@ function staticModuleDependencies(value) {
       index = collectTemplateExpressions(value, index + 1, []) - 1;
       continue;
     }
-    const token = /\b(?:import|export)\s+/gu.exec(value.slice(index));
+    const token = /\b(?:import|export)\b/gu.exec(value.slice(index));
     if (token?.index !== 0) continue;
     const dependency = staticModuleDependency(value, index + token[0].length);
     if (dependency !== undefined) dependencies.push(dependency);
@@ -922,7 +957,7 @@ try {
     const relativePath = relative(root, file).replaceAll('\\', '/');
     if (/\.css$/iu.test(relativePath)) {
       for (const match of stripCssComments(decodeCssEscapes(text)).matchAll(
-        /@import\s+(?:url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s)]+))\s*\)|"([^"]*)"|'([^']*)')/giu,
+        /@import\b\s*(?:url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s)]+))\s*\)|"([^"]*)"|'([^']*)')/giu,
       )) {
         const source = decodeHtmlAttribute(match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5] ?? '');
         if (

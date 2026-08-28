@@ -267,6 +267,11 @@ test('keeps stylesheet links and CSS imports inside the artifact', async () => {
       error: /ARTIFACT_EXTERNAL_CSS_IMPORT_PRESENT: styles\.css/u,
     },
     {
+      indexMeta: `<head><meta http-equiv="Content-Security-Policy" content="${csp}"><link rel="stylesheet" href="styles.css"></head>`,
+      css: '@import"/outside.css";',
+      error: /ARTIFACT_EXTERNAL_CSS_IMPORT_PRESENT: styles\.css/u,
+    },
+    {
       indexMeta: `<head><meta http-equiv="Content-Security-Policy" content="${csp}"><link data-x=">" rel="stylesheet" href="../../outside.css"></head>`,
       css: '',
       error: /ARTIFACT_EXTERNAL_STYLESHEET_PRESENT: index\.html/u,
@@ -320,6 +325,19 @@ test('ignores from text inside JavaScript regex literals', async () => {
   try {
     await writeValidArtifact(directory);
     await writeFile(join(directory, 'theme.js'), 'export default /from "\\/outside.js"/;\n');
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.equal(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /artifact ok:/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('ignores dynamic-import text inside JavaScript strings', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-module-string-test-'));
+  try {
+    await writeValidArtifact(directory);
+    await writeFile(join(directory, 'theme.js'), 'const message = \'import("/outside.js")\';\n');
     const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
     assert.equal(result.status, 0);
     assert.match(`${result.stdout}${result.stderr}`, /artifact ok:/u);
