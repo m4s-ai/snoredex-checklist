@@ -25,7 +25,9 @@ import {
 
 const fingerprint = "sha256:" + "a".repeat(64);
 const otherFingerprint = "sha256:" + "b".repeat(64);
+const finalFingerprint = "sha256:" + "c".repeat(64);
 const itemA = "item-00000000-0000-0000-0000-00000000000a";
+const itemB = "item-00000000-0000-0000-0000-00000000000b";
 const knownItemIds = new Set([itemA]);
 
 function state(note?: string, catalogueFingerprint = fingerprint): PrivateState {
@@ -159,6 +161,110 @@ test("preview exposes only safe aggregates and blocks unknown fingerprints", () 
     ok: false,
     error: "STATE_FINGERPRINT_UNSUPPORTED",
   });
+});
+
+test("gates older imports through the shared reconciliation chain", () => {
+  const storage = new FakeStorage();
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision,
+    now: () => exportedAt,
+    reconciliation: {
+      knownSourceItemIds: new Set([itemA]),
+      migrations: [{
+        fromFingerprint: otherFingerprint,
+        toFingerprint: fingerprint,
+        transitions: [{
+          fromItemId: itemA,
+          toItemIds: [itemA],
+          changeKind: "retained",
+          automaticStateAction: "preserve",
+          reconciliation: "identity-retained",
+        }],
+      }],
+    },
+  });
+  const imported = createPortableBackup(state("older", otherFingerprint), { appRevision, exportedAt });
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  const plan = lifecycle.prepareImport(imported.value.bytes, fingerprint, knownItemIds);
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.equal(plan.value.candidate.catalogueFingerprint, fingerprint);
+  assert.equal(plan.value.preview.sourceFingerprint, otherFingerprint);
+  assert.equal(plan.value.preview.reconciliation?.conservationSatisfied, true);
+  assert.equal(plan.value.reconciliation?.report.accounting.migrated, 0);
+  assert.deepEqual(plan.value.candidate.items, [{
+    itemId: itemA,
+    status: "have",
+    quantityOwned: 2,
+    quantityOrdered: 1,
+    note: "older",
+  }]);
+});
+
+test("never previews or writes a conflicting migration", () => {
+  const storage = new FakeStorage();
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision,
+    reconciliation: {
+      knownSourceItemIds: new Set([itemA]),
+      migrations: [{
+        fromFingerprint: otherFingerprint,
+        toFingerprint: fingerprint,
+        transitions: [{
+          fromItemId: itemA,
+          toItemIds: [itemA, "item-00000000-0000-0000-0000-00000000000b"],
+          changeKind: "split-1:N",
+          automaticStateAction: "none",
+          reconciliation: "requires-user-resolution",
+        }],
+      }],
+    },
+  });
+  const imported = createPortableBackup(state("older", otherFingerprint), { appRevision, exportedAt });
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  assert.deepEqual(lifecycle.prepareImport(imported.value.bytes, fingerprint, new Set([
+    itemA,
+    "item-00000000-0000-0000-0000-00000000000b",
+  ])), {
+    ok: false,
+    error: "STATE_RECONCILIATION_BLOCKED",
+  });
+  assert.equal(storage.values.size, 0);
+});
+
+test("rechecks the same reconciliation before committing an import", async () => {
+  const storage = new FakeStorage();
+  const transitions = [{
+    fromItemId: itemA,
+    toItemIds: [itemA],
+    changeKind: "retained",
+    automaticStateAction: "preserve",
+    reconciliation: "identity-retained",
+  }];
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision,
+    reconciliation: {
+      knownSourceItemIds: new Set([itemA]),
+      migrations: [{ fromFingerprint: otherFingerprint, toFingerprint: fingerprint, transitions }],
+    },
+  });
+  const imported = createPortableBackup(state("older", otherFingerprint), { appRevision, exportedAt });
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  const plan = lifecycle.prepareImport(imported.value.bytes, fingerprint, knownItemIds);
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  (transitions[0] as { toItemIds: readonly string[] }).toItemIds = [
+    itemA,
+    "item-00000000-0000-0000-0000-00000000000b",
+  ];
+  assert.deepEqual(await lifecycle.commitImport(plan.value, true), {
+    ok: false,
+    error: "STATE_RECONCILIATION_BLOCKED",
+  });
+  assert.equal(storage.values.size, 0);
 });
 
 test("replacement keeps a validated recovery copy and ordinary saves preserve it", async () => {
@@ -347,6 +453,162 @@ test("clear and restore use one recoverable slot and swap without merging", asyn
   if (!restored.ok) return;
   assert.equal(restored.value.active?.items[0]?.note, "keep me");
   assert.equal(restored.value.recovery, undefined);
+});
+
+test("restore preserves retired orphans in the recovery slot", async () => {
+  const storage = new FakeStorage();
+  const retired = state("retired", otherFingerprint);
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state(undefined, fingerprint)));
+  storage.values.set(PRIVATE_STATE_RECOVERY_STORAGE_KEY, JSON.stringify(retired));
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision,
+    now: () => exportedAt,
+    reconciliation: {
+      knownSourceItemIds: new Set([itemA]),
+      migrations: [{
+        fromFingerprint: otherFingerprint,
+        toFingerprint: fingerprint,
+        transitions: [{
+          fromItemId: itemA,
+          toItemIds: [],
+          changeKind: "retired-1:0",
+          automaticStateAction: "none",
+          reconciliation: "retire-to-orphan",
+        }],
+      }],
+    },
+  });
+
+  const restored = await lifecycle.restore(true, fingerprint, new Set());
+  assert.equal(restored.ok, true);
+  if (!restored.ok) return;
+  assert.deepEqual(restored.value.active?.items, []);
+  assert.equal(restored.value.recovery?.catalogueFingerprint, otherFingerprint);
+  assert.equal(restored.value.recovery?.items[0]?.note, "retired");
+  const storedRecovery = JSON.parse(storage.values.get(PRIVATE_STATE_RECOVERY_STORAGE_KEY) ?? "null") as PrivateState;
+  assert.equal(storedRecovery.catalogueFingerprint, otherFingerprint);
+  assert.equal(storedRecovery.items[0]?.itemId, itemA);
+});
+
+test("restore keeps the original source identity through a retired chain", async () => {
+  const storage = new FakeStorage();
+  const retired = state("retired", otherFingerprint);
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state(undefined, finalFingerprint)));
+  storage.values.set(PRIVATE_STATE_RECOVERY_STORAGE_KEY, JSON.stringify(retired));
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision,
+    now: () => exportedAt,
+    reconciliation: {
+      knownSourceItemIds: new Set([itemA]),
+      migrations: [
+        {
+          fromFingerprint: otherFingerprint,
+          toFingerprint: fingerprint,
+          transitions: [{
+            fromItemId: itemA,
+            toItemIds: [itemB],
+            changeKind: "rekey-1:1",
+            automaticStateAction: "preserve",
+            reconciliation: "one-to-one-preserve",
+          }],
+        },
+        {
+          fromFingerprint: fingerprint,
+          toFingerprint: finalFingerprint,
+          transitions: [{
+            fromItemId: itemB,
+            toItemIds: [],
+            changeKind: "retired-1:0",
+            automaticStateAction: "none",
+            reconciliation: "retire-to-orphan",
+          }],
+        },
+      ],
+    },
+  });
+
+  const restored = await lifecycle.restore(true, finalFingerprint, new Set());
+  assert.equal(restored.ok, true);
+  if (!restored.ok) return;
+  assert.deepEqual(restored.value.active?.items, []);
+  assert.equal(restored.value.recovery?.items[0]?.itemId, itemA);
+
+  const replayed = await lifecycle.restore(true, fingerprint, new Set([itemB]));
+  assert.equal(replayed.ok, true);
+  if (!replayed.ok) return;
+  assert.equal(replayed.value.active?.items[0]?.itemId, itemB);
+  assert.equal(replayed.value.recovery, undefined);
+});
+
+test("import preserves retired orphans in the recovery slot", async () => {
+  const storage = new FakeStorage();
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision,
+    now: () => exportedAt,
+    reconciliation: {
+      knownSourceItemIds: new Set([itemA]),
+      migrations: [{
+        fromFingerprint: otherFingerprint,
+        toFingerprint: fingerprint,
+        transitions: [{
+          fromItemId: itemA,
+          toItemIds: [],
+          changeKind: "retired-1:0",
+          automaticStateAction: "none",
+          reconciliation: "retire-to-orphan",
+        }],
+      }],
+    },
+  });
+  const imported = createPortableBackup(state("retired", otherFingerprint), { appRevision, exportedAt });
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  const plan = lifecycle.prepareImport(imported.value.bytes, fingerprint, new Set());
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  const committed = await lifecycle.commitImport(plan.value, true);
+  assert.equal(committed.ok, true);
+  if (!committed.ok) return;
+  assert.deepEqual(committed.value.active?.items, []);
+  assert.equal(committed.value.recovery?.catalogueFingerprint, otherFingerprint);
+  assert.equal(committed.value.recovery?.items[0]?.note, "retired");
+});
+
+test("restore fails closed when an orphan would displace the active snapshot", async () => {
+  const storage = new FakeStorage();
+  const active = state("active", fingerprint);
+  const retired = state("retired", otherFingerprint);
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(active));
+  storage.values.set(PRIVATE_STATE_RECOVERY_STORAGE_KEY, JSON.stringify(retired));
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision,
+    now: () => exportedAt,
+    reconciliation: {
+      knownSourceItemIds: new Set([itemA]),
+      migrations: [{
+        fromFingerprint: otherFingerprint,
+        toFingerprint: fingerprint,
+        transitions: [{
+          fromItemId: itemA,
+          toItemIds: [],
+          changeKind: "retired-1:0",
+          automaticStateAction: "none",
+          reconciliation: "retire-to-orphan",
+        }],
+      }],
+    },
+  });
+
+  assert.deepEqual(await lifecycle.restore(true, fingerprint, new Set()), {
+    ok: false,
+    error: "STATE_RECONCILIATION_BLOCKED",
+  });
+  const current = lifecycle.read();
+  assert.equal(current.ok, true);
+  if (current.ok) {
+    assert.equal(current.value.active?.items[0]?.note, "active");
+    assert.equal(current.value.recovery?.items[0]?.note, "retired");
+  }
 });
 
 test("restore fails closed when recovery is not valid for the active catalogue", async () => {
