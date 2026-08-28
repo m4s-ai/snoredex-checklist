@@ -681,7 +681,7 @@ function stripJavaScriptComments(value) {
       character === '/' &&
       value[index + 1] !== '/' &&
       value[index + 1] !== '*' &&
-      isJavaScriptRegexStart(value, index)
+      isJavaScriptRegexStart(output, output.length)
     ) {
       const end = skipJavaScriptRegex(value, index);
       output += value.slice(index, end);

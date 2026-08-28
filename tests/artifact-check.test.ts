@@ -307,6 +307,7 @@ test('rejects external JavaScript module dependencies', async () => {
     `export {${' '.repeat(201)}} from "/outside.js";\n`,
     'import "./catalogue.js"; console.log(\' from "/not-a-module.js"\');\n',
     '/[/*]/.test("*"); import("/outside.js");\n',
+    'const x = /*c*/ /[/*]/.test("*"); import("/outside.js");\n',
   ]) {
     const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-module-test-'));
     try {
