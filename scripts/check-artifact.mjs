@@ -227,6 +227,7 @@ function stripHtmlComments(html) {
   let commentStartDash = false;
   let rawTextTag;
   let selectDepth = 0;
+  let framesetDepth = 0;
   const rawTextElements = new Set([
     'iframe',
     'noembed',
@@ -261,7 +262,12 @@ function stripHtmlComments(html) {
           output += tag.raw;
           index = tag.end;
           if (tag.name === 'select') selectDepth = Math.max(0, selectDepth + (tag.closing ? -1 : 1));
-          if (!tag.closing && rawTextElements.has(tag.name) && !(selectDepth > 0 && tag.name !== 'script'))
+          if (tag.name === 'frameset') framesetDepth = Math.max(0, framesetDepth + (tag.closing ? -1 : 1));
+          if (
+            !tag.closing &&
+            rawTextElements.has(tag.name) &&
+            !((selectDepth > 0 || framesetDepth > 0) && tag.name !== 'script')
+          )
             rawTextTag = tag.name;
         } else {
           output += html[index];
@@ -683,6 +689,13 @@ function isJavaScriptBlockEnd(value, closeIndex) {
       index = skipJavaScriptTemplateBackward(value, index);
       continue;
     }
+    if (character === '/') {
+      const regexStart = skipJavaScriptRegexBackward(value, index);
+      if (regexStart >= 0) {
+        index = regexStart;
+        continue;
+      }
+    }
     if (character === '}') {
       depth += 1;
       continue;
@@ -749,6 +762,13 @@ function isControlConditionEnd(value, closeIndex) {
     if (value[index] === '"' || value[index] === "'") {
       index = skipJavaScriptQuotedBackward(value, index);
       continue;
+    }
+    if (value[index] === '/') {
+      const regexStart = skipJavaScriptRegexBackward(value, index);
+      if (regexStart >= 0) {
+        index = regexStart;
+        continue;
+      }
     }
     if (value[index] === ')') depth += 1;
     else if (value[index] === '(') {
