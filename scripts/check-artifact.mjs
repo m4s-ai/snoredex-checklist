@@ -563,8 +563,14 @@ function skipJavaScriptQuoted(value, index, quote) {
 }
 
 function skipJavaScriptLineComment(value, index) {
-  const end = value.indexOf('\n', index + 2);
-  return end < 0 ? value.length : end;
+  for (let end = index + 2; end < value.length; end += 1) {
+    if (isJavaScriptLineTerminator(value[end])) return end;
+  }
+  return value.length;
+}
+
+function isJavaScriptLineTerminator(character) {
+  return character === '\n' || character === '\r' || character === '\u2028' || character === '\u2029';
 }
 
 function skipJavaScriptBlockComment(value, index) {
@@ -576,7 +582,7 @@ function isJavaScriptRegexStart(value, index) {
   let previous = index - 1;
   let lineTerminator = false;
   while (previous >= 0 && /\s/u.test(value[previous])) {
-    if (/\r|\n|\u2028|\u2029/u.test(value[previous])) lineTerminator = true;
+    if (isJavaScriptLineTerminator(value[previous])) lineTerminator = true;
     previous -= 1;
   }
   if (previous < 0 || /[({[=,:;!?&|+\-*%^~<>]/u.test(value[previous])) return true;
@@ -812,7 +818,7 @@ function stripJavaScriptComments(value) {
       continue;
     }
     if (lineComment) {
-      if (character === '\n' || character === '\r') {
+      if (isJavaScriptLineTerminator(character)) {
         lineComment = false;
         output += character;
       }
@@ -823,7 +829,7 @@ function stripJavaScriptComments(value) {
         blockComment = false;
         output += ' ';
         index += 1;
-      } else if (character === '\n' || character === '\r') {
+      } else if (isJavaScriptLineTerminator(character)) {
         output += character;
       }
       continue;
