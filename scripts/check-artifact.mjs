@@ -61,8 +61,10 @@ function hasActiveCspMeta(head, expectedCsp) {
     'wbr',
   ]);
   const stack = [];
+  const allowedHeadElements = new Set(['base', 'link', 'meta', 'noscript', 'script', 'style', 'template', 'title']);
   let cspSeen = false;
   let controlledResourceBeforeCsp = false;
+  let headTerminated = false;
   for (const match of head.matchAll(/<(?:(\/)\s*)?([a-z][\w:-]*)(?:\s[^>]*)?>/giu)) {
     const tag = match[0];
     const closing = match[1] !== undefined;
@@ -71,6 +73,7 @@ function hasActiveCspMeta(head, expectedCsp) {
       if (stack.at(-1) === name) stack.pop();
       continue;
     }
+    if (!allowedHeadElements.has(name)) headTerminated = true;
     if (['base', 'link', 'script', 'style'].includes(name) && !cspSeen) controlledResourceBeforeCsp = true;
     if (
       name === 'meta' &&
@@ -82,7 +85,7 @@ function hasActiveCspMeta(head, expectedCsp) {
     }
     if (!voidElements.has(name)) stack.push(name);
   }
-  return cspSeen && !controlledResourceBeforeCsp;
+  return cspSeen && !controlledResourceBeforeCsp && !headTerminated;
 }
 
 async function filesIn(directory) {
