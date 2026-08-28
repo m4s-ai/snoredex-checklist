@@ -627,32 +627,85 @@ function isJavaScriptRegexStart(value, index) {
 }
 
 function isJavaScriptForOfKeyword(value, tokenStart) {
-  let cursor = tokenStart - 1;
-  while (cursor >= 0 && /\s/u.test(value[cursor])) cursor -= 1;
-  if (cursor < 0 || !/[\w$}\]]/u.test(value[cursor])) return false;
-  let nestedParentheses = 0;
-  let openParenthesis = -1;
-  for (let index = cursor; index >= 0; index -= 1) {
-    if (value[index] === ')') {
-      nestedParentheses += 1;
-    } else if (value[index] === '(') {
-      if (nestedParentheses > 0) nestedParentheses -= 1;
-      else {
-        openParenthesis = index;
-        break;
-      }
+  for (let index = 0; index < tokenStart; index += 1) {
+    const character = value[index];
+    if (character === '"' || character === "'") {
+      index = skipJavaScriptQuoted(value, index, character) - 1;
+      continue;
     }
+    if (character === '/' && value[index + 1] === '/') {
+      index = skipJavaScriptLineComment(value, index) - 1;
+      continue;
+    }
+    if (character === '/' && value[index + 1] === '*') {
+      index = skipJavaScriptBlockComment(value, index) - 1;
+      continue;
+    }
+    if (character === '`') {
+      index = collectTemplateExpressions(value, index + 1, []) - 1;
+      continue;
+    }
+    if (character === '/' && isJavaScriptRegexStart(value, index)) {
+      index = skipJavaScriptRegex(value, index) - 1;
+      continue;
+    }
+    if (value.slice(index, index + 3).toLowerCase() !== 'for') continue;
+    if (index > 0 && /[\w$]/u.test(value[index - 1])) continue;
+    let cursor = index + 3;
+    while (cursor < tokenStart && /\s/u.test(value[cursor])) cursor += 1;
+    if (value.slice(cursor, cursor + 5).toLowerCase() === 'await' && !/[\w$]/u.test(value[cursor + 5] ?? '')) {
+      cursor += 5;
+      while (cursor < tokenStart && /\s/u.test(value[cursor])) cursor += 1;
+    }
+    if (value[cursor] !== '(') continue;
+    const headerStart = cursor + 1;
+    if (!isJavaScriptForHeaderPrefix(value, cursor, tokenStart)) continue;
+    const header = value.slice(headerStart, tokenStart);
+    if (/\S/u.test(header) && !hasJavaScriptStatementSeparator(value, headerStart, tokenStart)) return true;
+    index = cursor;
   }
-  if (openParenthesis < 0) return false;
-  let beforeOpen = openParenthesis - 1;
-  while (beforeOpen >= 0 && /\s/u.test(value[beforeOpen])) beforeOpen -= 1;
-  if (!/(?:^|[^\w$])for(?:\s+await)?\s*$/iu.test(value.slice(0, beforeOpen + 1))) return false;
-  const headerStart = openParenthesis + 1;
-  const header = value.slice(headerStart, tokenStart);
-  return /\S/u.test(header) && !hasJavaScriptStatementSeparator(value, headerStart, tokenStart);
+  return false;
+}
+
+function isJavaScriptForHeaderPrefix(value, openParenthesis, end) {
+  const stack = ['('];
+  for (let index = openParenthesis + 1; index < end; index += 1) {
+    const character = value[index];
+    if (character === '"' || character === "'") {
+      index = skipJavaScriptQuoted(value, index, character) - 1;
+      continue;
+    }
+    if (character === '/' && value[index + 1] === '/') {
+      index = skipJavaScriptLineComment(value, index) - 1;
+      continue;
+    }
+    if (character === '/' && value[index + 1] === '*') {
+      index = skipJavaScriptBlockComment(value, index) - 1;
+      continue;
+    }
+    if (character === '`') {
+      index = collectTemplateExpressions(value, index + 1, []) - 1;
+      continue;
+    }
+    if (character === '/' && isJavaScriptRegexStart(value, index)) {
+      index = skipJavaScriptRegex(value, index) - 1;
+      continue;
+    }
+    if (/[([{]/u.test(character)) {
+      stack.push(character);
+      continue;
+    }
+    if (!/[)\]}]/u.test(character)) continue;
+    if (stack.length === 1 && character === ')') return false;
+    const expected = character === ')' ? '(' : character === ']' ? '[' : '{';
+    if (stack.at(-1) !== expected) return false;
+    stack.pop();
+  }
+  return stack.length > 0;
 }
 
 function hasJavaScriptStatementSeparator(value, start, end) {
+  const stack = [];
   for (let index = start; index < end; index += 1) {
     const character = value[index];
     if (character === '"' || character === "'") {
@@ -665,8 +718,13 @@ function hasJavaScriptStatementSeparator(value, start, end) {
       index = Math.min(collectTemplateExpressions(value, index + 1, []), end) - 1;
     } else if (character === '/' && isJavaScriptRegexStart(value, index)) {
       index = Math.min(skipJavaScriptRegex(value, index), end) - 1;
+    } else if (/[([{]/u.test(character)) {
+      stack.push(character);
+    } else if (/[)\]}]/u.test(character)) {
+      const expected = character === ')' ? '(' : character === ']' ? '[' : '{';
+      if (stack.at(-1) === expected) stack.pop();
     } else if (character === ';') {
-      return true;
+      if (stack.length === 0) return true;
     }
   }
   return false;
