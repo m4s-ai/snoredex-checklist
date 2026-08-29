@@ -19,6 +19,7 @@ async function get(path) {
 
 const home = await get('./');
 const collection = await get('./collection/');
+const guide = await get('./llms.txt');
 const stylesheet = await get('./styles.css');
 const theme = await get('./theme.js');
 const collectionTheme = await get('./collection/theme.js');
@@ -53,9 +54,10 @@ if (
 }
 const moduleResponses = await Promise.all(moduleManifest.modules.map((path) => get(`./assets/${path}`)));
 const appScript = await get('./assets/app.js');
-const [homeText, collectionText, stylesheetText, appScriptText, ...moduleTexts] = await Promise.all([
+const [homeText, collectionText, guideText, stylesheetText, appScriptText, ...moduleTexts] = await Promise.all([
   home.text(),
   collection.text(),
+  guide.text(),
   stylesheet.text(),
   appScript.text(),
   ...moduleResponses.map((response) => response.text()),
@@ -66,6 +68,7 @@ if (
   !collectionText.includes('Public catalogue text is rendered from the validated snapshot') ||
   !homeText.includes(`name="snoredex-app-revision" content="${expected.appRevision}"`) ||
   !collectionText.includes(`name="snoredex-app-revision" content="${expected.appRevision}"`) ||
+  !guideText.includes(`snoredex-app-revision:${expected.appRevision}`) ||
   !stylesheetText.includes(`snoredex-app-revision:${expected.appRevision}`) ||
   !themeText.includes(`snoredex-app-revision:${expected.appRevision}`) ||
   !collectionThemeText.includes(`snoredex-app-revision:${expected.appRevision}`) ||

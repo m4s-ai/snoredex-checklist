@@ -19,9 +19,10 @@ test('stamps the exact app revision into served shells and module', async () => 
       encoding: 'utf8',
     });
     assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
-    const [home, collection, stylesheet, app, theme, collectionTheme, moduleManifestText] = await Promise.all([
+    const [home, collection, guide, stylesheet, app, theme, collectionTheme, moduleManifestText] = await Promise.all([
       readFile(resolve(output, 'index.html'), 'utf8'),
       readFile(resolve(output, 'collection/index.html'), 'utf8'),
+      readFile(resolve(output, 'llms.txt'), 'utf8'),
       readFile(resolve(output, 'styles.css'), 'utf8'),
       readFile(resolve(output, 'assets/app.js'), 'utf8'),
       readFile(resolve(output, 'theme.js'), 'utf8'),
@@ -30,6 +31,7 @@ test('stamps the exact app revision into served shells and module', async () => 
     ]);
     assert.match(home, new RegExp(`name="snoredex-app-revision" content="${revision}"`, 'u'));
     assert.match(collection, new RegExp(`name="snoredex-app-revision" content="${revision}"`, 'u'));
+    assert.match(guide, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     assert.match(stylesheet, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     assert.match(app, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     assert.match(theme, new RegExp(`snoredex-app-revision:${revision}`, 'u'));

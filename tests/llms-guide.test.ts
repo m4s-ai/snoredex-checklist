@@ -50,7 +50,7 @@ test('the site build copies hand-authored guide and theme assets', async () => {
   const buildScript = await readFile(resolve(root, 'scripts/build-site.mjs'), 'utf8');
   assert.match(
     buildScript,
-    /cp\(resolve\(root, ['"]site-src\/llms\.txt['"]\), resolve\(staging, ['"]llms\.txt['"]\)\)/,
+    /copyRevisionGuide\(resolve\(root, ['"]site-src\/llms\.txt['"]\), resolve\(staging, ['"]llms\.txt['"]\)\)/,
   );
   assert.match(
     buildScript,
