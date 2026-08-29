@@ -1,0 +1,62 @@
+name: Deploy Pages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: deploy
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out selected revision
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Install supported Playwright engines
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Run repository gates
+        run: npm run check
+      - name: Run browser and accessibility gates
+        run: |
+          npm run test:browser
+          npm run test:accessibility
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Add deployment provenance
+        env:
+          SNOREDEX_PAGE_URL: https://m4s-ai.github.io/snoredex-checklist/
+        run: npm run deployment:manifest
+      - name: Recheck published artifact
+        run: npm run artifact:check
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/site
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+      - name: Smoke-test deployed Pages site
+        env:
+          SNOREDEX_PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: npm run smoke:pages

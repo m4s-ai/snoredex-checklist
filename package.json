@@ -34,7 +34,9 @@
     "sync:catalogue": "node scripts/sync-catalogue.ts",
     "build:site": "node scripts/build-site.mjs",
     "build:reproducible": "node scripts/check-reproducible-build.mjs",
-    "artifact:check": "node scripts/check-artifact.mjs"
+    "artifact:check": "node scripts/check-artifact.mjs",
+    "deployment:manifest": "node scripts/create-deployment-manifest.mjs",
+    "smoke:pages": "node scripts/smoke-pages.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",

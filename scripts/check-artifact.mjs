@@ -21,6 +21,23 @@ function containsPrivateStateSchema(value) {
   return Object.values(value).some((entry) => containsPrivateStateSchema(entry));
 }
 
+function isArtifactUrl(value) {
+  if (typeof value !== 'string') return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      url.username === '' &&
+      url.password === '' &&
+      url.search === '' &&
+      url.hash === '' &&
+      url.pathname.endsWith('/collector_catalogue.json')
+    );
+  } catch {
+    return false;
+  }
+}
+
 function decodeHtmlAttribute(value) {
   return value
     .replace(/&#x([\da-f]+);?/giu, (_, hex) => {
@@ -1477,16 +1494,60 @@ try {
   }
   if (!/^[0-9a-f]{40}$/u.test(provenance.appRevision)) throw new Error('ARTIFACT_APP_REVISION_INVALID');
   const catalogue = provenance.catalogue;
-  if (
-    !catalogue ||
-    catalogue.mode !== 'synthetic-fixture' ||
-    catalogue.sourceCommit !== 'synthetic-fixture' ||
-    catalogue.lock !== null ||
-    catalogue.contractVersion !== '1.0.0' ||
-    !/^sha256:[0-9a-f]{64}$/u.test(catalogue.catalogueFingerprint) ||
-    catalogue.sourceRepository !== 'https://github.com/m4s-ai/snoredex-data'
-  ) {
+  const commonCatalogueProvenance =
+    catalogue &&
+    catalogue.contractVersion === '1.0.0' &&
+    /^sha256:[0-9a-f]{64}$/u.test(catalogue.catalogueFingerprint) &&
+    catalogue.sourceRepository === 'https://github.com/m4s-ai/snoredex-data';
+  const syntheticCatalogue =
+    commonCatalogueProvenance &&
+    catalogue.mode === 'synthetic-fixture' &&
+    catalogue.sourceCommit === 'synthetic-fixture' &&
+    catalogue.lock === null;
+  const lock = catalogue?.lock;
+  const pinnedCatalogue =
+    commonCatalogueProvenance &&
+    catalogue.mode === 'pinned-snapshot' &&
+    /^[0-9a-f]{40}$/u.test(catalogue.sourceCommit) &&
+    /^sha256:[0-9a-f]{64}$/u.test(catalogue.catalogueByteSha256) &&
+    Number.isSafeInteger(catalogue.catalogueByteLength) &&
+    catalogue.catalogueByteLength > 0 &&
+    catalogue.catalogueFingerprint === lock?.catalogueFingerprint &&
+    catalogue.catalogueByteSha256 === lock?.catalogueByteSha256 &&
+    catalogue.catalogueByteLength === lock?.catalogueByteLength &&
+    lock?.schema === 'snoredex-checklist-catalogue-lock' &&
+    lock?.schemaVersion === '1.0.0' &&
+    lock?.sourceRepository === catalogue.sourceRepository &&
+    lock?.producerRevision === catalogue.sourceCommit &&
+    isArtifactUrl(lock?.artifactUrl) &&
+    lock?.contractVersion === catalogue.contractVersion &&
+    Array.isArray(lock?.issueUrls) &&
+    lock.issueUrls.length > 0 &&
+    lock.issueUrls.every((url) => typeof url === 'string');
+  if (!syntheticCatalogue && !pinnedCatalogue) {
     throw new Error('ARTIFACT_CATALOGUE_PROVENANCE_INVALID');
+  }
+  if (relativeFiles.includes('deployment.json')) {
+    let deployment;
+    try {
+      deployment = JSON.parse(await readFile(join(root, 'deployment.json'), 'utf8'));
+    } catch {
+      throw new Error('ARTIFACT_DEPLOYMENT_MANIFEST_INVALID');
+    }
+    if (
+      deployment?.schema !== 'snoredex-checklist-deployment' ||
+      deployment?.schemaVersion !== '1.0.0' ||
+      deployment.pageUrl !== 'https://m4s-ai.github.io/snoredex-checklist/' ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(deployment.publishedAt ?? '') ||
+      deployment.appRevision !== provenance.appRevision ||
+      deployment.producerRevision !== catalogue.sourceCommit ||
+      deployment.contractVersion !== catalogue.contractVersion ||
+      deployment.catalogueFingerprint !== catalogue.catalogueFingerprint ||
+      deployment.catalogueByteSha256 !== catalogue.catalogueByteSha256 ||
+      deployment.catalogueByteLength !== catalogue.catalogueByteLength
+    ) {
+      throw new Error('ARTIFACT_DEPLOYMENT_MANIFEST_INVALID');
+    }
   }
 
   const forbiddenContent = /\.snoredex-private\.json|synthetic-secret|PRIVATE-NOTE-DO-NOT-LOG/iu;

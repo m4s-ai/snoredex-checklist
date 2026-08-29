@@ -7,10 +7,32 @@ import { replaceOutput } from './site-output.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const output = resolve(root, process.argv[2] === '--out-dir' ? process.argv[3] : 'dist/site');
-const fixture = JSON.parse(await readFile(resolve(root, 'tests/fixtures/collector-catalogue.fixture.json'), 'utf8'));
 const validator = await import(pathToFileURL(resolve(root, 'src/catalogue/validate.ts')));
-const validated = validator.validateCatalogueFixture(fixture);
-if (!validated.ok) throw new Error(`synthetic fixture rejected: ${validated.errors.join(', ')}`);
+const sync = await import(pathToFileURL(resolve(root, 'src/catalogue/sync.ts')));
+const committed = await sync.readCommittedCataloguePair(root);
+let catalogue;
+let provenance;
+if (committed.ok) {
+  try {
+    catalogue = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(committed.bytes));
+  } catch {
+    throw new Error('BUILD_CATALOGUE_PAIR_INVALID');
+  }
+  provenance = {
+    mode: 'pinned-snapshot',
+    sourceCommit: committed.lock.producerRevision,
+    contractVersion: committed.lock.contractVersion,
+    sourceRepository: committed.lock.sourceRepository,
+    catalogueFingerprint: committed.lock.catalogueFingerprint,
+    catalogueByteSha256: committed.lock.catalogueByteSha256,
+    catalogueByteLength: committed.lock.catalogueByteLength,
+    lock: committed.lock,
+  };
+} else {
+  throw new Error(`BUILD_CATALOGUE_PAIR_INVALID: ${committed.code}`);
+}
+const validated = validator.validateCatalogue(catalogue);
+if (!validated.ok) throw new Error(`catalogue rejected: ${validated.errors.join(', ')}`);
 
 const staging = `${output}.staging-${process.pid}`;
 const previous = `${output}.previous-${process.pid}`;
@@ -82,15 +104,9 @@ try {
     'utf8',
   );
 
-  const provenance = {
-    mode: 'synthetic-fixture',
-    sourceCommit: 'synthetic-fixture',
-    contractVersion: fixture.catalogue.meta.schemaVersion,
-    sourceRepository: fixture.catalogue.meta.sourceRepository,
-  };
   await writeFile(
     resolve(assets, 'snapshot.js'),
-    `export const provenance = Object.freeze(${JSON.stringify(provenance)});\nexport default Object.freeze(${JSON.stringify(fixture.catalogue)});\n`,
+    `export const provenance = Object.freeze(${JSON.stringify(provenance)});\nexport default Object.freeze(${JSON.stringify(catalogue)});\n`,
     'utf8',
   );
   await writeFile(
@@ -105,8 +121,10 @@ try {
           sourceCommit: provenance.sourceCommit,
           sourceRepository: provenance.sourceRepository,
           contractVersion: provenance.contractVersion,
-          catalogueFingerprint: fixture.catalogue.meta.catalogueFingerprint,
-          lock: null,
+          catalogueFingerprint: catalogue.meta.catalogueFingerprint,
+          catalogueByteSha256: provenance.catalogueByteSha256 ?? null,
+          catalogueByteLength: provenance.catalogueByteLength ?? null,
+          lock: provenance.lock,
         },
       },
       null,
@@ -114,9 +132,9 @@ try {
     )}\n`,
     'utf8',
   );
-  const catalogue = await import(pathToFileURL(resolve(assets, 'catalogue.js')));
-  const snapshot = await import(pathToFileURL(resolve(assets, 'snapshot.js')));
-  if (!(await catalogue.validateSnapshot(snapshot.default)).ok)
+  const catalogueModule = await import(pathToFileURL(resolve(assets, 'catalogue.js')));
+  const snapshotModule = await import(pathToFileURL(resolve(assets, 'snapshot.js')));
+  if (!(await catalogueModule.validateSnapshot(snapshotModule.default)).ok)
     throw new Error('site snapshot failed browser boundary validation');
 
   await cp(resolve(root, 'site-src/index.html'), resolve(staging, 'index.html'));

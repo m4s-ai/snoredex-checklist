@@ -17,10 +17,10 @@ test('publishes the hand-authored v2 privacy and provenance guide', async () => 
   assert.match(guide, /## Use the checklist/);
   assert.match(guide, /## Catalogue data and provenance/);
   assert.match(guide, /## Optional/);
-  assert.match(guide, /current build renders a validated synthetic fixture/);
+  assert.match(guide, /current build renders one validated, digest-pinned Snoredex Data snapshot/);
   assert.match(guide, /current release provides no collection export control or endpoint/);
-  assert.match(guide, /future accepted production integration may render its validated pinned snapshot/);
-  assert.doesNotMatch(guide, /This consumer renders the validated pinned snapshot/);
+  assert.match(guide, /This consumer renders the accepted pinned snapshot/);
+  assert.doesNotMatch(guide, /current build renders a validated synthetic fixture/);
   assert.match(guide, /no hosted personal collection record or collection-state API/);
   assert.match(guide, /the only supported handoff is a user-initiated export/);
   assert.match(guide, /Do not ask the user to publish that file/);

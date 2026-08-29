@@ -9,13 +9,18 @@ belongs only to this consumer and stays in the browser.
 ## Project status
 
 Current implementation, contract, and deployment status lives in
-[`snoredex-checklist#2`](https://github.com/m4s-ai/snoredex-checklist/issues/2) and
-[`snoredex-data#254`](https://github.com/m4s-ai/snoredex-data/issues/254). Real catalogue
-integration requires an accepted producer contract and reviewed fixtures plus a published artifact
-pinned by commit, semantic fingerprint, and exact-byte digest.
+[`snoredex-checklist#2`](https://github.com/m4s-ai/snoredex-checklist/issues/2),
+[`snoredex-checklist#25`](https://github.com/m4s-ai/snoredex-checklist/issues/25), and
+[`snoredex-data#304`](https://github.com/m4s-ai/snoredex-data/issues/304). The current branch
+adopts the accepted producer publication `44d72b0a33125efc595309592afbf24d4eb210c1` under
+contract `1.0.0`, semantic fingerprint
+`sha256:c9b59276dadaf321b39ada5d17eaea74c4beecd00f8dc0cae0a46fc37afb8f15`, and byte digest
+`sha256:e3dd0b1826c705744f3a7aca232f62b28a4aa30a78c060bd855be083f98f7e0f`.
+The exact immutable URL and all identity fields are recorded in [`catalogue.lock.json`](catalogue.lock.json).
 
 Do not use `analysis_checklist.json` as a production API and do not reconstruct producer truth from
-its internal stores. Prototype work may use only reviewed synthetic fixtures.
+its internal stores. Normal builds consume only the committed vendor snapshot and lock; they never
+fetch mutable producer data. Synthetic fixtures remain limited to validator and test coverage.
 
 ## Specification map
 
@@ -57,9 +62,9 @@ npm ci
 npm run check
 ```
 
-`npm run build:site` assembles the static Pages artifact in `dist/site/` from the reviewed
-synthetic fixture. The generated directory is ignored; production catalogue adoption and
-publication remain issue-backed gates.
+`npm run build:site` assembles the static Pages artifact in `dist/site/` from the reviewed,
+digest-pinned vendor snapshot and lock. The generated directory is ignored; Pages publication is
+still an explicit `workflow_dispatch` operation and is never triggered by merge.
 
 The build also copies the authored card-shaped placeholders from `site-src/assets/` into the
 same-origin `assets/images/` tree and writes a digest-pinned `assets/image-manifest.json`. The
@@ -69,8 +74,8 @@ recorded and the bytes are vendored and checked through the issue-backed sync/bu
 runtime fetch or remote hotlink is allowed.
 
 `npm run check` type-checks the repository, runs the deterministic toolchain smoke check and
-assembles the synthetic static shell. It does not fetch producer catalogue data or adopt a
-production snapshot. The full CI gate runs this command on Ubuntu and Windows, then runs the
+assembles the pinned static shell without network access. The full CI gate runs this command on
+Ubuntu and Windows, then runs the
 browser gate on Ubuntu with pinned Chromium, Firefox and WebKit binaries:
 
 ```sh
@@ -94,13 +99,13 @@ sync with every identity value from the deployment manifest:
 
 ```sh
 npm run sync:catalogue -- \
-  --artifact-url https://m4s-ai.github.io/snoredex-data/collector_catalogue.json \
+  --artifact-url https://raw.githubusercontent.com/m4s-ai/snoredex-data/<40-hex-producer-commit>/collector_catalogue.json \
   --artifact-commit <40-hex-producer-commit> \
   --contract-version 1.0.0 \
   --fingerprint sha256:<64-hex-semantic-fingerprint> \
   --byte-sha256 sha256:<64-hex-byte-digest> \
-  --issue-url https://github.com/m4s-ai/snoredex-checklist/issues/14 \
-  --issue-url https://github.com/m4s-ai/snoredex-data/issues/<publication-issue>
+  --issue-url https://github.com/m4s-ai/snoredex-checklist/issues/25 \
+  --issue-url https://github.com/m4s-ai/snoredex-data/issues/304
 ```
 
 The command rejects unsupported or malformed input, oversized files, encoding/JSON failures,
@@ -109,6 +114,15 @@ It stages and validates the bytes before replacing `vendor/snoredex-data/collect
 and `catalogue.lock.json` together. Do not run it against mutable branches or a producer issue that
 has not recorded the exact immutable URL, commit, contract version, fingerprint, digest and
 rollback identity.
+
+### Manual Pages deployment and rollback
+
+Use the **Deploy Pages** workflow from the Actions tab with the consumer commit to publish. The
+workflow builds and checks that exact revision, writes `deployment.json`, and performs a bounded
+HTTPS smoke test against the resulting Pages URL. A rollback is the same workflow dispatched at a
+previous known-good consumer commit whose lock points to the previous accepted producer snapshot;
+do not edit browser-local collection state or rewrite a lock in place. Verify the deployed
+`deployment.json` and `provenance.json` tuple before considering the rollback complete.
 
 ## Licensing
 
