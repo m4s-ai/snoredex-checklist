@@ -54,6 +54,6 @@ test('the site build copies hand-authored guide and theme assets', async () => {
   );
   assert.match(
     buildScript,
-    /cp\(resolve\(root, ['"]site-src\/theme\.js['"]\), resolve\(staging, ['"]theme\.js['"]\)\)/,
+    /copyRevisionScript\(resolve\(root, ['"]site-src\/theme\.js['"]\), resolve\(staging, ['"]theme\.js['"]\)\)/,
   );
 });

@@ -19,14 +19,55 @@ async function get(path) {
 
 const home = await get('./');
 const collection = await get('./collection/');
+const theme = await get('./theme.js');
+const collectionTheme = await get('./collection/theme.js');
+const moduleManifestResponse = await get('./assets/module-manifest.json');
+let moduleManifest;
+try {
+  moduleManifest = await moduleManifestResponse.json();
+} catch {
+  throw new Error('PAGES_SMOKE_MODULE_MANIFEST_INVALID');
+}
+if (
+  moduleManifest?.schema !== 'snoredex-site-module-manifest' ||
+  moduleManifest?.schemaVersion !== '1.0.0' ||
+  moduleManifest?.appRevision !== expected.appRevision ||
+  !Array.isArray(moduleManifest.modules) ||
+  moduleManifest.modules.length === 0 ||
+  moduleManifest.modules.length > 256 ||
+  !moduleManifest.modules.includes('app.js') ||
+  new Set(moduleManifest.modules).size !== moduleManifest.modules.length ||
+  moduleManifest.modules.some(
+    (path) =>
+      typeof path !== 'string' ||
+      path.length === 0 ||
+      path.length > 256 ||
+      path.startsWith('/') ||
+      path.includes('\\') ||
+      path.split('/').some((segment) => segment === '' || segment === '.' || segment === '..') ||
+      !path.endsWith('.js'),
+  )
+) {
+  throw new Error('PAGES_SMOKE_MODULE_MANIFEST_INVALID');
+}
+const moduleResponses = await Promise.all(moduleManifest.modules.map((path) => get(`./assets/${path}`)));
 const appScript = await get('./assets/app.js');
-const [homeText, collectionText, appScriptText] = await Promise.all([home.text(), collection.text(), appScript.text()]);
+const [homeText, collectionText, appScriptText, ...moduleTexts] = await Promise.all([
+  home.text(),
+  collection.text(),
+  appScript.text(),
+  ...moduleResponses.map((response) => response.text()),
+]);
+const [themeText, collectionThemeText] = await Promise.all([theme.text(), collectionTheme.text()]);
 if (
   !homeText.includes('Snoredex Checklist') ||
   !collectionText.includes('Public catalogue text is rendered from the validated snapshot') ||
   !homeText.includes(`name="snoredex-app-revision" content="${expected.appRevision}"`) ||
   !collectionText.includes(`name="snoredex-app-revision" content="${expected.appRevision}"`) ||
-  !appScriptText.includes(`snoredex-app-revision:${expected.appRevision}`)
+  !themeText.includes(`snoredex-app-revision:${expected.appRevision}`) ||
+  !collectionThemeText.includes(`snoredex-app-revision:${expected.appRevision}`) ||
+  !appScriptText.includes(`snoredex-app-revision:${expected.appRevision}`) ||
+  moduleTexts.some((text) => !text.includes(`snoredex-app-revision:${expected.appRevision}`))
 ) {
   throw new Error('PAGES_SMOKE_SHELL_INVALID');
 }

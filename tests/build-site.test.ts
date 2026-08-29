@@ -19,14 +19,28 @@ test('stamps the exact app revision into served shells and module', async () => 
       encoding: 'utf8',
     });
     assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
-    const [home, collection, app] = await Promise.all([
+    const [home, collection, app, theme, collectionTheme, moduleManifestText] = await Promise.all([
       readFile(resolve(output, 'index.html'), 'utf8'),
       readFile(resolve(output, 'collection/index.html'), 'utf8'),
       readFile(resolve(output, 'assets/app.js'), 'utf8'),
+      readFile(resolve(output, 'theme.js'), 'utf8'),
+      readFile(resolve(output, 'collection/theme.js'), 'utf8'),
+      readFile(resolve(output, 'assets/module-manifest.json'), 'utf8'),
     ]);
     assert.match(home, new RegExp(`name="snoredex-app-revision" content="${revision}"`, 'u'));
     assert.match(collection, new RegExp(`name="snoredex-app-revision" content="${revision}"`, 'u'));
     assert.match(app, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
+    assert.match(theme, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
+    assert.match(collectionTheme, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
+    const moduleManifest = JSON.parse(moduleManifestText);
+    assert.equal(moduleManifest.schema, 'snoredex-site-module-manifest');
+    assert.equal(moduleManifest.appRevision, revision);
+    assert.ok(Array.isArray(moduleManifest.modules));
+    assert.ok(moduleManifest.modules.includes('app.js'));
+    for (const modulePath of moduleManifest.modules) {
+      const module = await readFile(resolve(output, 'assets', modulePath), 'utf8');
+      assert.match(module, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
+    }
   } finally {
     await rm(output, { recursive: true, force: true });
   }
