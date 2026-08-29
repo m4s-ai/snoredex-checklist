@@ -1,3 +1,5 @@
+import { validatePagesDeployment } from '../src/site/deployment.ts';
+
 const pageUrl = process.env.SNOREDEX_PAGE_URL;
 if (pageUrl !== 'https://m4s-ai.github.io/snoredex-checklist/') throw new Error('PAGES_SMOKE_URL_INVALID');
 
@@ -26,18 +28,15 @@ try {
 } catch {
   throw new Error('PAGES_SMOKE_PROVENANCE_INVALID');
 }
-const catalogue = provenance?.catalogue;
 if (
-  deployment?.schema !== 'snoredex-checklist-deployment' ||
-  deployment?.schemaVersion !== '1.0.0' ||
-  deployment.pageUrl !== pageUrl ||
-  !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(deployment.publishedAt ?? '') ||
-  deployment.appRevision !== provenance?.appRevision ||
-  deployment.producerRevision !== catalogue?.sourceCommit ||
-  deployment.contractVersion !== catalogue?.contractVersion ||
-  deployment.catalogueFingerprint !== catalogue?.catalogueFingerprint ||
-  deployment.catalogueByteSha256 !== catalogue?.catalogueByteSha256 ||
-  deployment.catalogueByteLength !== catalogue?.catalogueByteLength
+  !validatePagesDeployment(deployment, provenance, pageUrl, {
+    appRevision: process.env.SNOREDEX_EXPECTED_GITHUB_SHA,
+    producerRevision: process.env.SNOREDEX_EXPECTED_PRODUCER_REVISION,
+    contractVersion: process.env.SNOREDEX_EXPECTED_CONTRACT_VERSION,
+    catalogueFingerprint: process.env.SNOREDEX_EXPECTED_CATALOGUE_FINGERPRINT,
+    catalogueByteSha256: process.env.SNOREDEX_EXPECTED_CATALOGUE_BYTE_SHA256,
+    catalogueByteLength: Number(process.env.SNOREDEX_EXPECTED_CATALOGUE_BYTE_LENGTH),
+  })
 ) {
   throw new Error('PAGES_SMOKE_PROVENANCE_INVALID');
 }

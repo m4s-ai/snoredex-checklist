@@ -59,4 +59,11 @@ jobs:
       - name: Smoke-test deployed Pages site
         env:
           SNOREDEX_PAGE_URL: ${{ steps.deployment.outputs.page_url }}
-        run: npm run smoke:pages
+          SNOREDEX_EXPECTED_GITHUB_SHA: ${{ github.sha }}
+        run: |
+          export SNOREDEX_EXPECTED_PRODUCER_REVISION="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).producerRevision)")"
+          export SNOREDEX_EXPECTED_CONTRACT_VERSION="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).contractVersion)")"
+          export SNOREDEX_EXPECTED_CATALOGUE_FINGERPRINT="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).catalogueFingerprint)")"
+          export SNOREDEX_EXPECTED_CATALOGUE_BYTE_SHA256="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).catalogueByteSha256)")"
+          export SNOREDEX_EXPECTED_CATALOGUE_BYTE_LENGTH="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(String(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).catalogueByteLength))")"
+          npm run smoke:pages
