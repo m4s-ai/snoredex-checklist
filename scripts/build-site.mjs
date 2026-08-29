@@ -40,6 +40,11 @@ const requestedAppRevision = process.env.SNOREDEX_APP_REVISION ?? process.env.GI
 const gitResult = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' });
 const gitRevision = requestedAppRevision ?? (gitResult.status === 0 ? gitResult.stdout.trim() : '');
 if (!/^[0-9a-f]{40}$/u.test(gitRevision)) throw new Error('BUILD_APP_REVISION_INVALID');
+async function copyRevisionShell(source, destination) {
+  const shell = await readFile(source, 'utf8');
+  if (!shell.includes('__SNOREDEX_APP_REVISION__')) throw new Error('BUILD_APP_REVISION_MARKER_MISSING');
+  await writeFile(destination, shell.replaceAll('__SNOREDEX_APP_REVISION__', gitRevision), 'utf8');
+}
 const assets = resolve(staging, 'assets');
 await rm(staging, { recursive: true, force: true });
 await rm(previous, { recursive: true, force: true });
@@ -58,6 +63,9 @@ try {
   );
   if (stateResult.status !== 0)
     throw new Error(`browser state read API build failed with status ${stateResult.status ?? 'unknown'}`);
+  const appScript = resolve(assets, 'app.js');
+  const appSource = await readFile(appScript, 'utf8');
+  await writeFile(appScript, `${appSource}\n/* snoredex-app-revision:${gitRevision} */\n`, 'utf8');
 
   const siteAssets = await import(pathToFileURL(resolve(assets, 'assets.js')));
   const placeholderAssets = Object.values(siteAssets.PLACEHOLDER_ASSETS ?? {});
@@ -137,10 +145,10 @@ try {
   if (!(await catalogueModule.validateSnapshot(snapshotModule.default)).ok)
     throw new Error('site snapshot failed browser boundary validation');
 
-  await cp(resolve(root, 'site-src/index.html'), resolve(staging, 'index.html'));
+  await copyRevisionShell(resolve(root, 'site-src/index.html'), resolve(staging, 'index.html'));
   await cp(resolve(root, 'site-src/theme.js'), resolve(staging, 'theme.js'));
   await mkdir(resolve(staging, 'collection'), { recursive: true });
-  await cp(resolve(root, 'site-src/collection/index.html'), resolve(staging, 'collection/index.html'));
+  await copyRevisionShell(resolve(root, 'site-src/collection/index.html'), resolve(staging, 'collection/index.html'));
   await cp(resolve(root, 'site-src/theme.js'), resolve(staging, 'collection/theme.js'));
   await cp(resolve(root, 'site-src/llms.txt'), resolve(staging, 'llms.txt'));
   await cp(resolve(root, 'site-src/styles.css'), resolve(staging, 'styles.css'));

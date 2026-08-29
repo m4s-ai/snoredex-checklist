@@ -1,28 +1,58 @@
-import assert from "node:assert/strict";
-import test from "node:test";
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import test from 'node:test';
 
-import { replaceOutput } from "../scripts/site-output.ts";
+import { replaceOutput } from '../scripts/site-output.ts';
 
-test("reports the recovery path when replacement and restore both fail", async () => {
-  const output = "/site";
-  const previous = "/site.previous-123";
-  const staging = "/site.staging-123";
+const root = resolve(import.meta.dirname, '..');
+
+test('stamps the exact app revision into served shells and module', async () => {
+  const output = await mkdtemp(`${tmpdir()}/snoredex-build-revision-test-`);
+  const revision = 'f'.repeat(40);
+  try {
+    const result = spawnSync(process.execPath, [resolve(root, 'scripts/build-site.mjs'), '--out-dir', output], {
+      cwd: root,
+      env: { ...process.env, SNOREDEX_APP_REVISION: revision },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+    const [home, collection, app] = await Promise.all([
+      readFile(resolve(output, 'index.html'), 'utf8'),
+      readFile(resolve(output, 'collection/index.html'), 'utf8'),
+      readFile(resolve(output, 'assets/app.js'), 'utf8'),
+    ]);
+    assert.match(home, new RegExp(`name="snoredex-app-revision" content="${revision}"`, 'u'));
+    assert.match(collection, new RegExp(`name="snoredex-app-revision" content="${revision}"`, 'u'));
+    assert.match(app, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
+  } finally {
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test('reports the recovery path when replacement and restore both fail', async () => {
+  const output = '/site';
+  const previous = '/site.previous-123';
+  const staging = '/site.staging-123';
   const calls: Array<[string, string]> = [];
 
   await assert.rejects(
-    () => replaceOutput({
-      output,
-      previous,
-      staging,
-      renamePath: async (source, destination) => {
-        calls.push([source, destination]);
-        if (source === staging) throw new Error("install failed");
-        if (source === previous) throw new Error("restore failed");
-      },
-      removePath: async () => {
-        throw new Error("previous output should not be removed after a failed restore");
-      },
-    }),
+    () =>
+      replaceOutput({
+        output,
+        previous,
+        staging,
+        renamePath: async (source, destination) => {
+          calls.push([source, destination]);
+          if (source === staging) throw new Error('install failed');
+          if (source === previous) throw new Error('restore failed');
+        },
+        removePath: async () => {
+          throw new Error('previous output should not be removed after a failed restore');
+        },
+      }),
     (error: unknown) => {
       assert.equal(error instanceof AggregateError, true);
       if (!(error instanceof AggregateError)) return false;
@@ -33,5 +63,9 @@ test("reports the recovery path when replacement and restore both fail", async (
       return true;
     },
   );
-  assert.deepEqual(calls, [[output, previous], [staging, output], [previous, output]]);
+  assert.deepEqual(calls, [
+    [output, previous],
+    [staging, output],
+    [previous, output],
+  ]);
 });
