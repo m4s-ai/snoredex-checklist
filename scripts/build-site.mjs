@@ -49,6 +49,10 @@ async function copyRevisionScript(source, destination) {
   const script = await readFile(source, 'utf8');
   await writeFile(destination, `${script}\n/* snoredex-app-revision:${gitRevision} */\n`, 'utf8');
 }
+async function copyRevisionStylesheet(source, destination) {
+  const stylesheet = await readFile(source, 'utf8');
+  await writeFile(destination, `${stylesheet}\n/* snoredex-app-revision:${gitRevision} */\n`, 'utf8');
+}
 async function stampJavascriptAssets(directory, prefix = '') {
   const entries = await readdir(directory, { withFileTypes: true });
   const paths = [];
@@ -181,7 +185,7 @@ try {
   await copyRevisionShell(resolve(root, 'site-src/collection/index.html'), resolve(staging, 'collection/index.html'));
   await copyRevisionScript(resolve(root, 'site-src/theme.js'), resolve(staging, 'collection/theme.js'));
   await cp(resolve(root, 'site-src/llms.txt'), resolve(staging, 'llms.txt'));
-  await cp(resolve(root, 'site-src/styles.css'), resolve(staging, 'styles.css'));
+  await copyRevisionStylesheet(resolve(root, 'site-src/styles.css'), resolve(staging, 'styles.css'));
   await cp(resolve(root, 'LICENSE.md'), resolve(staging, 'LICENSE.md'));
   await cp(resolve(root, 'THIRD_PARTY_NOTICES.md'), resolve(staging, 'THIRD_PARTY_NOTICES.md'));
   await cp(resolve(root, 'LICENSES'), resolve(staging, 'LICENSES'), { recursive: true });
