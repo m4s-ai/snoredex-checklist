@@ -1,4 +1,5 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { strict as assert } from 'node:assert';
 import { extname, join, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { format } from 'prettier';
@@ -13,14 +14,43 @@ const sourceExtensions = ['.ts', '.tsx', '.js', '.mjs', '.cjs'];
 function scan(source) {
   const scanner = createScanner(true, undefined, source);
   const tokens = [];
+  let previous;
   let kind;
   do {
     kind = scanner.scan();
-    if (kind === SyntaxKind.SlashToken) kind = scanner.reScanSlashToken();
-    if (kind !== SyntaxKind.EndOfFile)
-      tokens.push({ kind, text: scanner.getTokenText(), start: scanner.getTokenStart() });
+    if (kind === SyntaxKind.SlashToken && shouldRescanSlash(previous)) kind = scanner.reScanSlashToken();
+    if (kind !== SyntaxKind.EndOfFile) {
+      previous = { kind, text: scanner.getTokenText() };
+      tokens.push({ ...previous, start: scanner.getTokenStart() });
+    }
   } while (kind !== SyntaxKind.EndOfFile);
   return tokens;
+}
+
+function canEndExpression(token) {
+  if (!token) return false;
+  return [
+    SyntaxKind.Identifier,
+    SyntaxKind.PrivateIdentifier,
+    SyntaxKind.ThisKeyword,
+    SyntaxKind.SuperKeyword,
+    SyntaxKind.CloseParenToken,
+    SyntaxKind.CloseBracketToken,
+    SyntaxKind.CloseBraceToken,
+    SyntaxKind.PlusPlusToken,
+    SyntaxKind.MinusMinusToken,
+    SyntaxKind.TrueKeyword,
+    SyntaxKind.FalseKeyword,
+    SyntaxKind.NullKeyword,
+    SyntaxKind.NumericLiteral,
+    SyntaxKind.StringLiteral,
+    SyntaxKind.NoSubstitutionTemplateLiteral,
+    SyntaxKind.RegularExpressionLiteral,
+  ].includes(token.kind);
+}
+
+function shouldRescanSlash(previous) {
+  return !canEndExpression(previous);
 }
 
 function pairBraces(tokens) {
@@ -52,16 +82,157 @@ function identifierLike(token) {
   return token && (token.kind === SyntaxKind.Identifier || token.kind === SyntaxKind.ConstructorKeyword);
 }
 
+function looksLikeMethodName(tokens, nameIndex) {
+  const previous = tokens[nameIndex - 1];
+  if (!previous) return true;
+  if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken, SyntaxKind.CloseParenToken].includes(previous.kind))
+    return false;
+  return [
+    SyntaxKind.OpenBraceToken,
+    SyntaxKind.CloseBraceToken,
+    SyntaxKind.SemicolonToken,
+    SyntaxKind.CommaToken,
+    SyntaxKind.GetKeyword,
+    SyntaxKind.SetKeyword,
+    SyntaxKind.StaticKeyword,
+    SyntaxKind.AsyncKeyword,
+    SyntaxKind.AsteriskToken,
+  ].includes(previous.kind);
+}
+
+function findBodyOpen(tokens, after, braces) {
+  for (let index = after + 1; index < tokens.length; index += 1) {
+    if (tokens[index].kind === SyntaxKind.OpenBraceToken) {
+      if (tokens[index - 1]?.kind === SyntaxKind.ColonToken) {
+        const typeClose = braces.get(index);
+        if (typeClose !== undefined) {
+          index = typeClose;
+          continue;
+        }
+      }
+      return index;
+    }
+    if (
+      [SyntaxKind.SemicolonToken, SyntaxKind.CommaToken, SyntaxKind.EqualsGreaterThanToken].includes(tokens[index].kind)
+    )
+      return undefined;
+  }
+  return undefined;
+}
+
+function findArrowExpressionEnd(tokens, start) {
+  let parens = 0;
+  let brackets = 0;
+  for (let index = start; index < tokens.length; index += 1) {
+    const kind = tokens[index].kind;
+    if (kind === SyntaxKind.OpenParenToken) parens += 1;
+    else if (kind === SyntaxKind.CloseParenToken) {
+      if (parens === 0 && brackets === 0) return index;
+      parens -= 1;
+    } else if (kind === SyntaxKind.OpenBracketToken) brackets += 1;
+    else if (kind === SyntaxKind.CloseBracketToken) {
+      if (brackets === 0 && parens === 0) return index;
+      brackets -= 1;
+    } else if (parens === 0 && brackets === 0 && [SyntaxKind.CommaToken, SyntaxKind.SemicolonToken].includes(kind))
+      return index;
+  }
+  return tokens.length;
+}
+
+function arrowName(tokens, arrowIndex) {
+  let cursor = arrowIndex - 1;
+  if (tokens[cursor]?.kind === SyntaxKind.CloseParenToken) {
+    let depth = 0;
+    for (; cursor >= 0; cursor -= 1) {
+      if (tokens[cursor].kind === SyntaxKind.CloseParenToken) depth += 1;
+      if (tokens[cursor].kind === SyntaxKind.OpenParenToken) {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    cursor -= 1;
+  }
+  if (tokens[cursor]?.kind === SyntaxKind.EqualsToken && identifierLike(tokens[cursor - 1]))
+    return tokens[cursor - 1].text;
+  if (tokens[cursor - 1]?.kind === SyntaxKind.EqualsToken && identifierLike(tokens[cursor - 2]))
+    return tokens[cursor - 2].text;
+  return '<arrow>';
+}
+
 function collectFunctions(tokens, source, path) {
   const braces = pairBraces(tokens);
   const functions = [];
   const seen = new Set();
-  const add = (start, bodyOpen, name) => {
-    const bodyClose = braces.get(bodyOpen);
-    if (bodyClose === undefined || seen.has(bodyOpen)) return;
-    seen.add(bodyOpen);
-    let complexity = 1;
-    for (let index = bodyOpen + 1; index < bodyClose; index += 1) {
+  const add = (start, range, name) => {
+    const { bodyOpen, bodyClose, expressionStart, expressionEnd } = range;
+    if (bodyOpen !== undefined && bodyClose === undefined) return;
+    const end = bodyClose ?? expressionEnd;
+    if (end === undefined || seen.has(bodyOpen ?? expressionStart)) return;
+    seen.add(bodyOpen ?? expressionStart);
+    const line = source.slice(0, tokens[start].start).split(/\r\n|\n|\r/u).length;
+    functions.push({
+      path: relative(root, path).split('\\').join('/'),
+      name,
+      line,
+      bodyOpen,
+      bodyClose,
+      expressionStart,
+      expressionEnd,
+      complexity: 1,
+    });
+  };
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token.kind === SyntaxKind.FunctionKeyword) {
+      let nameIndex = index + 1;
+      if (tokens[nameIndex]?.kind === SyntaxKind.AsteriskToken) nameIndex += 1;
+      const name = identifierLike(tokens[nameIndex]) ? tokens[nameIndex].text : '<anonymous>';
+      const parameterOpen = tokens.findIndex(
+        (candidate, candidateIndex) => candidateIndex > nameIndex && candidate.kind === SyntaxKind.OpenParenToken,
+      );
+      const parameterClose =
+        parameterOpen === -1
+          ? undefined
+          : matching(tokens, parameterOpen, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+      const bodyOpen = parameterClose === undefined ? undefined : findBodyOpen(tokens, parameterClose, braces);
+      if (bodyOpen !== undefined) add(index, { bodyOpen, bodyClose: braces.get(bodyOpen) }, name);
+      continue;
+    }
+    if (token.kind === SyntaxKind.EqualsGreaterThanToken) {
+      const name = arrowName(tokens, index);
+      if (tokens[index + 1]?.kind === SyntaxKind.OpenBraceToken) {
+        const bodyOpen = index + 1;
+        add(index - 1, { bodyOpen, bodyClose: braces.get(bodyOpen) }, name);
+      } else {
+        add(index - 1, { expressionStart: index + 1, expressionEnd: findArrowExpressionEnd(tokens, index + 1) }, name);
+      }
+      continue;
+    }
+    if (
+      token.kind !== SyntaxKind.OpenParenToken ||
+      !identifierLike(tokens[index - 1]) ||
+      !looksLikeMethodName(tokens, index - 1)
+    )
+      continue;
+    const close = matching(tokens, index, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+    const bodyOpen = close === undefined ? undefined : findBodyOpen(tokens, close, braces);
+    if (bodyOpen !== undefined) add(index - 1, { bodyOpen, bodyClose: braces.get(bodyOpen) }, tokens[index - 1].text);
+  }
+
+  for (const entry of functions) {
+    const start = entry.bodyOpen === undefined ? entry.expressionStart : entry.bodyOpen + 1;
+    const end = entry.bodyClose ?? entry.expressionEnd;
+    for (let index = start; index < end; index += 1) {
+      const nested = functions.find(
+        (candidate) =>
+          (candidate.bodyOpen === index || candidate.expressionStart === index) &&
+          (candidate.bodyClose ?? candidate.expressionEnd) < end,
+      );
+      if (nested) {
+        index = nested.bodyClose ?? nested.expressionEnd;
+        continue;
+      }
       if (
         [
           SyntaxKind.IfKeyword,
@@ -76,34 +247,12 @@ function collectFunctions(tokens, source, path) {
           SyntaxKind.QuestionQuestionToken,
         ].includes(tokens[index].kind)
       )
-        complexity += 1;
+        entry.complexity += 1;
     }
-    const line = source.slice(0, tokens[start].start).split(/\r\n|\n|\r/u).length;
-    functions.push({ path: relative(root, path).split('\\').join('/'), name, line, complexity });
-  };
-
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (token.kind === SyntaxKind.FunctionKeyword) {
-      let nameIndex = index + 1;
-      if (tokens[nameIndex]?.kind === SyntaxKind.AsteriskToken) nameIndex += 1;
-      const name = identifierLike(tokens[nameIndex]) ? tokens[nameIndex].text : '<anonymous>';
-      const bodyOpen = tokens.findIndex(
-        (candidate, candidateIndex) => candidateIndex > nameIndex && candidate.kind === SyntaxKind.OpenBraceToken,
-      );
-      if (bodyOpen !== -1) add(index, bodyOpen, name);
-      continue;
-    }
-    if (token.kind === SyntaxKind.EqualsGreaterThanToken) {
-      const previous = tokens[index - 1];
-      const name = identifierLike(previous) ? previous.text : '<arrow>';
-      if (tokens[index + 1]?.kind === SyntaxKind.OpenBraceToken) add(index - 1, index + 1, name);
-      continue;
-    }
-    if (token.kind !== SyntaxKind.OpenParenToken || !identifierLike(tokens[index - 1])) continue;
-    const close = matching(tokens, index, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
-    if (close !== undefined && tokens[close + 1]?.kind === SyntaxKind.OpenBraceToken)
-      add(index - 1, close + 1, tokens[index - 1].text);
+    delete entry.bodyOpen;
+    delete entry.bodyClose;
+    delete entry.expressionStart;
+    delete entry.expressionEnd;
   }
   return functions;
 }
@@ -167,6 +316,40 @@ function reportFor(files) {
       .map((entry) => `| \`${entry.path}:${entry.line}\` | \`${entry.name}\` | ${entry.complexity} |`),
     '',
   ].join('\n');
+}
+
+if (process.argv.includes('--self-test')) {
+  const samples = [
+    {
+      source:
+        'function typed({ enabled }: { enabled: boolean }): { ok: boolean } { if (enabled) return { ok: true }; return { ok: false }; }',
+      expected: [{ name: 'typed', complexity: 2 }],
+    },
+    {
+      source: 'const expression = (value) => value && value > 0 ? value : 0;',
+      expected: [{ name: 'expression', complexity: 3 }],
+    },
+    {
+      source: 'function outer(values) { return values.map((value) => value ? value : 0); }',
+      expected: [
+        { name: 'outer', complexity: 1 },
+        { name: '<arrow>', complexity: 2 },
+      ],
+    },
+    {
+      source: 'function slash(value) { const pattern = /a&&b/u; return value / 2 && value; }',
+      expected: [{ name: 'slash', complexity: 2 }],
+    },
+  ];
+  for (const sample of samples) {
+    const actual = collectFunctions(scan(sample.source), sample.source, 'fixture.ts').map(({ name, complexity }) => ({
+      name,
+      complexity,
+    }));
+    assert.deepEqual(actual, sample.expected);
+  }
+  console.log('complexity self-test passed');
+  process.exit(0);
 }
 
 const files = await sourceFiles(join(root, 'src'));
