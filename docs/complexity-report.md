@@ -3,10 +3,10 @@
 > Advisory lexical estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (32 production code files).
-Lines: 12,456.
+Lines: 12,488.
 Function-like nodes: 749.
-McCabe estimate: sum 3,785; mean 5.1; median 2; P90 12; P95 22.
-Hotspots: 88 functions exceed 10; 41 exceed 20.
+McCabe estimate: sum 3,794; mean 5.1; median 2; P90 12; P95 22.
+Hotspots: 89 functions exceed 10; 41 exceed 20.
 
 The estimate counts if/for/while/do/catch/case statements, conditional `?` tokens and `&&`/`||`/`??` operators inside function-like bodies. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
 
@@ -21,6 +21,7 @@ The estimate counts if/for/while/do/catch/case statements, conditional `?` token
 | `scripts/check-artifact.mjs:1311`   | `extractHead`                  |         45 |
 | `src/site/query.ts:31`              | `parseQuery`                   |         39 |
 | `src/state/storage.ts:1142`         | `setDraftOwnerState`           |         36 |
+| `scripts/complexity-report.mjs:418` | `findStatementEnd`             |         34 |
 | `src/catalogue/sync.ts:517`         | `parseJournal`                 |         34 |
 | `scripts/check-artifact.mjs:239`    | `stripHtmlComments`            |         32 |
 | `src/state/domain.ts:211`           | `parseState`                   |         32 |
@@ -28,7 +29,6 @@ The estimate counts if/for/while/do/catch/case statements, conditional `?` token
 | `src/state/backup.ts:289`           | `writeAuthority`               |         30 |
 | `src/catalogue/sync.ts:763`         | `syncCataloguePair`            |         29 |
 | `src/site/catalogue.ts:93`          | `validateProvenance`           |         29 |
-| `scripts/complexity-report.mjs:479` | `collectFunctions`             |         28 |
+| `scripts/complexity-report.mjs:500` | `collectFunctions`             |         28 |
 | `src/state/reconciliation.ts:167`   | `migrationIsStructurallyValid` |         28 |
 | `src/state/domain.ts:148`           | `normalizeRecordForImport`     |         27 |
-| `scripts/check-artifact.mjs:67`     | `readAttribute`                |         26 |

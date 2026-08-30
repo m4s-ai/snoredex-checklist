@@ -179,7 +179,8 @@ function isFunctionLikeParameterList(tokens, open) {
     )
   )
     return true;
-  if (identifierLike(previous)) return looksLikeMethodName(tokens, open - 1);
+  if (identifierLike(previous))
+    return looksLikeMethodName(tokens, open - 1) || tokens[open - 2]?.kind === SyntaxKind.FunctionKeyword;
   if (previous.kind !== SyntaxKind.GreaterThanToken) return false;
   let angleDepth = 0;
   for (let index = open - 1; index >= 0; index -= 1) {
@@ -451,6 +452,26 @@ function findStatementEnd(tokens, start) {
       : tokens[conditionClose + 1]?.kind === SyntaxKind.SemicolonToken
         ? conditionClose + 1
         : conditionClose;
+  }
+  if (firstKind === SyntaxKind.TryKeyword) {
+    let statementEnd = findStatementEnd(tokens, start + 1);
+    if (statementEnd === undefined) return undefined;
+    let cursor = statementEnd + 1;
+    if (tokens[cursor]?.kind === SyntaxKind.CatchKeyword) {
+      if (tokens[cursor + 1]?.kind === SyntaxKind.OpenParenToken) {
+        const conditionClose = matching(tokens, cursor + 1, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+        if (conditionClose === undefined) return undefined;
+        cursor = conditionClose + 1;
+      } else cursor += 1;
+      statementEnd = findStatementEnd(tokens, cursor);
+      if (statementEnd === undefined) return undefined;
+      cursor = statementEnd + 1;
+    }
+    if (tokens[cursor]?.kind === SyntaxKind.FinallyKeyword) {
+      statementEnd = findStatementEnd(tokens, cursor + 1);
+      if (statementEnd === undefined) return undefined;
+    }
+    return statementEnd;
   }
   let parens = 0;
   let brackets = 0;
@@ -822,6 +843,17 @@ if (process.argv.includes('--self-test')) {
       expected: [
         { name: 'controlExpression', complexity: 2 },
         { name: '<arrow>', complexity: 2 },
+      ],
+    },
+    {
+      source: `function namedParameterTypes(first, options: { cb?: () => void }, last) {}
+        function tryBody(value, ready) {
+          do try { step(value); } finally { stop(value); } while (ready);
+          return value;
+        }`,
+      expected: [
+        { name: 'namedParameterTypes', complexity: 1 },
+        { name: 'tryBody', complexity: 2 },
       ],
     },
   ];
