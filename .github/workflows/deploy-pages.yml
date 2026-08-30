@@ -154,7 +154,7 @@ jobs:
             sources.length === 0 ||
             sources.some((value) => !digest.test(value)) ||
             new Set(sources).size !== sources.length ||
-            (!sameCatalogueDeployment && sources.some((value) => value !== previous.catalogueFingerprint))
+            !sameCatalogueDeployment
           ) {
             throw new Error('rollback target must match the exact published recovery tuple');
           }

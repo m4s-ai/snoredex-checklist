@@ -27,10 +27,7 @@ test('production adoption validates the reviewed target migration without requir
     workflow,
     /sameCatalogueDeployment = current\?\.catalogueFingerprint === previous\?\.catalogueFingerprint/u,
   );
-  assert.match(
-    workflow,
-    /!sameCatalogueDeployment && sources\.some\(\(value\) => value !== previous\.catalogueFingerprint\)/u,
-  );
+  assert.match(workflow, /new Set\(sources\)\.size !== sources\.length \|\|\s+!sameCatalogueDeployment/u);
   assert.match(workflow, /!digest\.test\(current\.catalogueFingerprint \?\? ''\)/u);
   assert.doesNotMatch(workflow, /git merge-base --is-ancestor/u);
   assert.match(workflow, /name: Require reviewed producer migration target\s+if: inputs\.deployment_mode == 'adopt'/u);
