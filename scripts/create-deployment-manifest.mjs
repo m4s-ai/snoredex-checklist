@@ -31,6 +31,59 @@ if (
   throw new Error('DEPLOYMENT_PROVENANCE_INVALID');
 }
 
+const isCommit = (value) => typeof value === 'string' && /^[0-9a-f]{40}$/u.test(value);
+const isDigest = (value) => typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value);
+const isByteLength = (value) => Number.isSafeInteger(value) && value > 0;
+
+function deploymentTuple(value) {
+  if (
+    value?.schema !== 'snoredex-checklist-deployment' ||
+    value?.schemaVersion !== '1.0.0' ||
+    value?.pageUrl !== pageUrl ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value?.publishedAt ?? '') ||
+    !isCommit(value?.appRevision) ||
+    !isCommit(value?.producerRevision) ||
+    value?.contractVersion !== '1.0.0' ||
+    !isDigest(value?.catalogueFingerprint) ||
+    !isDigest(value?.catalogueByteSha256) ||
+    !isByteLength(value?.catalogueByteLength)
+  ) {
+    throw new Error('DEPLOYMENT_PREVIOUS_INVALID');
+  }
+  return {
+    appRevision: value.appRevision,
+    producerRevision: value.producerRevision,
+    contractVersion: value.contractVersion,
+    catalogueFingerprint: value.catalogueFingerprint,
+    catalogueByteSha256: value.catalogueByteSha256,
+    catalogueByteLength: value.catalogueByteLength,
+  };
+}
+
+let previous;
+const previousPath = process.env.SNOREDEX_CURRENT_DEPLOYMENT_PATH;
+if (previousPath) {
+  try {
+    previous = JSON.parse(await readFile(previousPath, 'utf8'));
+  } catch {
+    throw new Error('DEPLOYMENT_PREVIOUS_INVALID');
+  }
+  deploymentTuple(previous);
+  if (previous.sourceFingerprints !== undefined) {
+    if (
+      !Array.isArray(previous.sourceFingerprints) ||
+      previous.sourceFingerprints.length === 0 ||
+      previous.sourceFingerprints.some((value) => !isDigest(value)) ||
+      new Set(previous.sourceFingerprints).size !== previous.sourceFingerprints.length ||
+      !previous.sourceFingerprints.includes(previous.catalogueFingerprint)
+    ) {
+      throw new Error('DEPLOYMENT_PREVIOUS_INVALID');
+    }
+  }
+}
+
+const previousSources = previous ? (previous.sourceFingerprints ?? [previous.catalogueFingerprint]) : [];
+
 const manifest = {
   schema: 'snoredex-checklist-deployment',
   schemaVersion: '1.0.0',
@@ -42,6 +95,8 @@ const manifest = {
   catalogueFingerprint: lock.catalogueFingerprint,
   catalogueByteSha256: lock.catalogueByteSha256,
   catalogueByteLength: lock.catalogueByteLength,
+  sourceFingerprints: [...new Set([lock.catalogueFingerprint, ...previousSources])],
 };
+if (previous) manifest.rollback = deploymentTuple(previous);
 await writeFile(join(root, 'deployment.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 console.log('deployment manifest created');

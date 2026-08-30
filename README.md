@@ -133,9 +133,12 @@ Use the **Deploy Pages** workflow from the Actions tab with the consumer commit 
 `adopt` for a forward catalogue adoption or `rollback` for a previous known-good consumer commit.
 The workflow builds and checks that exact revision, writes `deployment.json`, and performs a bounded
 HTTPS smoke test against the resulting Pages URL. A rollback requires an existing published
-manifest and an ancestor consumer commit, and does not require a reverse migration route that the
-older artifact could not contain; that revision must still contain the deployment tooling and npm
-commands used by this workflow. An older commit without them is not an eligible rollback target.
+manifest whose exact recovery tuple names the selected consumer revision and its pinned catalogue;
+an arbitrary older ancestor is not sufficient. The manifest carries every catalogue fingerprint
+that may still be active in browsers after the one-slot rollback. A later adoption must provide a
+reviewed route for each of those fingerprints. The selected revision must still contain the
+recoverable deployment-manifest tooling and npm commands used by this workflow. An older commit
+without them is not an eligible rollback target.
 Do not edit browser-local collection state or rewrite a lock in place. Verify the deployed
 `deployment.json` and `provenance.json` tuple before considering the rollback complete.
 

@@ -68,6 +68,14 @@ jobs:
               exit 1
             fi
           done
+          if [[ "${{ inputs.deployment_mode }}" == "adopt" ]] && ! grep -q "SNOREDEX_CURRENT_DEPLOYMENT_PATH" scripts/check-production-adoption.mjs; then
+            echo "consumer_revision lacks the published deployment adoption guard"
+            exit 1
+          fi
+          if [[ "${{ inputs.deployment_mode }}" == "rollback" ]] && ! grep -q "SNOREDEX_CURRENT_DEPLOYMENT_PATH" scripts/create-deployment-manifest.mjs; then
+            echo "consumer_revision lacks recoverable deployment provenance"
+            exit 1
+          fi
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
@@ -85,17 +93,19 @@ jobs:
           SNOREDEX_PAGE_URL: https://m4s-ai.github.io/snoredex-checklist/
         run: |
           set -euo pipefail
-          manifest="$(mktemp)"
-          trap 'rm -f "$manifest"' EXIT
+          manifest="$RUNNER_TEMP/current-deployment.json"
+          rm -f "$manifest"
           status="$(curl --silent --show-error --location --output "$manifest" --write-out '%{http_code}' "$SNOREDEX_PAGE_URL/deployment.json")"
           if [[ "$status" == "404" ]]; then
             echo "catalogue_fingerprint=" >> "$GITHUB_OUTPUT"
             echo "app_revision=" >> "$GITHUB_OUTPUT"
+            echo "manifest_path=" >> "$GITHUB_OUTPUT"
           elif [[ "$status" == "200" ]]; then
             fingerprint="$(node --input-type=module -e 'import fs from "node:fs"; const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).catalogueFingerprint; if (!/^sha256:[0-9a-f]{64}$/.test(value ?? "")) process.exit(1); process.stdout.write(value);' "$manifest")"
             app_revision="$(node --input-type=module -e 'import fs from "node:fs"; const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).appRevision; if (!/^[0-9a-f]{40}$/.test(value ?? "")) process.exit(1); process.stdout.write(value);' "$manifest")"
             echo "catalogue_fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
             echo "app_revision=$app_revision" >> "$GITHUB_OUTPUT"
+            echo "manifest_path=$manifest" >> "$GITHUB_OUTPUT"
           else
             echo "current production deployment manifest unavailable (HTTP $status)"
             exit 1
@@ -104,22 +114,48 @@ jobs:
         if: inputs.deployment_mode == 'rollback'
         env:
           CONSUMER_REVISION: ${{ inputs.consumer_revision }}
-          CURRENT_APP_REVISION: ${{ steps.current-production.outputs.app_revision }}
+          CURRENT_DEPLOYMENT_PATH: ${{ steps.current-production.outputs.manifest_path }}
         run: |
           set -euo pipefail
-          if [[ -z "$CURRENT_APP_REVISION" ]]; then
+          if [[ -z "$CURRENT_DEPLOYMENT_PATH" ]]; then
             echo "rollback requires an existing published deployment manifest"
             exit 1
           fi
-          if ! git merge-base --is-ancestor "$CONSUMER_REVISION" "$CURRENT_APP_REVISION"; then
-            echo "rollback target must be an ancestor of the currently published app revision"
-            exit 1
-          fi
+          node --input-type=module - "$CURRENT_DEPLOYMENT_PATH" "$CONSUMER_REVISION" <<'NODE'
+          import fs from 'node:fs';
+
+          const [manifestPath, targetRevision] = process.argv.slice(2);
+          const current = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+          const lock = JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8'));
+          const commit = /^[0-9a-f]{40}$/u;
+          const digest = /^sha256:[0-9a-f]{64}$/u;
+          const previous = current?.rollback;
+          const validLength = (value) => Number.isSafeInteger(value) && value > 0;
+          if (
+            current?.schema !== 'snoredex-checklist-deployment' ||
+            current?.schemaVersion !== '1.0.0' ||
+            current?.pageUrl !== 'https://m4s-ai.github.io/snoredex-checklist/' ||
+            !previous ||
+            previous.appRevision !== targetRevision ||
+            !commit.test(targetRevision) ||
+            !commit.test(previous.producerRevision) ||
+            previous.producerRevision !== lock.producerRevision ||
+            previous.contractVersion !== lock.contractVersion ||
+            previous.catalogueFingerprint !== lock.catalogueFingerprint ||
+            previous.catalogueByteSha256 !== lock.catalogueByteSha256 ||
+            previous.catalogueByteLength !== lock.catalogueByteLength ||
+            !digest.test(previous.catalogueFingerprint ?? '') ||
+            !digest.test(previous.catalogueByteSha256 ?? '') ||
+            !validLength(previous.catalogueByteLength)
+          ) {
+            throw new Error('rollback target must match the exact published recovery tuple');
+          }
+          NODE
       - name: Require reviewed producer migration target
         if: inputs.deployment_mode == 'adopt'
         env:
           SNOREDEX_DEPLOYMENT_MODE: ${{ inputs.deployment_mode }}
-          SNOREDEX_CURRENT_CATALOGUE_FINGERPRINT: ${{ steps.current-production.outputs.catalogue_fingerprint }}
+          SNOREDEX_CURRENT_DEPLOYMENT_PATH: ${{ steps.current-production.outputs.manifest_path }}
         run: node scripts/check-production-adoption.mjs
       - name: Run browser and accessibility gates
         run: |
@@ -130,6 +166,7 @@ jobs:
       - name: Add deployment provenance
         env:
           SNOREDEX_PAGE_URL: https://m4s-ai.github.io/snoredex-checklist/
+          SNOREDEX_CURRENT_DEPLOYMENT_PATH: ${{ steps.current-production.outputs.manifest_path }}
         run: npm run deployment:manifest
       - name: Recheck published artifact
         run: npm run artifact:check

@@ -1,22 +1,32 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import test from 'node:test';
 
 const root = resolve(import.meta.dirname, '..');
 
 test('production adoption validates the reviewed target migration without requiring the fixture as a source', async () => {
   const scriptPath = resolve(root, 'scripts/check-production-adoption.mjs');
+  const manifestScriptPath = resolve(root, 'scripts/create-deployment-manifest.mjs');
   const workflowPath = resolve(root, '.github/workflows/deploy-pages.yml');
   const script = await readFile(scriptPath, 'utf8');
+  const manifestScript = await readFile(manifestScriptPath, 'utf8');
+  const lock = JSON.parse(await readFile(resolve(root, 'catalogue.lock.json'), 'utf8'));
   const workflow = await readFile(workflowPath, 'utf8');
   assert.doesNotMatch(script, /collector-catalogue\.fixture/u);
-  assert.match(script, /candidate\.toFingerprint === targetFingerprint/u);
+  assert.match(script, /candidate\?\.toFingerprint === targetFingerprint/u);
+  assert.match(script, /sourceFingerprints/u);
+  assert.match(manifestScript, /SNOREDEX_CURRENT_DEPLOYMENT_PATH/u);
+  assert.match(manifestScript, /manifest\.rollback = deploymentTuple\(previous\)/u);
+  assert.match(workflow, /rollback target must match the exact published recovery tuple/u);
+  assert.match(workflow, /consumer_revision lacks recoverable deployment provenance/u);
+  assert.doesNotMatch(workflow, /git merge-base --is-ancestor/u);
   assert.match(workflow, /name: Require reviewed producer migration target\s+if: inputs\.deployment_mode == 'adopt'/u);
 
   const run = (currentFingerprint?: string) => {
-    const env = { ...process.env, SNOREDEX_DEPLOYMENT_MODE: 'adopt' };
+    const env: NodeJS.ProcessEnv = { ...process.env, SNOREDEX_DEPLOYMENT_MODE: 'adopt' };
     if (currentFingerprint === undefined) delete env.SNOREDEX_CURRENT_CATALOGUE_FINGERPRINT;
     else env.SNOREDEX_CURRENT_CATALOGUE_FINGERPRINT = currentFingerprint;
     return spawnSync(process.execPath, [scriptPath], { cwd: root, encoding: 'utf8', env });
@@ -32,13 +42,6 @@ test('production adoption validates the reviewed target migration without requir
   const unchanged = run(target);
   assert.equal(unchanged.status, 0, `${unchanged.stdout}${unchanged.stderr}`);
 
-  const rollback = spawnSync(process.execPath, [scriptPath], {
-    cwd: root,
-    encoding: 'utf8',
-    env: { ...process.env, SNOREDEX_DEPLOYMENT_MODE: 'rollback', SNOREDEX_CURRENT_CATALOGUE_FINGERPRINT: target },
-  });
-  assert.equal(rollback.status, 0, `${rollback.stdout}${rollback.stderr}`);
-
   const rollbackWithoutDeployment = spawnSync(process.execPath, [scriptPath], {
     cwd: root,
     encoding: 'utf8',
@@ -53,4 +56,116 @@ test('production adoption validates the reviewed target migration without requir
   const unrelated = run(`sha256:${'b'.repeat(64)}`);
   assert.notEqual(unrelated.status, 0);
   assert.match(`${unrelated.stdout}${unrelated.stderr}`, /PRODUCTION_ADOPTION_BLOCKED_MISSING_REVIEWED_TRANSITION/u);
+
+  const temporaryDirectory = await mkdtemp(resolve(tmpdir(), 'snoredex-adoption-'));
+  try {
+    const currentManifestPath = resolve(temporaryDirectory, 'deployment.json');
+    const previousAppRevision = 'b'.repeat(40);
+    const previousDeployment = {
+      schema: 'snoredex-checklist-deployment',
+      schemaVersion: '1.0.0',
+      pageUrl: 'https://m4s-ai.github.io/snoredex-checklist/',
+      publishedAt: '2026-08-30T00:00:00.000Z',
+      appRevision: previousAppRevision,
+      producerRevision: lock.producerRevision,
+      contractVersion: lock.contractVersion,
+      catalogueFingerprint: lock.catalogueFingerprint,
+      catalogueByteSha256: lock.catalogueByteSha256,
+      catalogueByteLength: lock.catalogueByteLength,
+      sourceFingerprints: [lock.catalogueFingerprint],
+    };
+    const provenancePath = resolve(temporaryDirectory, 'provenance.json');
+    await writeFile(
+      provenancePath,
+      JSON.stringify({
+        schema: 'snoredex-site-provenance',
+        schemaVersion: '1.0.0',
+        appRevision: 'a'.repeat(40),
+        catalogue: {
+          mode: 'pinned-snapshot',
+          sourceCommit: lock.producerRevision,
+          sourceRepository: 'https://github.com/m4s-ai/snoredex-data',
+          contractVersion: lock.contractVersion,
+          catalogueFingerprint: lock.catalogueFingerprint,
+          catalogueByteSha256: lock.catalogueByteSha256,
+          catalogueByteLength: lock.catalogueByteLength,
+          lock,
+        },
+      }),
+      'utf8',
+    );
+    await writeFile(currentManifestPath, JSON.stringify(previousDeployment), 'utf8');
+    const generated = spawnSync(process.execPath, [manifestScriptPath, temporaryDirectory], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_PAGE_URL: 'https://m4s-ai.github.io/snoredex-checklist/',
+        SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+      },
+    });
+    assert.equal(generated.status, 0, `${generated.stdout}${generated.stderr}`);
+    const generatedDeployment = JSON.parse(await readFile(resolve(temporaryDirectory, 'deployment.json'), 'utf8'));
+    assert.deepEqual(generatedDeployment.rollback, {
+      appRevision: previousAppRevision,
+      producerRevision: lock.producerRevision,
+      contractVersion: lock.contractVersion,
+      catalogueFingerprint: lock.catalogueFingerprint,
+      catalogueByteSha256: lock.catalogueByteSha256,
+      catalogueByteLength: lock.catalogueByteLength,
+    });
+    assert.deepEqual(generatedDeployment.sourceFingerprints, [lock.catalogueFingerprint]);
+
+    const currentDeployment = {
+      sourceFingerprints: [target, 'sha256:3298f2574d6b35c9a5f93e6de6189127ee741c1d78aace39d12b67c286b8854f'],
+      catalogueFingerprint: target,
+    };
+    await writeFile(currentManifestPath, JSON.stringify(currentDeployment), 'utf8');
+    const rollback = spawnSync(process.execPath, [scriptPath], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_DEPLOYMENT_MODE: 'rollback',
+        SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+      },
+    });
+    assert.equal(rollback.status, 0, `${rollback.stdout}${rollback.stderr}`);
+
+    const fromBothSources = spawnSync(process.execPath, [scriptPath], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_DEPLOYMENT_MODE: 'adopt',
+        SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+      },
+    });
+    assert.equal(fromBothSources.status, 0, `${fromBothSources.stdout}${fromBothSources.stderr}`);
+
+    await writeFile(
+      currentManifestPath,
+      JSON.stringify({
+        sourceFingerprints: [target, `sha256:${'b'.repeat(64)}`],
+        catalogueFingerprint: target,
+      }),
+      'utf8',
+    );
+    const missingSourceRoute = spawnSync(process.execPath, [scriptPath], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_DEPLOYMENT_MODE: 'adopt',
+        SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+      },
+    });
+    assert.notEqual(missingSourceRoute.status, 0);
+    assert.match(
+      `${missingSourceRoute.stdout}${missingSourceRoute.stderr}`,
+      /PRODUCTION_ADOPTION_BLOCKED_MISSING_REVIEWED_TRANSITION/u,
+    );
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
 });
