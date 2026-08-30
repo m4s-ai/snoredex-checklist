@@ -23,7 +23,15 @@ test('production adoption validates the reviewed target migration without requir
   assert.match(manifestScript, /previousSources\.length > 0/u);
   assert.match(workflow, /rollback target must match the exact published recovery tuple/u);
   assert.match(workflow, /consumer_revision lacks recoverable deployment provenance/u);
-  assert.match(workflow, /sources\.some\(\(value\) => value !== previous\.catalogueFingerprint\)/u);
+  assert.match(
+    workflow,
+    /sameCatalogueDeployment = current\?\.catalogueFingerprint === previous\?\.catalogueFingerprint/u,
+  );
+  assert.match(
+    workflow,
+    /!sameCatalogueDeployment && sources\.some\(\(value\) => value !== previous\.catalogueFingerprint\)/u,
+  );
+  assert.match(workflow, /!digest\.test\(current\.catalogueFingerprint \?\? ''\)/u);
   assert.doesNotMatch(workflow, /git merge-base --is-ancestor/u);
   assert.match(workflow, /name: Require reviewed producer migration target\s+if: inputs\.deployment_mode == 'adopt'/u);
 

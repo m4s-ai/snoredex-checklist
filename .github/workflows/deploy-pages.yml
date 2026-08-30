@@ -131,6 +131,7 @@ jobs:
           const digest = /^sha256:[0-9a-f]{64}$/u;
           const previous = current?.rollback;
           const sources = current?.sourceFingerprints;
+          const sameCatalogueDeployment = current?.catalogueFingerprint === previous?.catalogueFingerprint;
           const validLength = (value) => Number.isSafeInteger(value) && value > 0;
           if (
             current?.schema !== 'snoredex-checklist-deployment' ||
@@ -145,6 +146,7 @@ jobs:
             previous.catalogueFingerprint !== lock.catalogueFingerprint ||
             previous.catalogueByteSha256 !== lock.catalogueByteSha256 ||
             previous.catalogueByteLength !== lock.catalogueByteLength ||
+            !digest.test(current.catalogueFingerprint ?? '') ||
             !digest.test(previous.catalogueFingerprint ?? '') ||
             !digest.test(previous.catalogueByteSha256 ?? '') ||
             !validLength(previous.catalogueByteLength) ||
@@ -152,7 +154,7 @@ jobs:
             sources.length === 0 ||
             sources.some((value) => !digest.test(value)) ||
             new Set(sources).size !== sources.length ||
-            sources.some((value) => value !== previous.catalogueFingerprint)
+            (!sameCatalogueDeployment && sources.some((value) => value !== previous.catalogueFingerprint))
           ) {
             throw new Error('rollback target must match the exact published recovery tuple');
           }
