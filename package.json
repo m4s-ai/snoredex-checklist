@@ -35,6 +35,8 @@
     "build:site": "node scripts/build-site.mjs",
     "build:reproducible": "node scripts/check-reproducible-build.mjs",
     "artifact:check": "node scripts/check-artifact.mjs",
+    "complexity:report": "node scripts/complexity-report.mjs --write",
+    "complexity:check": "node scripts/complexity-report.mjs --check",
     "deployment:manifest": "node scripts/create-deployment-manifest.mjs",
     "smoke:pages": "node scripts/smoke-pages.mjs"
   },
