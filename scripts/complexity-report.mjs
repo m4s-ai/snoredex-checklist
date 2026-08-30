@@ -152,14 +152,52 @@ function hasTypeDeclarationBefore(tokens, from) {
   return false;
 }
 
+function enclosingOpenBrace(tokens, from) {
+  let depth = 0;
+  for (let index = from - 1; index >= 0; index -= 1) {
+    const kind = tokens[index].kind;
+    if (kind === SyntaxKind.CloseBraceToken) depth += 1;
+    else if (kind === SyntaxKind.OpenBraceToken) {
+      if (depth === 0) return index;
+      depth -= 1;
+    }
+  }
+  return undefined;
+}
+
+function isTypeDeclarationScope(tokens, from) {
+  const open = enclosingOpenBrace(tokens, from);
+  return open !== undefined && hasTypeDeclarationBefore(tokens, open);
+}
+
+function isObjectLiteralScope(tokens, from) {
+  const open = enclosingOpenBrace(tokens, from);
+  if (open === undefined) return false;
+  const previousKind = tokens[open - 1]?.kind;
+  if (
+    [
+      SyntaxKind.EqualsToken,
+      SyntaxKind.ReturnKeyword,
+      SyntaxKind.OpenParenToken,
+      SyntaxKind.OpenBracketToken,
+      SyntaxKind.CommaToken,
+    ].includes(previousKind)
+  )
+    return true;
+  if (previousKind !== SyntaxKind.ColonToken) return false;
+  const beforeProperty = tokens[open - 3]?.kind;
+  return [SyntaxKind.OpenBraceToken, SyntaxKind.CommaToken].includes(beforeProperty);
+}
+
 function isTypeOnlyArrow(tokens, arrowIndex) {
   const close = arrowIndex - 1;
   if (tokens[close]?.kind !== SyntaxKind.CloseParenToken) return false;
   const open = matchingOpen(tokens, close, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
   if (open === undefined) return false;
+  if (isTypeDeclarationScope(tokens, open)) return true;
   if (tokens[open - 1]?.kind === SyntaxKind.NewKeyword) return true;
   if (tokens[open - 1]?.kind === SyntaxKind.ColonToken) {
-    return tokens[arrowIndex + 1]?.kind === SyntaxKind.OpenBraceToken ? hasTypeDeclarationBefore(tokens, open) : true;
+    return !isObjectLiteralScope(tokens, open);
   }
   if (tokens[open - 1]?.kind === SyntaxKind.AsKeyword) return true;
   for (let index = open - 1; index >= 0; index -= 1) {
@@ -499,6 +537,22 @@ if (process.argv.includes('--self-test')) {
         { name: 'storage', complexity: 1 },
         { name: '<arrow>', complexity: 2 },
       ],
+    },
+    {
+      source: `function expressionStorage() {
+        return { register: (value) => (value ? value : undefined) };
+      }`,
+      expected: [
+        { name: 'expressionStorage', complexity: 1 },
+        { name: '<arrow>', complexity: 2 },
+      ],
+    },
+    {
+      source: `interface GenericStorage {
+        readonly listKeys?: (prefix: string) => readonly string[];
+        readonly withAtomicUpdate?: <T>(callback: () => T) => T;
+      }`,
+      expected: [],
     },
   ];
   for (const sample of samples) {
