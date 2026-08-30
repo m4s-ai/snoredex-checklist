@@ -63,12 +63,14 @@ function requestFor(rootDirectory: string, catalogue = cloneCatalogue()): Catalo
   const migrationBytes = migrationFor(catalogue, semanticFingerprint(catalogue));
   return {
     rootDirectory,
-    artifactUrl: 'https://example.test/collector_catalogue.json',
+    artifactUrl:
+      'https://raw.githubusercontent.com/m4s-ai/snoredex-data/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/collector_catalogue.json',
     artifactCommit: 'a'.repeat(40),
     contractVersion: '1.0.0',
     expectedFingerprint: semanticFingerprint(catalogue),
     expectedByteSha256: digestFor(bytes),
-    migrationArtifactUrl: 'https://example.test/collector_migrations.json',
+    migrationArtifactUrl:
+      'https://raw.githubusercontent.com/m4s-ai/snoredex-data/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/collector_migrations.json',
     migrationExpectedByteSha256: digestFor(migrationBytes),
     migrationBytes,
     issueUrls: [
@@ -107,6 +109,27 @@ test('stages and commits a validated catalogue plus matching lock', async () => 
       [...(await readFile(join(rootDirectory, 'vendor', 'snoredex-data', 'collector_migrations.json')))],
       [...request.migrationBytes],
     );
+  } finally {
+    await cleanup(rootDirectory);
+  }
+});
+
+test('requires both producer artifact URLs to use the declared revision', async () => {
+  const rootDirectory = await temporaryRoot();
+  try {
+    const request = requestFor(rootDirectory);
+    const producerUrl = (filename: string, commit: string): string =>
+      `https://raw.githubusercontent.com/m4s-ai/snoredex-data/${commit}/${filename}`;
+    const mismatchedArtifact = await syncCataloguePair({
+      ...request,
+      artifactUrl: producerUrl('collector_catalogue.json', 'b'.repeat(40)),
+    });
+    assert.deepEqual(mismatchedArtifact, { ok: false, code: 'SYNC_ARGUMENT_INVALID' });
+    const mismatchedMigration = await syncCataloguePair({
+      ...request,
+      migrationArtifactUrl: producerUrl('collector_migrations.json', 'b'.repeat(40)),
+    });
+    assert.deepEqual(mismatchedMigration, { ok: false, code: 'SYNC_ARGUMENT_INVALID' });
   } finally {
     await cleanup(rootDirectory);
   }

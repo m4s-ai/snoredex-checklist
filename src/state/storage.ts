@@ -382,6 +382,13 @@ export class OrderedStateStore {
         result.error === 'STATE_FINGERPRINT_UNSUPPORTED' ? 'LOCAL_STATE_UNSUPPORTED' : 'LOCAL_STATE_UNREADABLE',
       );
     }
+    // Keep the complete source draft available when reconciliation produces
+    // retired or otherwise orphaned records.  The target projection cannot
+    // represent those source identities, so replacing the draft would lose
+    // private state before the user can review or recover it.
+    if (result.value.orphans.length > 0 || result.value.conflicts.length > 0) {
+      return error('LOCAL_STATE_UNREADABLE');
+    }
     this.unsavedDraft = cloneState(result.value.state);
     return success(undefined);
   }

@@ -124,20 +124,28 @@ function isHttpsUrl(value: unknown): value is string {
   }
 }
 
-function isArtifactUrl(value: unknown): value is string {
+function isProducerArtifactUrl(value: unknown, expectedCommit: unknown, filename: string): value is string {
   if (!isHttpsUrl(value)) {
     return false;
   }
+  if (!isCommit(expectedCommit)) {
+    return false;
+  }
   const url = new URL(value);
-  return url.search === '' && url.hash === '' && url.pathname.endsWith('/collector_catalogue.json');
+  return (
+    url.origin === 'https://raw.githubusercontent.com' &&
+    url.search === '' &&
+    url.hash === '' &&
+    url.pathname === `/m4s-ai/snoredex-data/${expectedCommit}/${filename}`
+  );
 }
 
-function isMigrationArtifactUrl(value: unknown): value is string {
-  if (!isHttpsUrl(value)) {
-    return false;
-  }
-  const url = new URL(value);
-  return url.search === '' && url.hash === '' && url.pathname.endsWith('/collector_migrations.json');
+function isArtifactUrl(value: unknown, expectedCommit: unknown): value is string {
+  return isProducerArtifactUrl(value, expectedCommit, 'collector_catalogue.json');
+}
+
+function isMigrationArtifactUrl(value: unknown, expectedCommit: unknown): value is string {
+  return isProducerArtifactUrl(value, expectedCommit, 'collector_migrations.json');
 }
 
 function isIssueUrl(value: unknown): value is string {
@@ -385,14 +393,14 @@ function lockIsValid(value: unknown): value is CatalogueLock {
     value.schemaVersion === LOCK_VERSION &&
     value.sourceRepository === PRODUCER_REPOSITORY &&
     isCommit(value.producerRevision) &&
-    isArtifactUrl(value.artifactUrl) &&
+    isArtifactUrl(value.artifactUrl, value.producerRevision) &&
     typeof value.contractVersion === 'string' &&
     isSha256(value.catalogueFingerprint) &&
     isSha256(value.catalogueByteSha256) &&
     typeof byteLength === 'number' &&
     Number.isSafeInteger(byteLength) &&
     byteLength > 0 &&
-    isMigrationArtifactUrl(value.migrationArtifactUrl) &&
+    isMigrationArtifactUrl(value.migrationArtifactUrl, value.producerRevision) &&
     isSha256(value.migrationByteSha256) &&
     typeof migrationByteLength === 'number' &&
     Number.isSafeInteger(migrationByteLength) &&
@@ -722,7 +730,7 @@ async function readCommittedCataloguePairUnsafe(rootDirectory: string): Promise<
       bytes.byteLength !== rawLock.catalogueByteLength ||
       sha256(migrationBytes) !== rawLock.migrationByteSha256 ||
       migrationBytes.byteLength !== rawLock.migrationByteLength ||
-      !isMigrationArtifactUrl(rawLock.migrationArtifactUrl)
+      !isMigrationArtifactUrl(rawLock.migrationArtifactUrl, rawLock.producerRevision)
     ) {
       return { ok: false, code: 'SYNC_PAIR_INVALID' };
     }
@@ -755,12 +763,12 @@ export async function readCommittedCataloguePair(rootDirectory: string): Promise
 export async function syncCataloguePair(request: CatalogueSyncRequest): Promise<SyncResult> {
   const rootDirectory = resolve(request.rootDirectory);
   if (
-    !isArtifactUrl(request.artifactUrl) ||
+    !isArtifactUrl(request.artifactUrl, request.artifactCommit) ||
     !isCommit(request.artifactCommit) ||
     typeof request.contractVersion !== 'string' ||
     !isSha256(request.expectedFingerprint) ||
     !isSha256(request.expectedByteSha256) ||
-    !isMigrationArtifactUrl(request.migrationArtifactUrl) ||
+    !isMigrationArtifactUrl(request.migrationArtifactUrl, request.artifactCommit) ||
     !isSha256(request.migrationExpectedByteSha256) ||
     request.expectedFingerprint.length !== 71 ||
     request.expectedByteSha256.length !== 71 ||

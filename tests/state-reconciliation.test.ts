@@ -845,3 +845,27 @@ test('reconciles a pending note draft before validating the target fingerprint',
   assert.equal(draft?.items[0]?.itemId, targetA);
   assert.equal(draft?.items[0]?.note, 'pending source');
 });
+
+test('preserves a pending draft when reconciliation yields retired orphan records', () => {
+  const storage = {
+    getItem: (_key: string): string | null => null,
+    setItem: (_key: string, _value: string): void => undefined,
+    removeItem: (_key: string): void => undefined,
+  };
+  const store = new OrderedStateStore(storage);
+  const source = state(oldFingerprint, [
+    { itemId: oldA, status: 'have', quantityOwned: 2, quantityOrdered: 0, note: 'retired note' },
+  ]);
+  store.scheduleNoteSave(source, false);
+
+  assert.deepEqual(
+    store.reconcileUnsavedDraft(targetFingerprint, new Set(), {
+      knownSourceItemIds: new Set([oldA]),
+      migrations: [
+        migration(oldFingerprint, targetFingerprint, [transition(oldA, [], 'retired-1:0', 'none', 'retire-to-orphan')]),
+      ],
+    }),
+    { ok: false, error: 'LOCAL_STATE_UNREADABLE' },
+  );
+  assert.deepEqual(store.unsaved(), source);
+});
