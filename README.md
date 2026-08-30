@@ -68,8 +68,11 @@ still an explicit `workflow_dispatch` operation and is never triggered by merge.
 durable workflow revision and provide the full lowercase `consumer_revision` commit SHA to deploy;
 the workflow validates and checks out that exact consumer revision before building, and the smoke
 test verifies the same SHA. Deployment also fails closed until the pinned producer migration
-manifest contains a reviewed, complete transition from the deployed synthetic fixture; no
-consumer-side identity mapping is inferred.
+manifest is reviewed, complete and targets the accepted catalogue fingerprint. On the first
+deployment (when no production manifest exists), no source fingerprint is required; later
+deployments must provide a reviewed route from the currently published fingerprint. A synthetic
+fixture that was never production is not treated as a migration source, and no consumer-side
+identity mapping is inferred.
 
 The build also copies the authored card-shaped placeholders from `site-src/assets/` into the
 same-origin `assets/images/` tree and writes a digest-pinned `assets/image-manifest.json`. The
@@ -126,13 +129,18 @@ rollback identity.
 
 ### Manual Pages deployment and rollback
 
-Use the **Deploy Pages** workflow from the Actions tab with the consumer commit to publish. The
-workflow builds and checks that exact revision, writes `deployment.json`, and performs a bounded
-HTTPS smoke test against the resulting Pages URL. A rollback is the same workflow dispatched at a
-previous known-good consumer commit whose lock points to the previous accepted producer snapshot;
-that revision must also contain the deployment tooling and npm commands used by this workflow; an
-older commit without them is not an eligible rollback target. Do not edit browser-local collection
-state or rewrite a lock in place. Verify the deployed
+Use the **Deploy Pages** workflow from the Actions tab with the consumer commit to publish. Select
+`adopt` for a forward catalogue adoption or `rollback` for a previous known-good consumer commit.
+The workflow builds and checks that exact revision, writes `deployment.json`, and performs a bounded
+HTTPS smoke test against the resulting Pages URL. A rollback requires an existing published
+manifest whose exact recovery tuple names the selected consumer revision and its pinned catalogue;
+an arbitrary older ancestor is not sufficient. The manifest carries every catalogue fingerprint
+that may still be active in browsers after the one-slot rollback. A later adoption must provide a
+reviewed route for each of those fingerprints. If those sources diverge, no single rollback target
+is advertised and the workflow fails closed until a recoverable target exists. The selected revision
+must still contain the recoverable deployment-manifest tooling and npm commands used by this
+workflow. An older commit without them is not an eligible rollback target.
+Do not edit browser-local collection state or rewrite a lock in place. Verify the deployed
 `deployment.json` and `provenance.json` tuple before considering the rollback complete.
 
 ## Licensing
