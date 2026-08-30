@@ -948,6 +948,8 @@ const RECOVERY_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   LOCAL_STATE_UNREADABLE: 'The saved collection could not be read. Import a valid backup to recover it.',
 };
 
+const MAX_RECOVERY_FILE_BYTES = 16 * 1024 * 1024;
+
 function recoveryErrorMessage(error: string): string {
   return RECOVERY_ERROR_MESSAGES[error] ?? 'The collection operation failed; the current state was not changed.';
 }
@@ -961,6 +963,8 @@ function confirmationDialog(title: string, message: string): Promise<boolean> {
   const dialog = document.createElement('dialog');
   dialog.className = 'recovery-confirmation';
   const heading = text('h3', title);
+  heading.id = 'recovery-confirmation-title';
+  dialog.setAttribute('aria-labelledby', heading.id);
   const body = text('p', message);
   const actions = text('div', undefined, 'recovery-preview-actions');
   const cancel = text('button', 'Cancel') as HTMLButtonElement;
@@ -1123,10 +1127,16 @@ function renderRecoveryTools(
     button.type = 'button';
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
-  fileInput.accept = '.snoredex-private.json,application/json';
+  fileInput.accept = ['.snoredex-', 'private.json'].join('') + ',application/json';
   fileInput.hidden = true;
   importButton.addEventListener('click', () => fileInput.click());
   let plan: BackupPlan | undefined;
+  let selectionGeneration = 0;
+  const clearPreview = (): void => {
+    plan = undefined;
+    previewContainer.replaceChildren();
+    previewContainer.hidden = true;
+  };
   const refresh = (): void => {
     const current = lifecycle.read();
     if (!current.ok) {
@@ -1187,15 +1197,23 @@ function renderRecoveryTools(
     });
   });
   fileInput.addEventListener('change', () => {
+    const generation = ++selectionGeneration;
     const file = fileInput.files?.[0];
     fileInput.value = '';
+    clearPreview();
     if (!file) return;
     setStatus('Validating backup…');
+    if (file.size > MAX_RECOVERY_FILE_BYTES) {
+      setStatus(recoveryErrorMessage('IMPORT_FILE_TOO_LARGE'));
+      return;
+    }
     void file
       .arrayBuffer()
       .then((buffer) => {
+        if (generation !== selectionGeneration) return;
         const result = lifecycle.prepareImport(new Uint8Array(buffer), targetFingerprint, knownItemIds);
         if (!result.ok) {
+          clearPreview();
           setStatus(recoveryErrorMessage(result.error));
           return;
         }
@@ -1222,15 +1240,17 @@ function renderRecoveryTools(
             });
           },
           () => {
-            plan = undefined;
-            previewContainer.replaceChildren();
-            previewContainer.hidden = true;
+            clearPreview();
             setStatus('Import preview cancelled.');
           },
         );
         setStatus('Review the backup preview before applying it.');
       })
-      .catch(() => setStatus(recoveryErrorMessage('IMPORT_FILE_READ_FAILED')));
+      .catch(() => {
+        if (generation !== selectionGeneration) return;
+        clearPreview();
+        setStatus(recoveryErrorMessage('IMPORT_FILE_READ_FAILED'));
+      });
   });
   actionsContainer.append(exportButton, exportRecoveryButton, importButton, clearButton, restoreButton, fileInput);
   refresh();

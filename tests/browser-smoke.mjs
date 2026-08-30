@@ -208,6 +208,43 @@ try {
           beforeImport,
           `${name}: preview is mutation-free`,
         );
+        await page.locator('input[type="file"]').setInputFiles({
+          name: 'invalid.json',
+          mimeType: 'application/json',
+          buffer: Buffer.from('{"schema":', 'utf8'),
+        });
+        await page
+          .locator('[data-recovery-status]')
+          .filter({ hasText: 'The selected file is not valid JSON.' })
+          .waitFor();
+        assert.equal(
+          await page.getByRole('heading', { name: /^(?:Import|Replace) preview$/u }).count(),
+          0,
+          `${name}: invalid import clears preview`,
+        );
+        await page.locator('input[type="file"]').setInputFiles({
+          name: 'oversized.json',
+          mimeType: 'application/json',
+          buffer: Buffer.alloc(16 * 1024 * 1024 + 1),
+        });
+        await page
+          .locator('[data-recovery-status]')
+          .filter({ hasText: 'The selected file is larger than the 16 MiB safety limit.' })
+          .waitFor();
+        assert.equal(
+          await page.getByRole('heading', { name: /^(?:Import|Replace) preview$/u }).count(),
+          0,
+          `${name}: oversized import clears preview`,
+        );
+        await page.getByRole('button', { name: 'Clear collection' }).click();
+        const confirmation = page.getByRole('dialog', { name: 'Clear collection?' });
+        await confirmation.waitFor();
+        assert.equal(
+          await confirmation.getByRole('heading', { name: 'Clear collection?' }).count(),
+          1,
+          `${name}: confirmation name`,
+        );
+        await confirmation.getByRole('button', { name: 'Cancel' }).click();
       }
       assert.equal(unexpectedRequests.length, 0, `${name}: unexpected network requests`);
       assert.deepEqual(failures, [], `${name}: browser failures`);

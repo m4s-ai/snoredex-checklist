@@ -466,6 +466,7 @@ function moduleDependencySources(value) {
 
 function dynamicModuleDependencies(value) {
   const dependencies = [];
+  if (!/\bimport\b/u.test(value)) return dependencies;
   for (let index = 0; index < value.length; index += 1) {
     const character = value[index];
     if (character === '"' || character === "'") {
@@ -518,6 +519,7 @@ function dynamicModuleDependencies(value) {
 
 function staticModuleDependencies(value) {
   const dependencies = [];
+  if (!/\bimport\b|\bexport\s*(?:\{|\*)/u.test(value)) return dependencies;
   for (let index = 0; index < value.length; index += 1) {
     const character = value[index];
     if (character === '"' || character === "'") {
