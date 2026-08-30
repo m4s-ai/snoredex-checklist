@@ -26,6 +26,8 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      SNOREDEX_APP_REVISION: ${{ inputs.consumer_revision }}
     steps:
       - name: Check out workflow revision
         uses: actions/checkout@v7

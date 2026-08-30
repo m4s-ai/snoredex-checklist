@@ -119,7 +119,10 @@ export function buildValidatedSourceMembershipIndex(
     if (!sameSet(sourceItemIds, expectedSourceItemIds)) {
       throw new Error(`BUILD_MIGRATION_SOURCE_MEMBERSHIP_INVALID: ${fromFingerprint} source set`);
     }
-    if (migration.toFingerprint === targetFingerprint && !sameSet(targetRouteItemIds, targetItemIds)) {
+    if (
+      migration.toFingerprint === targetFingerprint &&
+      ![...targetRouteItemIds].every((itemId) => targetItemIds.has(itemId))
+    ) {
       throw new Error(`BUILD_MIGRATION_SOURCE_MEMBERSHIP_INVALID: ${fromFingerprint} target set`);
     }
     byFingerprint.set(fromFingerprint, expectedSourceItemIds);

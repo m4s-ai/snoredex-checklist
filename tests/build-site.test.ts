@@ -13,13 +13,14 @@ const root = resolve(import.meta.dirname, '..');
 test('validates migration source membership against the target contract', () => {
   const catalogue = {
     meta: { catalogueFingerprint: 'sha256:target' },
-    items: [{ itemId: 'item-a' }, { itemId: 'item-b' }],
+    items: [{ itemId: 'item-a' }, { itemId: 'item-b' }, { itemId: 'item-c' }],
   };
   const manifest = {
     catalogueTransitions: [
       {
         fromFingerprint: 'sha256:source',
         toFingerprint: 'sha256:target',
+        sourceItemIds: ['item-a', 'item-b'],
         transitions: [
           {
             fromItemId: 'item-a',
@@ -46,6 +47,13 @@ test('validates migration source membership against the target contract', () => 
   omitted.catalogueTransitions[0].transitions.pop();
   assert.throws(
     () => buildValidatedSourceMembershipIndex(omitted, catalogue),
+    /BUILD_MIGRATION_SOURCE_MEMBERSHIP_INVALID/u,
+  );
+
+  const unknownTarget = structuredClone(manifest);
+  unknownTarget.catalogueTransitions[0].transitions[0].toItemIds = ['item-z'];
+  assert.throws(
+    () => buildValidatedSourceMembershipIndex(unknownTarget, catalogue),
     /BUILD_MIGRATION_SOURCE_MEMBERSHIP_INVALID/u,
   );
 });

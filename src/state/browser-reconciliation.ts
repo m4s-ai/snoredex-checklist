@@ -124,6 +124,14 @@ export async function reconcileBrowserState(
       const checked = validatePrivateState(active, knownItemIds);
       return checked.ok ? { ok: true, changed: false } : { ok: false, changed: false, error: 'LOCAL_STATE_UNREADABLE' };
     }
+    const matchingRecovery = current.value.recovery;
+    if (matchingRecovery?.catalogueFingerprint === targetFingerprint) {
+      const checked = validatePrivateState(matchingRecovery, knownItemIds);
+      if (!checked.ok) return { ok: false, changed: false, error: 'LOCAL_STATE_UNREADABLE' };
+      // A rollback deploy targets the snapshot in the recovery slot. Swap it
+      // into active while retaining the newer active state for a future roll-forward.
+      return writeAuthority(storage.value, current.value.raw, matchingRecovery, active);
+    }
     const result = reconcilePrivateState(active, targetFingerprint, {
       ...reconciliation,
       knownTargetItemIds: knownItemIds,
