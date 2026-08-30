@@ -29,8 +29,23 @@ test('production adoption validates the reviewed target migration without requir
   );
   assert.match(workflow, /new Set\(sources\)\.size !== sources\.length \|\|\s+!sameCatalogueDeployment/u);
   assert.match(workflow, /!digest\.test\(current\.catalogueFingerprint \?\? ''\)/u);
+  assert.doesNotMatch(workflow, /push:\s+branches:\s+- main/u);
+  assert.match(
+    workflow,
+    /description: Optional full consumer commit SHA \(adopt defaults to this workflow revision\)/u,
+  );
+  assert.match(workflow, /required: false/u);
+  assert.match(workflow, /consumer_revision is required for rollback/u);
+  assert.match(workflow, /consumer_revision="\$\{CONSUMER_REVISION_INPUT:-\$WORKFLOW_REVISION\}"/u);
+  assert.match(
+    workflow,
+    /SNOREDEX_EXPECTED_GITHUB_SHA: \$\{\{ steps\.deployment-inputs\.outputs\.consumer_revision \}\}/u,
+  );
   assert.doesNotMatch(workflow, /git merge-base --is-ancestor/u);
-  assert.match(workflow, /name: Require reviewed producer migration target\s+if: inputs\.deployment_mode == 'adopt'/u);
+  assert.match(
+    workflow,
+    /name: Require reviewed producer migration target\s+if: steps\.deployment-inputs\.outputs\.deployment_mode == 'adopt'/u,
+  );
 
   const run = (currentFingerprint?: string) => {
     const env: NodeJS.ProcessEnv = { ...process.env, SNOREDEX_DEPLOYMENT_MODE: 'adopt' };
