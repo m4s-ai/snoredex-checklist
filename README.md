@@ -67,7 +67,9 @@ digest-pinned vendor snapshot and lock. The generated directory is ignored; Page
 still an explicit `workflow_dispatch` operation and is never triggered by merge. Dispatch it from a
 durable workflow revision and provide the full lowercase `consumer_revision` commit SHA to deploy;
 the workflow validates and checks out that exact consumer revision before building, and the smoke
-test verifies the same SHA.
+test verifies the same SHA. Deployment also fails closed until the pinned producer migration
+manifest contains a reviewed, complete transition from the deployed synthetic fixture; no
+consumer-side identity mapping is inferred.
 
 The build also copies the authored card-shaped placeholders from `site-src/assets/` into the
 same-origin `assets/images/` tree and writes a digest-pinned `assets/image-manifest.json`. The

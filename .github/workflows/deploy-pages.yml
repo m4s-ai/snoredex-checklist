@@ -55,6 +55,8 @@ jobs:
         run: npx playwright install --with-deps chromium firefox webkit
       - name: Run repository gates
         run: npm run check
+      - name: Require reviewed migration from the deployed fixture
+        run: node scripts/check-production-adoption.mjs
       - name: Run browser and accessibility gates
         run: |
           npm run test:browser
