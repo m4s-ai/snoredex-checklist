@@ -170,9 +170,7 @@ function isTypeDeclarationScope(tokens, from) {
   return open !== undefined && hasTypeDeclarationBefore(tokens, open);
 }
 
-function isObjectLiteralScope(tokens, from) {
-  const open = enclosingOpenBrace(tokens, from);
-  if (open === undefined) return false;
+function isObjectLiteralOpen(tokens, open) {
   const previousKind = tokens[open - 1]?.kind;
   if (
     [
@@ -187,6 +185,29 @@ function isObjectLiteralScope(tokens, from) {
   if (previousKind !== SyntaxKind.ColonToken) return false;
   const beforeProperty = tokens[open - 3]?.kind;
   return [SyntaxKind.OpenBraceToken, SyntaxKind.CommaToken].includes(beforeProperty);
+}
+
+function isObjectLiteralValueArrow(tokens, from) {
+  const open = enclosingOpenBrace(tokens, from);
+  if (open === undefined) return false;
+  if (!isObjectLiteralOpen(tokens, open)) return false;
+  let parens = 0;
+  let brackets = 0;
+  let angles = 0;
+  let sawArrow = false;
+  let hasPropertyColon = false;
+  for (let index = open + 1; index < from; index += 1) {
+    const kind = tokens[index].kind;
+    if (kind === SyntaxKind.EqualsGreaterThanToken) sawArrow = true;
+    if (kind === SyntaxKind.OpenParenToken) parens += 1;
+    else if (kind === SyntaxKind.CloseParenToken) parens = Math.max(0, parens - 1);
+    else if (kind === SyntaxKind.OpenBracketToken) brackets += 1;
+    else if (kind === SyntaxKind.CloseBracketToken) brackets = Math.max(0, brackets - 1);
+    else if (kind === SyntaxKind.LessThanToken) angles += 1;
+    else if (kind === SyntaxKind.GreaterThanToken) angles = Math.max(0, angles - 1);
+    else if (kind === SyntaxKind.ColonToken && parens === 0 && brackets === 0 && angles === 0) hasPropertyColon = true;
+  }
+  return hasPropertyColon && parens === 0 && brackets === 0 && angles === 0 && !sawArrow;
 }
 
 function isParenthesizedTypePosition(tokens, open) {
@@ -207,7 +228,7 @@ function isTypeOnlyArrow(tokens, arrowIndex) {
   const open = matchingOpen(tokens, close, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
   if (open === undefined) return false;
   if (isTypeDeclarationScope(tokens, open)) return true;
-  if (isObjectLiteralScope(tokens, open)) return false;
+  if (isObjectLiteralValueArrow(tokens, open)) return false;
   if (tokens[open - 1]?.kind === SyntaxKind.NewKeyword) return true;
   if (tokens[open - 1]?.kind === SyntaxKind.LessThanToken) return true;
   if (isParenthesizedTypePosition(tokens, open)) return true;
@@ -311,6 +332,10 @@ function isOptionalTypeProperty(tokens, index) {
   return tokens[index]?.kind === SyntaxKind.QuestionToken && tokens[index + 1]?.kind === SyntaxKind.ColonToken;
 }
 
+function isCatchClause(tokens, index) {
+  return ![SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[index - 1]?.kind);
+}
+
 function collectFunctions(tokens, source, path) {
   const braces = pairBraces(tokens);
   const functions = [];
@@ -399,8 +424,13 @@ function collectFunctions(tokens, source, path) {
           SyntaxKind.BarBarToken,
           SyntaxKind.QuestionQuestionToken,
         ].includes(tokens[index].kind)
-      )
-        if (!isOptionalTypeProperty(tokens, index)) entry.complexity += 1;
+      ) {
+        if (
+          !isOptionalTypeProperty(tokens, index) &&
+          (tokens[index].kind !== SyntaxKind.CatchKeyword || isCatchClause(tokens, index))
+        )
+          entry.complexity += 1;
+      }
     }
     delete entry.bodyOpen;
     delete entry.bodyClose;
@@ -574,6 +604,25 @@ if (process.argv.includes('--self-test')) {
         return retryAction ?? callbacks;
       }`,
       expected: [{ name: 'wrappedTypes', complexity: 2 }],
+    },
+    {
+      source: `function nestedTypes() {
+        return {
+          request: <T>(name: string, callback: () => Promise<T>): Promise<T> =>
+            (request as (lockName: string, lockCallback: () => Promise<T>) => Promise<T>).call(name, callback),
+        };
+      }`,
+      expected: [
+        { name: 'nestedTypes', complexity: 1 },
+        { name: '<arrow>', complexity: 1 },
+      ],
+    },
+    {
+      source: 'function rejection(value) { return value.catch(() => undefined); }',
+      expected: [
+        { name: 'rejection', complexity: 1 },
+        { name: '<arrow>', complexity: 1 },
+      ],
     },
   ];
   for (const sample of samples) {

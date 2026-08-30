@@ -3,8 +3,8 @@
 > Advisory lexical estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (32 production code files).
-Lines: 12,207.
-Function-like nodes: 745.
+Lines: 12,256.
+Function-like nodes: 736.
 McCabe estimate: sum 3,714; mean 5.0; median 2; P90 12; P95 21.
 Hotspots: 87 functions exceed 10; 39 exceed 20.
 
@@ -24,9 +24,9 @@ The estimate counts if/for/while/do/catch/case statements, conditional `?` token
 | `src/catalogue/sync.ts:517`       | `parseJournal`                  |         34 |
 | `scripts/check-artifact.mjs:239`  | `stripHtmlComments`             |         32 |
 | `src/state/domain.ts:211`         | `parseState`                    |         32 |
-| `src/catalogue/sync.ts:763`       | `syncCataloguePair`             |         31 |
 | `src/site/deployment.ts:24`       | `validatePagesDeployment`       |         31 |
 | `src/state/backup.ts:289`         | `writeAuthority`                |         30 |
+| `src/catalogue/sync.ts:763`       | `syncCataloguePair`             |         29 |
 | `src/site/catalogue.ts:93`        | `validateProvenance`            |         29 |
 | `src/state/reconciliation.ts:167` | `migrationIsStructurallyValid`  |         28 |
 | `src/state/domain.ts:148`         | `normalizeRecordForImport`      |         27 |
