@@ -3,10 +3,10 @@
 > Advisory lexical estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (32 production code files).
-Lines: 12,367.
-Function-like nodes: 746.
-McCabe estimate: sum 3,754; mean 5.0; median 2; P90 12; P95 21.
-Hotspots: 88 functions exceed 10; 40 exceed 20.
+Lines: 12,456.
+Function-like nodes: 749.
+McCabe estimate: sum 3,785; mean 5.1; median 2; P90 12; P95 22.
+Hotspots: 88 functions exceed 10; 41 exceed 20.
 
 The estimate counts if/for/while/do/catch/case statements, conditional `?` tokens and `&&`/`||`/`??` operators inside function-like bodies. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
 
@@ -28,7 +28,7 @@ The estimate counts if/for/while/do/catch/case statements, conditional `?` token
 | `src/state/backup.ts:289`           | `writeAuthority`               |         30 |
 | `src/catalogue/sync.ts:763`         | `syncCataloguePair`            |         29 |
 | `src/site/catalogue.ts:93`          | `validateProvenance`           |         29 |
-| `scripts/complexity-report.mjs:414` | `collectFunctions`             |         28 |
+| `scripts/complexity-report.mjs:479` | `collectFunctions`             |         28 |
 | `src/state/reconciliation.ts:167`   | `migrationIsStructurallyValid` |         28 |
 | `src/state/domain.ts:148`           | `normalizeRecordForImport`     |         27 |
 | `scripts/check-artifact.mjs:67`     | `readAttribute`                |         26 |

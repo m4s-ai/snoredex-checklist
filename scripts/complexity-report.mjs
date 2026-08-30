@@ -170,6 +170,32 @@ function isTypeDeclarationScope(tokens, from) {
   return open !== undefined && hasTypeDeclarationBefore(tokens, open);
 }
 
+function isFunctionLikeParameterList(tokens, open) {
+  const previous = tokens[open - 1];
+  if (!previous) return false;
+  if (
+    [SyntaxKind.EqualsToken, SyntaxKind.FunctionKeyword, SyntaxKind.AsyncKeyword, SyntaxKind.NewKeyword].includes(
+      previous.kind,
+    )
+  )
+    return true;
+  if (identifierLike(previous)) return looksLikeMethodName(tokens, open - 1);
+  if (previous.kind !== SyntaxKind.GreaterThanToken) return false;
+  let angleDepth = 0;
+  for (let index = open - 1; index >= 0; index -= 1) {
+    const kind = tokens[index].kind;
+    if (kind === SyntaxKind.GreaterThanToken) {
+      angleDepth += 1;
+      continue;
+    }
+    if (kind === SyntaxKind.LessThanToken) {
+      angleDepth -= 1;
+      if (angleDepth === 0) return identifierLike(tokens[index - 1]) && looksLikeMethodName(tokens, index - 1);
+    }
+  }
+  return false;
+}
+
 function isParameterTypeLiteral(tokens, open) {
   if (tokens[open - 1]?.kind !== SyntaxKind.ColonToken) return false;
   let parenDepth = 0;
@@ -185,6 +211,7 @@ function isParameterTypeLiteral(tokens, open) {
       continue;
     }
     const close = matching(tokens, index, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+    if (!isFunctionLikeParameterList(tokens, index)) return false;
     return [SyntaxKind.OpenBraceToken, SyntaxKind.EqualsGreaterThanToken, SyntaxKind.ColonToken].includes(
       tokens[close + 1]?.kind,
     );
@@ -387,26 +414,64 @@ function isCatchClause(tokens, index) {
   return ![SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[index - 1]?.kind);
 }
 
-function isDoWhileContinuation(tokens, index) {
-  const previousKind = tokens[index - 1]?.kind;
-  if (previousKind === SyntaxKind.CloseBraceToken) {
-    const open = matchingOpen(tokens, index - 1, SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken);
-    if (open !== undefined && tokens[open - 1]?.kind === SyntaxKind.DoKeyword) return true;
-    return false;
+function findStatementEnd(tokens, start) {
+  if (start >= tokens.length) return undefined;
+  const firstKind = tokens[start].kind;
+  if (firstKind === SyntaxKind.OpenBraceToken)
+    return matching(tokens, start, SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken);
+  if (
+    [
+      SyntaxKind.IfKeyword,
+      SyntaxKind.WhileKeyword,
+      SyntaxKind.ForKeyword,
+      SyntaxKind.WithKeyword,
+      SyntaxKind.SwitchKeyword,
+    ].includes(firstKind)
+  ) {
+    const conditionOpen = tokens.findIndex(
+      (token, index) => index >= start && token.kind === SyntaxKind.OpenParenToken,
+    );
+    if (conditionOpen === -1) return undefined;
+    const conditionClose = matching(tokens, conditionOpen, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+    if (conditionClose === undefined) return undefined;
+    const consequentEnd = findStatementEnd(tokens, conditionClose + 1);
+    if (consequentEnd === undefined) return undefined;
+    if (firstKind === SyntaxKind.IfKeyword && tokens[consequentEnd + 1]?.kind === SyntaxKind.ElseKeyword)
+      return findStatementEnd(tokens, consequentEnd + 2);
+    return consequentEnd;
   }
-  if (previousKind !== SyntaxKind.SemicolonToken) return false;
-  let parenDepth = 0;
-  let bracketDepth = 0;
-  for (let cursor = index - 2; cursor >= 0; cursor -= 1) {
-    const kind = tokens[cursor].kind;
-    if (kind === SyntaxKind.CloseParenToken) parenDepth += 1;
-    else if (kind === SyntaxKind.OpenParenToken) parenDepth = Math.max(0, parenDepth - 1);
-    else if (kind === SyntaxKind.CloseBracketToken) bracketDepth += 1;
-    else if (kind === SyntaxKind.OpenBracketToken) bracketDepth = Math.max(0, bracketDepth - 1);
-    else if (parenDepth === 0 && bracketDepth === 0) {
-      if (kind === SyntaxKind.DoKeyword) return true;
-      if ([SyntaxKind.WhileKeyword, SyntaxKind.SemicolonToken, SyntaxKind.CloseBraceToken].includes(kind)) return false;
-    }
+  if (firstKind === SyntaxKind.DoKeyword) {
+    const bodyEnd = findStatementEnd(tokens, start + 1);
+    if (bodyEnd === undefined || tokens[bodyEnd + 1]?.kind !== SyntaxKind.WhileKeyword) return bodyEnd;
+    const conditionOpen = bodyEnd + 2;
+    if (tokens[conditionOpen]?.kind !== SyntaxKind.OpenParenToken) return bodyEnd;
+    const conditionClose = matching(tokens, conditionOpen, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+    return conditionClose === undefined
+      ? bodyEnd
+      : tokens[conditionClose + 1]?.kind === SyntaxKind.SemicolonToken
+        ? conditionClose + 1
+        : conditionClose;
+  }
+  let parens = 0;
+  let brackets = 0;
+  for (let index = start; index < tokens.length; index += 1) {
+    const kind = tokens[index].kind;
+    if (kind === SyntaxKind.OpenParenToken) parens += 1;
+    else if (kind === SyntaxKind.CloseParenToken) parens = Math.max(0, parens - 1);
+    else if (kind === SyntaxKind.OpenBracketToken) brackets += 1;
+    else if (kind === SyntaxKind.CloseBracketToken) brackets = Math.max(0, brackets - 1);
+    else if (parens === 0 && brackets === 0 && kind === SyntaxKind.SemicolonToken) return index;
+    else if (parens === 0 && brackets === 0 && kind === SyntaxKind.CloseBraceToken) return index - 1;
+  }
+  return undefined;
+}
+
+function isDoWhileContinuation(tokens, index) {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    if (tokens[cursor].kind !== SyntaxKind.DoKeyword) continue;
+    const bodyEnd = findStatementEnd(tokens, cursor + 1);
+    if (bodyEnd === index - 1) return true;
+    if (bodyEnd !== undefined && bodyEnd < index - 1) continue;
   }
   return false;
 }
@@ -734,6 +799,30 @@ if (process.argv.includes('--self-test')) {
         return value;
       }`,
       expected: [{ name: 'doWhileUnbraced', complexity: 2 }],
+    },
+    {
+      source: `function doWhileCompound(value) {
+        do while (value > 0) step(); while (value < 10);
+        return value;
+      }`,
+      expected: [{ name: 'doWhileCompound', complexity: 3 }],
+    },
+    {
+      source: `function doWhileIf(value) {
+        do if (value > 0) step(); else step(); while (value < 10);
+        return value;
+      }`,
+      expected: [{ name: 'doWhileIf', complexity: 3 }],
+    },
+    {
+      source: `function controlExpression(value, ready) {
+        if ({ nested: { callback: (x) => x && ready } }.nested.callback(value)) return value;
+        return value;
+      }`,
+      expected: [
+        { name: 'controlExpression', complexity: 2 },
+        { name: '<arrow>', complexity: 2 },
+      ],
     },
   ];
   for (const sample of samples) {
