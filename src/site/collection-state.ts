@@ -27,6 +27,11 @@ interface PersistenceResult<T> {
 interface OrderedStateStoreLike {
   read(): PersistenceResult<PrivateState | undefined>;
   unsaved(): PrivateState | undefined;
+  readonly reconcileUnsavedDraft?: (
+    targetFingerprint: string,
+    knownTargetItemIds: ReadonlySet<string>,
+    reconciliation: CollectionReconciliationOptions,
+  ) => PersistenceResult<void>;
   adoptUnsavedDraft(): PersistenceResult<PrivateState | undefined>;
   discardUnsavedDraft(): void;
   hasPendingNote(): boolean;
@@ -446,6 +451,10 @@ export async function createCollectionStateController(
     const store = new storageModule.OrderedStateStore(storage.value);
     const persisted = store.read();
     if (!persisted.ok) return undefined;
+    if (reconciliation !== undefined && store.reconcileUnsavedDraft !== undefined) {
+      if (!store.reconcileUnsavedDraft(catalogueFingerprint, knownTrackableItemIds, reconciliation).ok)
+        return undefined;
+    }
     const active = persisted.value;
     if (active !== undefined && active.catalogueFingerprint !== catalogueFingerprint) return undefined;
     if (active !== undefined && active.items.some((item) => !knownTrackableItemIds.has(item.itemId))) return undefined;

@@ -1,6 +1,11 @@
 import { readStateAuthority } from './authority.ts';
 import { serializePrivateState, validatePrivateState, type PrivateState } from './domain.ts';
-import { reconcilePrivateState, type ReconciliationContext, type ReconciliationSuccess } from './reconciliation.ts';
+import {
+  reconcilePrivateState,
+  type ReconciliationContext,
+  type ReconciliationMigration,
+  type ReconciliationSuccess,
+} from './reconciliation.ts';
 import {
   PRIVATE_STATE_RECOVERY_STORAGE_KEY,
   PRIVATE_STATE_STORAGE_KEY,
@@ -58,18 +63,40 @@ function preserveRecovery(source: PrivateState, _result: ReconciliationSuccess):
   return { ...source, items: source.items.map((item) => ({ ...item })) };
 }
 
-function hasDirectMigration(
+function migrationEntries(reconciliation: ReconciliationContext): readonly ReconciliationMigration[] {
+  const source = reconciliation.migrations as unknown;
+  if (Array.isArray(source)) return source as readonly ReconciliationMigration[];
+  if (typeof source !== 'object' || source === null) return [];
+  const routes = (source as { readonly catalogueTransitions?: unknown }).catalogueTransitions;
+  return Array.isArray(routes) ? (routes as readonly ReconciliationMigration[]) : [];
+}
+
+function hasMigrationPath(
   reconciliation: ReconciliationContext,
   fromFingerprint: string,
   toFingerprint: string,
 ): boolean {
-  const migrations =
-    'catalogueTransitions' in reconciliation.migrations
-      ? reconciliation.migrations.catalogueTransitions
-      : reconciliation.migrations;
-  return migrations.some(
-    (migration) => migration.fromFingerprint === fromFingerprint && migration.toFingerprint === toFingerprint,
-  );
+  if (fromFingerprint === toFingerprint) return true;
+  const nextBySource = new Map<string, string[]>();
+  for (const migration of migrationEntries(reconciliation)) {
+    if (typeof migration.fromFingerprint !== 'string' || typeof migration.toFingerprint !== 'string') continue;
+    const next = nextBySource.get(migration.fromFingerprint) ?? [];
+    next.push(migration.toFingerprint);
+    nextBySource.set(migration.fromFingerprint, next);
+  }
+  const queue = [fromFingerprint];
+  const seen = new Set(queue);
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index];
+    for (const next of nextBySource.get(current) ?? []) {
+      if (next === toFingerprint) return true;
+      if (!seen.has(next)) {
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return false;
 }
 
 function writeAuthority(
@@ -142,7 +169,7 @@ export async function reconcileBrowserState(
     if (matchingRecovery?.catalogueFingerprint === targetFingerprint) {
       const checked = validatePrivateState(matchingRecovery, knownItemIds);
       if (!checked.ok) return { ok: false, changed: false, error: 'LOCAL_STATE_UNREADABLE' };
-      if (hasDirectMigration(reconciliation, active.catalogueFingerprint, targetFingerprint)) {
+      if (hasMigrationPath(reconciliation, active.catalogueFingerprint, targetFingerprint)) {
         const reconciled = reconcilePrivateState(active, targetFingerprint, {
           ...reconciliation,
           knownTargetItemIds: knownItemIds,

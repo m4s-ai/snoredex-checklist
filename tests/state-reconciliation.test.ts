@@ -13,7 +13,11 @@ import {
   type PrivateState,
 } from '../src/state/domain.ts';
 import { reconcileBrowserState } from '../src/state/browser-reconciliation.ts';
-import { PRIVATE_STATE_RECOVERY_STORAGE_KEY, PRIVATE_STATE_STORAGE_KEY } from '../src/state/storage.ts';
+import {
+  OrderedStateStore,
+  PRIVATE_STATE_RECOVERY_STORAGE_KEY,
+  PRIVATE_STATE_STORAGE_KEY,
+} from '../src/state/storage.ts';
 
 const oldFingerprint = `sha256:${'a'.repeat(64)}`;
 const middleFingerprint = `sha256:${'b'.repeat(64)}`;
@@ -778,7 +782,7 @@ test('browser rollback blocks when edits diverge from the matching recovery', as
     ),
   );
   const recovery = state(targetFingerprint, [
-    { itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0, note: 'newer active' },
+    { itemId: targetC, status: 'have', quantityOwned: 1, quantityOrdered: 0, note: 'newer active' },
   ]);
   storage.setItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY, JSON.stringify(recovery));
   const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
@@ -791,11 +795,14 @@ test('browser rollback blocks when edits diverge from the matching recovery', as
   const beforeActive = storage.getItem(PRIVATE_STATE_STORAGE_KEY);
   const beforeRecovery = storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY);
   try {
-    const result = await reconcileBrowserState(targetFingerprint, new Set([targetA]), {
+    const result = await reconcileBrowserState(targetFingerprint, new Set([targetC]), {
       knownSourceItemIds: new Set([oldA]),
       migrations: [
-        migration(oldFingerprint, targetFingerprint, [
-          transition(oldA, [targetA], 'rekey-1:1', 'preserve', 'one-to-one-preserve'),
+        migration(oldFingerprint, middleFingerprint, [
+          transition(oldA, [oldB], 'rekey-1:1', 'preserve', 'one-to-one-preserve'),
+        ]),
+        migration(middleFingerprint, targetFingerprint, [
+          transition(oldB, [targetC], 'rekey-1:1', 'preserve', 'one-to-one-preserve'),
         ]),
       ],
     });
@@ -808,4 +815,33 @@ test('browser rollback blocks when edits diverge from the matching recovery', as
     if (navigatorDescriptor === undefined) delete (globalThis as { navigator?: unknown }).navigator;
     else Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
   }
+});
+
+test('reconciles a pending note draft before validating the target fingerprint', () => {
+  const storage = {
+    getItem: (_key: string): string | null => null,
+    setItem: (_key: string, _value: string): void => undefined,
+    removeItem: (_key: string): void => undefined,
+  };
+  const store = new OrderedStateStore(storage);
+  const source = state(oldFingerprint, [
+    { itemId: oldA, status: 'need', quantityOwned: 0, quantityOrdered: 0, note: 'pending source' },
+  ]);
+  const targetFingerprint = `sha256:${'d'.repeat(64)}`;
+  store.scheduleNoteSave(source, false);
+  assert.deepEqual(
+    store.reconcileUnsavedDraft(targetFingerprint, new Set([targetA]), {
+      knownSourceItemIds: new Set([oldA]),
+      migrations: [
+        migration(oldFingerprint, targetFingerprint, [
+          transition(oldA, [targetA], 'rekey-1:1', 'preserve', 'one-to-one-preserve'),
+        ]),
+      ],
+    }),
+    { ok: true, value: undefined },
+  );
+  const draft = store.unsaved();
+  assert.equal(draft?.catalogueFingerprint, targetFingerprint);
+  assert.equal(draft?.items[0]?.itemId, targetA);
+  assert.equal(draft?.items[0]?.note, 'pending source');
 });
