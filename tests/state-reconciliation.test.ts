@@ -12,6 +12,8 @@ import {
   PRIVATE_STATE_VERSION,
   type PrivateState,
 } from '../src/state/domain.ts';
+import { reconcileBrowserState } from '../src/state/browser-reconciliation.ts';
+import { PRIVATE_STATE_RECOVERY_STORAGE_KEY, PRIVATE_STATE_STORAGE_KEY } from '../src/state/storage.ts';
 
 const oldFingerprint = `sha256:${'a'.repeat(64)}`;
 const middleFingerprint = `sha256:${'b'.repeat(64)}`;
@@ -31,6 +33,30 @@ function state(fingerprint = oldFingerprint, items: PrivateState['items'] = []):
     catalogueFingerprint: fingerprint,
     items,
   };
+}
+
+class FakeBrowserLocalStorage {
+  private readonly values = new Map<string, string>();
+
+  public get length(): number {
+    return this.values.size;
+  }
+
+  public getItem(key: string): string | null {
+    return this.values.get(key) ?? null;
+  }
+
+  public setItem(key: string, value: string): void {
+    this.values.set(key, value);
+  }
+
+  public removeItem(key: string): void {
+    this.values.delete(key);
+  }
+
+  public key(index: number): string | null {
+    return [...this.values.keys()][index] ?? null;
+  }
 }
 
 function transition(
@@ -649,4 +675,49 @@ test('selects source membership for the stored fingerprint from cumulative manif
   });
   assert.equal(result.ok, true);
   if (result.ok) assert.equal(result.value.state.items[0]?.itemId, targetA);
+});
+
+test('browser migration rotates an existing recovery snapshot', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  storage.setItem(
+    PRIVATE_STATE_STORAGE_KEY,
+    JSON.stringify(
+      state(oldFingerprint, [{ itemId: oldA, status: 'have', quantityOwned: 2, quantityOrdered: 1, note: 'active' }]),
+    ),
+  );
+  storage.setItem(
+    PRIVATE_STATE_RECOVERY_STORAGE_KEY,
+    JSON.stringify(
+      state(oldFingerprint, [
+        { itemId: oldA, status: 'have', quantityOwned: 1, quantityOrdered: 0, note: 'stale recovery' },
+      ]),
+    ),
+  );
+  const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { locks: { request: async (_name: string, callback: () => Promise<unknown>) => callback() } },
+  });
+  try {
+    const result = await reconcileBrowserState(targetFingerprint, new Set([targetA]), {
+      knownSourceItemIds: new Set([oldA]),
+      migrations: [
+        migration(oldFingerprint, targetFingerprint, [
+          transition(oldA, [targetA], 'rekey-1:1', 'preserve', 'one-to-one-preserve'),
+        ]),
+      ],
+    });
+    assert.deepEqual(result, { ok: true, changed: true });
+    const active = JSON.parse(storage.getItem(PRIVATE_STATE_STORAGE_KEY) ?? 'null') as PrivateState;
+    const recovery = JSON.parse(storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY) ?? 'null') as PrivateState;
+    assert.equal(active.catalogueFingerprint, targetFingerprint);
+    assert.equal(recovery.items[0]?.note, 'active');
+  } finally {
+    if (localStorageDescriptor === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
+    else Object.defineProperty(globalThis, 'localStorage', localStorageDescriptor);
+    if (navigatorDescriptor === undefined) delete (globalThis as { navigator?: unknown }).navigator;
+    else Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+  }
 });

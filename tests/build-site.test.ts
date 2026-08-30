@@ -6,8 +6,49 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import { replaceOutput } from '../scripts/site-output.ts';
+import { buildValidatedSourceMembershipIndex } from '../scripts/migration-membership.ts';
 
 const root = resolve(import.meta.dirname, '..');
+
+test('validates migration source membership against the target contract', () => {
+  const catalogue = {
+    meta: { catalogueFingerprint: 'sha256:target' },
+    items: [{ itemId: 'item-a' }, { itemId: 'item-b' }],
+  };
+  const manifest = {
+    catalogueTransitions: [
+      {
+        fromFingerprint: 'sha256:source',
+        toFingerprint: 'sha256:target',
+        transitions: [
+          {
+            fromItemId: 'item-a',
+            toItemIds: ['item-a'],
+            changeKind: 'retained',
+            automaticStateAction: 'preserve',
+            reconciliation: 'identity-retained',
+          },
+          {
+            fromItemId: 'item-b',
+            toItemIds: ['item-b'],
+            changeKind: 'retained',
+            automaticStateAction: 'preserve',
+            reconciliation: 'identity-retained',
+          },
+        ],
+      },
+    ],
+  };
+  const index = buildValidatedSourceMembershipIndex(manifest, catalogue);
+  assert.deepEqual([...(index.get('sha256:source') ?? [])], ['item-a', 'item-b']);
+
+  const omitted = structuredClone(manifest);
+  omitted.catalogueTransitions[0].transitions.pop();
+  assert.throws(
+    () => buildValidatedSourceMembershipIndex(omitted, catalogue),
+    /BUILD_MIGRATION_SOURCE_MEMBERSHIP_INVALID/u,
+  );
+});
 
 test('stamps the exact app revision into served shells and module', async () => {
   const output = await mkdtemp(`${tmpdir()}/snoredex-build-revision-test-`);

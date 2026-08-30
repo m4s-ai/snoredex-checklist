@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { replaceOutput } from './site-output.ts';
+import { buildValidatedSourceMembershipIndex } from './migration-membership.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const output = resolve(root, process.argv[2] === '--out-dir' ? process.argv[3] : 'dist/site');
@@ -170,14 +171,7 @@ try {
     'utf8',
   );
   const catalogueTransitions = migrationManifest.catalogueTransitions;
-  const knownSourceIdsByFingerprint = new Map();
-  for (const migration of catalogueTransitions) {
-    const sourceIds = knownSourceIdsByFingerprint.get(migration.fromFingerprint) ?? new Set();
-    for (const transition of migration.transitions) {
-      for (const itemId of transition.fromItemIds ?? [transition.fromItemId]) sourceIds.add(itemId);
-    }
-    knownSourceIdsByFingerprint.set(migration.fromFingerprint, sourceIds);
-  }
+  const knownSourceIdsByFingerprint = buildValidatedSourceMembershipIndex(migrationManifest, catalogue);
   const serializedKnownSourceIdsByFingerprint = [...knownSourceIdsByFingerprint.entries()].map(
     ([fingerprint, itemIds]) => [fingerprint, [...itemIds]],
   );

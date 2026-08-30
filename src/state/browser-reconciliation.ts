@@ -130,9 +130,9 @@ export async function reconcileBrowserState(
     });
     if (!result.ok) return { ok: false, changed: false, error: result.error };
     const recovery = preserveRecovery(active, result.value);
-    if (recovery !== undefined && current.value.recovery !== undefined) {
-      return { ok: false, changed: false, error: 'STATE_RECONCILIATION_BLOCKED' };
-    }
+    // Each migration rotates the sidecar to the immediately previous active
+    // snapshot.  Keeping an older recovery copy would block every later
+    // catalogue adoption because there is only one rollback slot.
     return writeAuthority(storage.value, current.value.raw, result.value.state, recovery ?? current.value.recovery);
   });
 }
