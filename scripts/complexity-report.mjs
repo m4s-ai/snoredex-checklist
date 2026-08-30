@@ -137,6 +137,7 @@ function isTypeOnlyArrow(tokens, arrowIndex) {
   if (tokens[close]?.kind !== SyntaxKind.CloseParenToken) return false;
   const open = matchingOpen(tokens, close, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
   if (open === undefined) return false;
+  if (tokens[open - 1]?.kind === SyntaxKind.NewKeyword) return true;
   if (tokens[open - 1]?.kind === SyntaxKind.ColonToken) return true;
   if (tokens[open - 1]?.kind === SyntaxKind.AsKeyword) return true;
   for (let index = open - 1; index >= 0; index -= 1) {
@@ -233,6 +234,10 @@ function arrowName(tokens, arrowIndex) {
   return '<arrow>';
 }
 
+function isOptionalTypeProperty(tokens, index) {
+  return tokens[index]?.kind === SyntaxKind.QuestionToken && tokens[index + 1]?.kind === SyntaxKind.ColonToken;
+}
+
 function collectFunctions(tokens, source, path) {
   const braces = pairBraces(tokens);
   const functions = [];
@@ -322,7 +327,7 @@ function collectFunctions(tokens, source, path) {
           SyntaxKind.QuestionQuestionToken,
         ].includes(tokens[index].kind)
       )
-        entry.complexity += 1;
+        if (!isOptionalTypeProperty(tokens, index)) entry.complexity += 1;
     }
     delete entry.bodyOpen;
     delete entry.bodyClose;
@@ -436,8 +441,16 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: 'invoke', complexity: 1 }],
     },
     {
+      source: 'type Constructor = new (value: string) => Promise<string>; const build = (value) => value ? value : "";',
+      expected: [{ name: 'build', complexity: 2 }],
+    },
+    {
       source: 'function template(value) { return `raw ${value ? 1 : 2} literal?` ?? value; }',
       expected: [{ name: 'template', complexity: 3 }],
+    },
+    {
+      source: 'function optionalType(value) { const result: { enabled?: boolean } = {}; return value ? result : {}; }',
+      expected: [{ name: 'optionalType', complexity: 2 }],
     },
     {
       source: 'function nestedTemplate(localization) { return `${{ localization }.localization ?? "unknown"}`; }',
