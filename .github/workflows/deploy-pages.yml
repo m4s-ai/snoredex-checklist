@@ -7,6 +7,14 @@ on:
         description: Full 40-character consumer commit SHA to deploy
         required: true
         type: string
+      deployment_mode:
+        description: Forward catalogue adoption or rollback to a previous known-good revision
+        required: true
+        default: adopt
+        type: choice
+        options:
+          - adopt
+          - rollback
 
 permissions:
   contents: read
@@ -82,15 +90,35 @@ jobs:
           status="$(curl --silent --show-error --location --output "$manifest" --write-out '%{http_code}' "$SNOREDEX_PAGE_URL/deployment.json")"
           if [[ "$status" == "404" ]]; then
             echo "catalogue_fingerprint=" >> "$GITHUB_OUTPUT"
+            echo "app_revision=" >> "$GITHUB_OUTPUT"
           elif [[ "$status" == "200" ]]; then
             fingerprint="$(node --input-type=module -e 'import fs from "node:fs"; const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).catalogueFingerprint; if (!/^sha256:[0-9a-f]{64}$/.test(value ?? "")) process.exit(1); process.stdout.write(value);' "$manifest")"
+            app_revision="$(node --input-type=module -e 'import fs from "node:fs"; const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).appRevision; if (!/^[0-9a-f]{40}$/.test(value ?? "")) process.exit(1); process.stdout.write(value);' "$manifest")"
             echo "catalogue_fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+            echo "app_revision=$app_revision" >> "$GITHUB_OUTPUT"
           else
             echo "current production deployment manifest unavailable (HTTP $status)"
             exit 1
           fi
-      - name: Require reviewed producer migration target
+      - name: Validate rollback target
+        if: inputs.deployment_mode == 'rollback'
         env:
+          CONSUMER_REVISION: ${{ inputs.consumer_revision }}
+          CURRENT_APP_REVISION: ${{ steps.current-production.outputs.app_revision }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CURRENT_APP_REVISION" ]]; then
+            echo "rollback requires an existing published deployment manifest"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$CONSUMER_REVISION" "$CURRENT_APP_REVISION"; then
+            echo "rollback target must be an ancestor of the currently published app revision"
+            exit 1
+          fi
+      - name: Require reviewed producer migration target
+        if: inputs.deployment_mode == 'adopt'
+        env:
+          SNOREDEX_DEPLOYMENT_MODE: ${{ inputs.deployment_mode }}
           SNOREDEX_CURRENT_CATALOGUE_FINGERPRINT: ${{ steps.current-production.outputs.catalogue_fingerprint }}
         run: node scripts/check-production-adoption.mjs
       - name: Run browser and accessibility gates

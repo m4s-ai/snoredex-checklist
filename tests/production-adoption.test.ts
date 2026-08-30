@@ -8,12 +8,15 @@ const root = resolve(import.meta.dirname, '..');
 
 test('production adoption validates the reviewed target migration without requiring the fixture as a source', async () => {
   const scriptPath = resolve(root, 'scripts/check-production-adoption.mjs');
+  const workflowPath = resolve(root, '.github/workflows/deploy-pages.yml');
   const script = await readFile(scriptPath, 'utf8');
+  const workflow = await readFile(workflowPath, 'utf8');
   assert.doesNotMatch(script, /collector-catalogue\.fixture/u);
   assert.match(script, /candidate\.toFingerprint === targetFingerprint/u);
+  assert.match(workflow, /name: Require reviewed producer migration target\s+if: inputs\.deployment_mode == 'adopt'/u);
 
   const run = (currentFingerprint?: string) => {
-    const env = { ...process.env };
+    const env = { ...process.env, SNOREDEX_DEPLOYMENT_MODE: 'adopt' };
     if (currentFingerprint === undefined) delete env.SNOREDEX_CURRENT_CATALOGUE_FINGERPRINT;
     else env.SNOREDEX_CURRENT_CATALOGUE_FINGERPRINT = currentFingerprint;
     return spawnSync(process.execPath, [scriptPath], { cwd: root, encoding: 'utf8', env });
@@ -28,6 +31,24 @@ test('production adoption validates the reviewed target migration without requir
 
   const unchanged = run(target);
   assert.equal(unchanged.status, 0, `${unchanged.stdout}${unchanged.stderr}`);
+
+  const rollback = spawnSync(process.execPath, [scriptPath], {
+    cwd: root,
+    encoding: 'utf8',
+    env: { ...process.env, SNOREDEX_DEPLOYMENT_MODE: 'rollback', SNOREDEX_CURRENT_CATALOGUE_FINGERPRINT: target },
+  });
+  assert.equal(rollback.status, 0, `${rollback.stdout}${rollback.stderr}`);
+
+  const rollbackWithoutDeployment = spawnSync(process.execPath, [scriptPath], {
+    cwd: root,
+    encoding: 'utf8',
+    env: { ...process.env, SNOREDEX_DEPLOYMENT_MODE: 'rollback' },
+  });
+  assert.notEqual(rollbackWithoutDeployment.status, 0);
+  assert.match(
+    `${rollbackWithoutDeployment.stdout}${rollbackWithoutDeployment.stderr}`,
+    /PRODUCTION_ADOPTION_BLOCKED_ROLLBACK_REQUIRES_PUBLISHED_DEPLOYMENT/u,
+  );
 
   const unrelated = run(`sha256:${'b'.repeat(64)}`);
   assert.notEqual(unrelated.status, 0);

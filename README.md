@@ -129,13 +129,14 @@ rollback identity.
 
 ### Manual Pages deployment and rollback
 
-Use the **Deploy Pages** workflow from the Actions tab with the consumer commit to publish. The
-workflow builds and checks that exact revision, writes `deployment.json`, and performs a bounded
-HTTPS smoke test against the resulting Pages URL. A rollback is the same workflow dispatched at a
-previous known-good consumer commit whose lock points to the previous accepted producer snapshot;
-that revision must also contain the deployment tooling and npm commands used by this workflow; an
-older commit without them is not an eligible rollback target. Do not edit browser-local collection
-state or rewrite a lock in place. Verify the deployed
+Use the **Deploy Pages** workflow from the Actions tab with the consumer commit to publish. Select
+`adopt` for a forward catalogue adoption or `rollback` for a previous known-good consumer commit.
+The workflow builds and checks that exact revision, writes `deployment.json`, and performs a bounded
+HTTPS smoke test against the resulting Pages URL. A rollback requires an existing published
+manifest and an ancestor consumer commit, and does not require a reverse migration route that the
+older artifact could not contain; that revision must still contain the deployment tooling and npm
+commands used by this workflow. An older commit without them is not an eligible rollback target.
+Do not edit browser-local collection state or rewrite a lock in place. Verify the deployed
 `deployment.json` and `provenance.json` tuple before considering the rollback complete.
 
 ## Licensing
