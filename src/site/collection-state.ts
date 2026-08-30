@@ -27,6 +27,7 @@ interface PersistenceResult<T> {
 interface OrderedStateStoreLike {
   read(): PersistenceResult<PrivateState | undefined>;
   unsaved(): PrivateState | undefined;
+  readonly recoveryNeedsReview?: () => boolean;
   readonly reconcileUnsavedDraft?: (
     targetFingerprint: string,
     knownTargetItemIds: ReadonlySet<string>,
@@ -459,8 +460,14 @@ export async function createCollectionStateController(
     if (active !== undefined && active.catalogueFingerprint !== catalogueFingerprint) return undefined;
     if (active !== undefined && active.items.some((item) => !knownTrackableItemIds.has(item.itemId))) return undefined;
     const recovery = store.unsaved();
-    if (recovery !== undefined && recovery.catalogueFingerprint !== catalogueFingerprint) return undefined;
-    if (recovery !== undefined && recovery.items.some((item) => !knownTrackableItemIds.has(item.itemId)))
+    const recoveryNeedsReview = store.recoveryNeedsReview?.() ?? false;
+    if (!recoveryNeedsReview && recovery !== undefined && recovery.catalogueFingerprint !== catalogueFingerprint)
+      return undefined;
+    if (
+      !recoveryNeedsReview &&
+      recovery !== undefined &&
+      recovery.items.some((item) => !knownTrackableItemIds.has(item.itemId))
+    )
       return undefined;
     return new BrowserCollectionStateController(
       store,

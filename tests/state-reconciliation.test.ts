@@ -867,6 +867,7 @@ test('preserves a pending draft when reconciliation yields retired orphan record
     }),
     { ok: true, value: undefined },
   );
+  assert.equal(store.recoveryNeedsReview(), true);
   assert.deepEqual(store.adoptUnsavedDraft(), { ok: false, error: 'LOCAL_STATE_UNREADABLE' });
   assert.deepEqual(store.unsaved(), source);
 });

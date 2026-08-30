@@ -367,6 +367,11 @@ export class OrderedStateStore {
     return this.unsavedDraft === undefined ? undefined : cloneState(this.unsavedDraft);
   }
 
+  /** Whether the visible draft contains source records awaiting review. */
+  public recoveryNeedsReview(): boolean {
+    return this.unsavedDraftRequiresReview;
+  }
+
   /** Reconcile a recovered note draft before the catalogue fingerprint is validated. */
   public reconcileUnsavedDraft(
     targetFingerprint: string,
