@@ -46,6 +46,20 @@ jobs:
         env:
           CONSUMER_REVISION: ${{ inputs.consumer_revision }}
         run: git checkout --detach "$CONSUMER_REVISION"
+      - name: Validate deployment tooling
+        run: |
+          for path in scripts/check-production-adoption.mjs scripts/create-deployment-manifest.mjs scripts/smoke-pages.mjs; do
+            if [[ ! -f "$path" ]]; then
+              echo "consumer_revision lacks required deployment tooling: $path"
+              exit 1
+            fi
+          done
+          for script in check test:browser test:accessibility deployment:manifest artifact:check smoke:pages; do
+            if ! grep -q "\"$script\"" package.json; then
+              echo "consumer_revision lacks required npm script: $script"
+              exit 1
+            fi
+          done
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:

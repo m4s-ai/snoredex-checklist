@@ -130,7 +130,9 @@ Use the **Deploy Pages** workflow from the Actions tab with the consumer commit 
 workflow builds and checks that exact revision, writes `deployment.json`, and performs a bounded
 HTTPS smoke test against the resulting Pages URL. A rollback is the same workflow dispatched at a
 previous known-good consumer commit whose lock points to the previous accepted producer snapshot;
-do not edit browser-local collection state or rewrite a lock in place. Verify the deployed
+that revision must also contain the deployment tooling and npm commands used by this workflow; an
+older commit without them is not an eligible rollback target. Do not edit browser-local collection
+state or rewrite a lock in place. Verify the deployed
 `deployment.json` and `provenance.json` tuple before considering the rollback complete.
 
 ## Licensing

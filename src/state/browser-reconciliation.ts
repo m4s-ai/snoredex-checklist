@@ -58,6 +58,20 @@ function preserveRecovery(source: PrivateState, _result: ReconciliationSuccess):
   return { ...source, items: source.items.map((item) => ({ ...item })) };
 }
 
+function hasDirectMigration(
+  reconciliation: ReconciliationContext,
+  fromFingerprint: string,
+  toFingerprint: string,
+): boolean {
+  const migrations =
+    'catalogueTransitions' in reconciliation.migrations
+      ? reconciliation.migrations.catalogueTransitions
+      : reconciliation.migrations;
+  return migrations.some(
+    (migration) => migration.fromFingerprint === fromFingerprint && migration.toFingerprint === toFingerprint,
+  );
+}
+
 function writeAuthority(
   storage: StorageLike,
   expected: AuthoritySnapshot['raw'],
@@ -128,8 +142,25 @@ export async function reconcileBrowserState(
     if (matchingRecovery?.catalogueFingerprint === targetFingerprint) {
       const checked = validatePrivateState(matchingRecovery, knownItemIds);
       if (!checked.ok) return { ok: false, changed: false, error: 'LOCAL_STATE_UNREADABLE' };
+      if (hasDirectMigration(reconciliation, active.catalogueFingerprint, targetFingerprint)) {
+        const reconciled = reconcilePrivateState(active, targetFingerprint, {
+          ...reconciliation,
+          knownTargetItemIds: knownItemIds,
+        });
+        if (!reconciled.ok) return { ok: false, changed: false, error: reconciled.error };
+        const reconciledText = serialized(reconciled.value.state);
+        const recoveryText = serialized(matchingRecovery);
+        if (reconciledText === undefined || recoveryText === undefined) {
+          return { ok: false, changed: false, error: 'STATE_RECONCILIATION_BLOCKED' };
+        }
+        if (reconciledText !== recoveryText) {
+          return { ok: false, changed: false, error: 'STATE_RECONCILIATION_CONFLICT' };
+        }
+      }
       // A rollback deploy targets the snapshot in the recovery slot. Swap it
       // into active while retaining the newer active state for a future roll-forward.
+      // When a migration route exists, the active state is reconciled first so
+      // edits made during rollback cannot be silently discarded.
       return writeAuthority(storage.value, current.value.raw, matchingRecovery, active);
     }
     const result = reconcilePrivateState(active, targetFingerprint, {

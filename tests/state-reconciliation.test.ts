@@ -766,3 +766,46 @@ test('browser rollback restores matching recovery while preserving newer active 
     else Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
   }
 });
+
+test('browser rollback blocks when edits diverge from the matching recovery', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  storage.setItem(
+    PRIVATE_STATE_STORAGE_KEY,
+    JSON.stringify(
+      state(oldFingerprint, [
+        { itemId: oldA, status: 'have', quantityOwned: 1, quantityOrdered: 0, note: 'edited during rollback' },
+      ]),
+    ),
+  );
+  const recovery = state(targetFingerprint, [
+    { itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0, note: 'newer active' },
+  ]);
+  storage.setItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY, JSON.stringify(recovery));
+  const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { locks: { request: async (_name: string, callback: () => Promise<unknown>) => callback() } },
+  });
+  const beforeActive = storage.getItem(PRIVATE_STATE_STORAGE_KEY);
+  const beforeRecovery = storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY);
+  try {
+    const result = await reconcileBrowserState(targetFingerprint, new Set([targetA]), {
+      knownSourceItemIds: new Set([oldA]),
+      migrations: [
+        migration(oldFingerprint, targetFingerprint, [
+          transition(oldA, [targetA], 'rekey-1:1', 'preserve', 'one-to-one-preserve'),
+        ]),
+      ],
+    });
+    assert.deepEqual(result, { ok: false, changed: false, error: 'STATE_RECONCILIATION_CONFLICT' });
+    assert.equal(storage.getItem(PRIVATE_STATE_STORAGE_KEY), beforeActive);
+    assert.equal(storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY), beforeRecovery);
+  } finally {
+    if (localStorageDescriptor === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
+    else Object.defineProperty(globalThis, 'localStorage', localStorageDescriptor);
+    if (navigatorDescriptor === undefined) delete (globalThis as { navigator?: unknown }).navigator;
+    else Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+  }
+});
