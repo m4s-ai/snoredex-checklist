@@ -865,7 +865,8 @@ test('preserves a pending draft when reconciliation yields retired orphan record
         migration(oldFingerprint, targetFingerprint, [transition(oldA, [], 'retired-1:0', 'none', 'retire-to-orphan')]),
       ],
     }),
-    { ok: false, error: 'LOCAL_STATE_UNREADABLE' },
+    { ok: true, value: undefined },
   );
+  assert.deepEqual(store.adoptUnsavedDraft(), { ok: false, error: 'LOCAL_STATE_UNREADABLE' });
   assert.deepEqual(store.unsaved(), source);
 });

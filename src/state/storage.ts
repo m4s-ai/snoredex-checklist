@@ -311,6 +311,8 @@ export class OrderedStateStore {
   private activeDraftOwned = false;
   private recoveredForeignReference: DraftReference | undefined;
   private recoveredDraftPresented = false;
+  /** A recovered draft contains source records the target cannot represent. */
+  private unsavedDraftRequiresReview = false;
   private draftPersistenceError: PersistenceErrorCode | undefined;
   private supersededDraftReference: DraftReference | undefined;
   private pendingOwnedDraftRetirements: DraftReference[] = [];
@@ -372,7 +374,10 @@ export class OrderedStateStore {
     reconciliation: ReconciliationContext,
   ): PersistenceResult<void> {
     const draft = this.unsavedDraft;
-    if (draft === undefined || draft.catalogueFingerprint === targetFingerprint) return success(undefined);
+    if (draft === undefined || draft.catalogueFingerprint === targetFingerprint) {
+      this.unsavedDraftRequiresReview = false;
+      return success(undefined);
+    }
     const result = reconcilePrivateState(draft, targetFingerprint, {
       ...reconciliation,
       knownTargetItemIds,
@@ -385,10 +390,15 @@ export class OrderedStateStore {
     // Keep the complete source draft available when reconciliation produces
     // retired or otherwise orphaned records.  The target projection cannot
     // represent those source identities, so replacing the draft would lose
-    // private state before the user can review or recover it.
+    // private state before the user can review or recover it.  The controller
+    // must remain reachable so the user can explicitly discard the draft;
+    // adoption is blocked until a reviewed transition can represent every
+    // source record.
     if (result.value.orphans.length > 0 || result.value.conflicts.length > 0) {
-      return error('LOCAL_STATE_UNREADABLE');
+      this.unsavedDraftRequiresReview = true;
+      return success(undefined);
     }
+    this.unsavedDraftRequiresReview = false;
     this.unsavedDraft = cloneState(result.value.state);
     return success(undefined);
   }
@@ -397,6 +407,9 @@ export class OrderedStateStore {
   public adoptUnsavedDraft(): PersistenceResult<PrivateState | undefined> {
     if (this.unsavedDraft === undefined) {
       return success(undefined);
+    }
+    if (this.unsavedDraftRequiresReview) {
+      return error('LOCAL_STATE_UNREADABLE');
     }
     this.recoveredDraftPresented = true;
     return success(cloneState(this.unsavedDraft));
@@ -571,6 +584,7 @@ export class OrderedStateStore {
       this.supersededDraftReference = foreignReference;
     }
     this.recoveredDraftPresented = false;
+    this.unsavedDraftRequiresReview = false;
     if (ownedRetired && foreignRetired) {
       this.unsavedDraft = undefined;
       this.supersededDraftReference = undefined;
