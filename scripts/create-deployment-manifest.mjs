@@ -96,7 +96,11 @@ const manifest = {
   catalogueByteLength: lock.catalogueByteLength,
   sourceFingerprints,
 };
-if (previous && previousSources.every((value) => value === previous.catalogueFingerprint)) {
+if (
+  previous &&
+  (lock.catalogueFingerprint === previous.catalogueFingerprint ||
+    (previousSources.length > 0 && previousSources.every((value) => value === previous.catalogueFingerprint)))
+) {
   manifest.rollback = deploymentTuple(previous);
 }
 await writeFile(join(root, 'deployment.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');

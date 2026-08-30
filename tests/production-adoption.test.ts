@@ -20,7 +20,7 @@ test('production adoption validates the reviewed target migration without requir
   assert.match(script, /sourceFingerprints/u);
   assert.match(manifestScript, /SNOREDEX_CURRENT_DEPLOYMENT_PATH/u);
   assert.match(manifestScript, /manifest\.rollback = deploymentTuple\(previous\)/u);
-  assert.match(manifestScript, /previousSources\.every\(/u);
+  assert.match(manifestScript, /previousSources\.length > 0/u);
   assert.match(workflow, /rollback target must match the exact published recovery tuple/u);
   assert.match(workflow, /consumer_revision lacks recoverable deployment provenance/u);
   assert.match(workflow, /sources\.some\(\(value\) => value !== previous\.catalogueFingerprint\)/u);
@@ -97,6 +97,22 @@ test('production adoption validates the reviewed target migration without requir
       }),
       'utf8',
     );
+    const changedCatalogueDeployment = { ...previousDeployment, catalogueFingerprint: reviewedSourceFingerprint };
+    await writeFile(currentManifestPath, JSON.stringify(changedCatalogueDeployment), 'utf8');
+    const changedCatalogue = spawnSync(process.execPath, [manifestScriptPath, temporaryDirectory], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_PAGE_URL: 'https://m4s-ai.github.io/snoredex-checklist/',
+        SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+      },
+    });
+    assert.equal(changedCatalogue.status, 0, `${changedCatalogue.stdout}${changedCatalogue.stderr}`);
+    const changedCatalogueManifest = JSON.parse(await readFile(resolve(temporaryDirectory, 'deployment.json'), 'utf8'));
+    assert.equal(changedCatalogueManifest.rollback, undefined);
+    assert.deepEqual(changedCatalogueManifest.sourceFingerprints, [reviewedSourceFingerprint]);
+
     await writeFile(currentManifestPath, JSON.stringify(previousDeployment), 'utf8');
     const generated = spawnSync(process.execPath, [manifestScriptPath, temporaryDirectory], {
       cwd: root,
@@ -135,7 +151,14 @@ test('production adoption validates the reviewed target migration without requir
     });
     assert.equal(divergent.status, 0, `${divergent.stdout}${divergent.stderr}`);
     const divergentDeployment = JSON.parse(await readFile(resolve(temporaryDirectory, 'deployment.json'), 'utf8'));
-    assert.equal(divergentDeployment.rollback, undefined);
+    assert.deepEqual(divergentDeployment.rollback, {
+      appRevision: previousAppRevision,
+      producerRevision: lock.producerRevision,
+      contractVersion: lock.contractVersion,
+      catalogueFingerprint: lock.catalogueFingerprint,
+      catalogueByteSha256: lock.catalogueByteSha256,
+      catalogueByteLength: lock.catalogueByteLength,
+    });
     assert.deepEqual(divergentDeployment.sourceFingerprints, [reviewedSourceFingerprint, lock.catalogueFingerprint]);
 
     const currentDeployment = {
