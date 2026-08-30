@@ -68,8 +68,9 @@ still an explicit `workflow_dispatch` operation and is never triggered by merge.
 durable workflow revision and provide the full lowercase `consumer_revision` commit SHA to deploy;
 the workflow validates and checks out that exact consumer revision before building, and the smoke
 test verifies the same SHA. Deployment also fails closed until the pinned producer migration
-manifest contains a reviewed, complete transition from the deployed synthetic fixture; no
-consumer-side identity mapping is inferred.
+manifest is reviewed, complete and targets the accepted catalogue fingerprint; a synthetic
+fixture that was never production is not treated as a migration source, and no consumer-side
+identity mapping is inferred.
 
 The build also copies the authored card-shaped placeholders from `site-src/assets/` into the
 same-origin `assets/images/` tree and writes a digest-pinned `assets/image-manifest.json`. The
