@@ -34,6 +34,9 @@ if (deploymentMode !== 'adopt' && deploymentMode !== 'rollback') {
 if (hasCurrentFingerprint && !/^sha256:[0-9a-f]{64}$/u.test(currentFingerprint)) {
   throw new Error('PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_FINGERPRINT');
 }
+if (hasCurrentDeployment && !hasCurrentFingerprint) {
+  throw new Error('PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT');
+}
 if (deploymentMode === 'rollback') {
   if (!hasCurrentDeployment) {
     throw new Error('PRODUCTION_ADOPTION_BLOCKED_ROLLBACK_REQUIRES_PUBLISHED_DEPLOYMENT');
@@ -43,16 +46,14 @@ if (deploymentMode === 'rollback') {
 }
 
 const sourceFingerprints = hasCurrentDeployment
-  ? (currentDeployment?.sourceFingerprints ?? [currentFingerprint])
+  ? (currentDeployment?.sourceFingerprints ?? [])
   : hasCurrentFingerprint
     ? [currentFingerprint]
     : [];
 if (
   !Array.isArray(sourceFingerprints) ||
-  (sourceFingerprints.length === 0 && hasCurrentDeployment) ||
   sourceFingerprints.some((value) => !/^sha256:[0-9a-f]{64}$/u.test(value)) ||
-  new Set(sourceFingerprints).size !== sourceFingerprints.length ||
-  (hasCurrentDeployment && !sourceFingerprints.includes(currentFingerprint))
+  new Set(sourceFingerprints).size !== sourceFingerprints.length
 ) {
   throw new Error('PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT');
 }
@@ -60,6 +61,9 @@ if (
 if (typeof targetFingerprint !== 'string') {
   throw new Error('PRODUCTION_ADOPTION_BLOCKED_MISSING_REVIEWED_TRANSITION');
 }
+const migrationSources = hasCurrentDeployment
+  ? [...new Set([...sourceFingerprints, currentFingerprint])]
+  : sourceFingerprints;
 if (!hasCurrentDeployment && !hasCurrentFingerprint) {
   const initialRoute = migrations?.catalogueTransitions?.find(
     (candidate) => candidate?.toFingerprint === targetFingerprint,
@@ -68,7 +72,7 @@ if (!hasCurrentDeployment && !hasCurrentFingerprint) {
     throw new Error('PRODUCTION_ADOPTION_BLOCKED_MISSING_REVIEWED_TRANSITION');
   }
 }
-for (const sourceFingerprint of sourceFingerprints) {
+for (const sourceFingerprint of migrationSources) {
   if (sourceFingerprint === targetFingerprint) continue;
   const route = migrations?.catalogueTransitions?.find(
     (candidate) => candidate?.fromFingerprint === sourceFingerprint && candidate?.toFingerprint === targetFingerprint,

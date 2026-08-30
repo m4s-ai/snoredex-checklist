@@ -72,17 +72,16 @@ if (previousPath) {
   if (previous.sourceFingerprints !== undefined) {
     if (
       !Array.isArray(previous.sourceFingerprints) ||
-      previous.sourceFingerprints.length === 0 ||
       previous.sourceFingerprints.some((value) => !isDigest(value)) ||
-      new Set(previous.sourceFingerprints).size !== previous.sourceFingerprints.length ||
-      !previous.sourceFingerprints.includes(previous.catalogueFingerprint)
+      new Set(previous.sourceFingerprints).size !== previous.sourceFingerprints.length
     ) {
       throw new Error('DEPLOYMENT_PREVIOUS_INVALID');
     }
   }
 }
 
-const previousSources = previous ? (previous.sourceFingerprints ?? [previous.catalogueFingerprint]) : [];
+const previousSources = previous ? (previous.sourceFingerprints ?? []) : [];
+const sourceFingerprints = previous ? [...new Set([...previousSources, previous.catalogueFingerprint])] : [];
 
 const manifest = {
   schema: 'snoredex-checklist-deployment',
@@ -95,8 +94,10 @@ const manifest = {
   catalogueFingerprint: lock.catalogueFingerprint,
   catalogueByteSha256: lock.catalogueByteSha256,
   catalogueByteLength: lock.catalogueByteLength,
-  sourceFingerprints: [...new Set([lock.catalogueFingerprint, ...previousSources])],
+  sourceFingerprints,
 };
-if (previous) manifest.rollback = deploymentTuple(previous);
+if (previous && previousSources.every((value) => value === previous.catalogueFingerprint)) {
+  manifest.rollback = deploymentTuple(previous);
+}
 await writeFile(join(root, 'deployment.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 console.log('deployment manifest created');

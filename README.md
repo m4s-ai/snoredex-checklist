@@ -136,9 +136,10 @@ HTTPS smoke test against the resulting Pages URL. A rollback requires an existin
 manifest whose exact recovery tuple names the selected consumer revision and its pinned catalogue;
 an arbitrary older ancestor is not sufficient. The manifest carries every catalogue fingerprint
 that may still be active in browsers after the one-slot rollback. A later adoption must provide a
-reviewed route for each of those fingerprints. The selected revision must still contain the
-recoverable deployment-manifest tooling and npm commands used by this workflow. An older commit
-without them is not an eligible rollback target.
+reviewed route for each of those fingerprints. If those sources diverge, no single rollback target
+is advertised and the workflow fails closed until a recoverable target exists. The selected revision
+must still contain the recoverable deployment-manifest tooling and npm commands used by this
+workflow. An older commit without them is not an eligible rollback target.
 Do not edit browser-local collection state or rewrite a lock in place. Verify the deployed
 `deployment.json` and `provenance.json` tuple before considering the rollback complete.
 

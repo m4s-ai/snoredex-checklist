@@ -20,8 +20,10 @@ test('production adoption validates the reviewed target migration without requir
   assert.match(script, /sourceFingerprints/u);
   assert.match(manifestScript, /SNOREDEX_CURRENT_DEPLOYMENT_PATH/u);
   assert.match(manifestScript, /manifest\.rollback = deploymentTuple\(previous\)/u);
+  assert.match(manifestScript, /previousSources\.every\(/u);
   assert.match(workflow, /rollback target must match the exact published recovery tuple/u);
   assert.match(workflow, /consumer_revision lacks recoverable deployment provenance/u);
+  assert.match(workflow, /sources\.some\(\(value\) => value !== previous\.catalogueFingerprint\)/u);
   assert.doesNotMatch(workflow, /git merge-base --is-ancestor/u);
   assert.match(workflow, /name: Require reviewed producer migration target\s+if: inputs\.deployment_mode == 'adopt'/u);
 
@@ -36,7 +38,8 @@ test('production adoption validates the reviewed target migration without requir
   assert.equal(initial.status, 0, `${initial.stdout}${initial.stderr}`);
 
   const target = 'sha256:c9b59276dadaf321b39ada5d17eaea74c4beecd00f8dc0cae0a46fc37afb8f15';
-  const reviewedSource = run('sha256:3298f2574d6b35c9a5f93e6de6189127ee741c1d78aace39d12b67c286b8854f');
+  const reviewedSourceFingerprint = 'sha256:3298f2574d6b35c9a5f93e6de6189127ee741c1d78aace39d12b67c286b8854f';
+  const reviewedSource = run(reviewedSourceFingerprint);
   assert.equal(reviewedSource.status, 0, `${reviewedSource.stdout}${reviewedSource.stderr}`);
 
   const unchanged = run(target);
@@ -72,7 +75,7 @@ test('production adoption validates the reviewed target migration without requir
       catalogueFingerprint: lock.catalogueFingerprint,
       catalogueByteSha256: lock.catalogueByteSha256,
       catalogueByteLength: lock.catalogueByteLength,
-      sourceFingerprints: [lock.catalogueFingerprint],
+      sourceFingerprints: [],
     };
     const provenancePath = resolve(temporaryDirectory, 'provenance.json');
     await writeFile(
@@ -116,8 +119,27 @@ test('production adoption validates the reviewed target migration without requir
     });
     assert.deepEqual(generatedDeployment.sourceFingerprints, [lock.catalogueFingerprint]);
 
+    await writeFile(
+      currentManifestPath,
+      JSON.stringify({ ...previousDeployment, sourceFingerprints: [reviewedSourceFingerprint] }),
+      'utf8',
+    );
+    const divergent = spawnSync(process.execPath, [manifestScriptPath, temporaryDirectory], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_PAGE_URL: 'https://m4s-ai.github.io/snoredex-checklist/',
+        SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+      },
+    });
+    assert.equal(divergent.status, 0, `${divergent.stdout}${divergent.stderr}`);
+    const divergentDeployment = JSON.parse(await readFile(resolve(temporaryDirectory, 'deployment.json'), 'utf8'));
+    assert.equal(divergentDeployment.rollback, undefined);
+    assert.deepEqual(divergentDeployment.sourceFingerprints, [reviewedSourceFingerprint, lock.catalogueFingerprint]);
+
     const currentDeployment = {
-      sourceFingerprints: [target, 'sha256:3298f2574d6b35c9a5f93e6de6189127ee741c1d78aace39d12b67c286b8854f'],
+      sourceFingerprints: [target, reviewedSourceFingerprint],
       catalogueFingerprint: target,
     };
     await writeFile(currentManifestPath, JSON.stringify(currentDeployment), 'utf8');
@@ -142,6 +164,22 @@ test('production adoption validates the reviewed target migration without requir
       },
     });
     assert.equal(fromBothSources.status, 0, `${fromBothSources.stdout}${fromBothSources.stderr}`);
+
+    await writeFile(
+      currentManifestPath,
+      JSON.stringify({ sourceFingerprints: [], catalogueFingerprint: reviewedSourceFingerprint }),
+      'utf8',
+    );
+    const fromEmptyRecoverySet = spawnSync(process.execPath, [scriptPath], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_DEPLOYMENT_MODE: 'adopt',
+        SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+      },
+    });
+    assert.equal(fromEmptyRecoverySet.status, 0, `${fromEmptyRecoverySet.stdout}${fromEmptyRecoverySet.stderr}`);
 
     await writeFile(
       currentManifestPath,
