@@ -132,13 +132,35 @@ function matchingOpen(tokens, close, openKind, closeKind) {
   return undefined;
 }
 
+function hasTypeDeclarationBefore(tokens, from) {
+  for (let index = from - 1; index >= 0; index -= 1) {
+    const kind = tokens[index].kind;
+    if ([SyntaxKind.SemicolonToken, SyntaxKind.CloseBraceToken].includes(kind)) return false;
+    if ([SyntaxKind.TypeKeyword, SyntaxKind.InterfaceKeyword, SyntaxKind.DeclareKeyword].includes(kind)) return true;
+    if (
+      [
+        SyntaxKind.ConstKeyword,
+        SyntaxKind.LetKeyword,
+        SyntaxKind.VarKeyword,
+        SyntaxKind.ReturnKeyword,
+        SyntaxKind.FunctionKeyword,
+        SyntaxKind.EqualsGreaterThanToken,
+      ].includes(kind)
+    )
+      return false;
+  }
+  return false;
+}
+
 function isTypeOnlyArrow(tokens, arrowIndex) {
   const close = arrowIndex - 1;
   if (tokens[close]?.kind !== SyntaxKind.CloseParenToken) return false;
   const open = matchingOpen(tokens, close, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
   if (open === undefined) return false;
   if (tokens[open - 1]?.kind === SyntaxKind.NewKeyword) return true;
-  if (tokens[open - 1]?.kind === SyntaxKind.ColonToken) return true;
+  if (tokens[open - 1]?.kind === SyntaxKind.ColonToken) {
+    return tokens[arrowIndex + 1]?.kind === SyntaxKind.OpenBraceToken ? hasTypeDeclarationBefore(tokens, open) : true;
+  }
   if (tokens[open - 1]?.kind === SyntaxKind.AsKeyword) return true;
   for (let index = open - 1; index >= 0; index -= 1) {
     const kind = tokens[index].kind;
@@ -463,6 +485,20 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function union(): { ok: boolean } | null { return null; }',
       expected: [{ name: 'union', complexity: 1 }],
+    },
+    {
+      source: `function storage() {
+        return {
+          register: (onInactive, onActive) => {
+            if (onInactive) return onActive;
+            return onInactive;
+          },
+        };
+      }`,
+      expected: [
+        { name: 'storage', complexity: 1 },
+        { name: '<arrow>', complexity: 2 },
+      ],
     },
   ];
   for (const sample of samples) {
