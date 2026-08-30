@@ -2,6 +2,11 @@ name: Deploy Pages
 
 on:
   workflow_dispatch:
+    inputs:
+      consumer_revision:
+        description: Full 40-character consumer commit SHA to deploy
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -22,10 +27,23 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Check out selected revision
+      - name: Check out workflow revision
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Validate consumer revision
+        env:
+          CONSUMER_REVISION: ${{ inputs.consumer_revision }}
+        run: |
+          if [[ ! "$CONSUMER_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "consumer_revision must be a full lowercase commit SHA"
+            exit 1
+          fi
+          git cat-file -e "$CONSUMER_REVISION^{commit}"
+      - name: Check out consumer revision
+        env:
+          CONSUMER_REVISION: ${{ inputs.consumer_revision }}
+        run: git checkout --detach "$CONSUMER_REVISION"
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
@@ -59,7 +77,7 @@ jobs:
       - name: Smoke-test deployed Pages site
         env:
           SNOREDEX_PAGE_URL: ${{ steps.deployment.outputs.page_url }}
-          SNOREDEX_EXPECTED_GITHUB_SHA: ${{ github.sha }}
+          SNOREDEX_EXPECTED_GITHUB_SHA: ${{ inputs.consumer_revision }}
         run: |
           export SNOREDEX_EXPECTED_PRODUCER_REVISION="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).producerRevision)")"
           export SNOREDEX_EXPECTED_CONTRACT_VERSION="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).contractVersion)")"

@@ -34,12 +34,41 @@ if (committed.ok) {
 const validated = validator.validateCatalogue(catalogue);
 if (!validated.ok) throw new Error(`catalogue rejected: ${validated.errors.join(', ')}`);
 
+const migrationPath = resolve(root, 'vendor/snoredex-data/collector_migrations.json');
+const migrationBytes = await readFile(migrationPath);
+const migrationDigest = `sha256:${createHash('sha256').update(migrationBytes).digest('hex')}`;
+const expectedMigrationDigest = committed.lock.migrationByteSha256;
+const expectedMigrationLength = committed.lock.migrationByteLength;
+if (
+  typeof committed.lock.migrationArtifactUrl !== 'string' ||
+  !committed.lock.migrationArtifactUrl.endsWith('/collector_migrations.json') ||
+  migrationBytes.byteLength !== expectedMigrationLength ||
+  migrationDigest !== expectedMigrationDigest
+) {
+  throw new Error('BUILD_MIGRATION_ARTIFACT_DIGEST_MISMATCH');
+}
+let migrationManifest;
+try {
+  migrationManifest = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(migrationBytes));
+} catch {
+  throw new Error('BUILD_MIGRATION_ARTIFACT_INVALID');
+}
+if (
+  migrationManifest?.meta?.toFingerprint !== committed.lock.catalogueFingerprint ||
+  migrationManifest?.meta?.schemaVersion !== '1.1.0' ||
+  !Array.isArray(migrationManifest?.catalogueTransitions) ||
+  migrationManifest.catalogueTransitions.length === 0
+) {
+  throw new Error('BUILD_MIGRATION_ARTIFACT_INVALID');
+}
+
 const staging = `${output}.staging-${process.pid}`;
 const previous = `${output}.previous-${process.pid}`;
 const requestedAppRevision = process.env.SNOREDEX_APP_REVISION ?? process.env.GITHUB_SHA;
 const gitResult = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' });
 const gitRevision = requestedAppRevision ?? (gitResult.status === 0 ? gitResult.stdout.trim() : '');
 if (!/^[0-9a-f]{40}$/u.test(gitRevision)) throw new Error('BUILD_APP_REVISION_INVALID');
+provenance.appRevision = gitRevision;
 async function copyRevisionShell(source, destination) {
   const shell = await readFile(source, 'utf8');
   if (!shell.includes('__SNOREDEX_APP_REVISION__')) throw new Error('BUILD_APP_REVISION_MARKER_MISSING');
@@ -138,6 +167,17 @@ try {
   await writeFile(
     resolve(assets, 'snapshot.js'),
     `export const provenance = Object.freeze(${JSON.stringify(provenance)});\nexport default Object.freeze(${JSON.stringify(catalogue)});\n`,
+    'utf8',
+  );
+  const catalogueTransitions = migrationManifest.catalogueTransitions;
+  const knownSourceIds = new Set(
+    catalogueTransitions.flatMap((migration) =>
+      migration.transitions.flatMap((transition) => transition.fromItemIds ?? [transition.fromItemId]),
+    ),
+  );
+  await writeFile(
+    resolve(assets, 'migrations.js'),
+    `export const migrationManifest = Object.freeze(${JSON.stringify({ catalogueTransitions })});\nexport const knownSourceItemIds = new Set(${JSON.stringify([...knownSourceIds])});\n`,
     'utf8',
   );
   const javascriptModules = await stampJavascriptAssets(assets);

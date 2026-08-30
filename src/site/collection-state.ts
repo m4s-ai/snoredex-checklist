@@ -41,6 +41,24 @@ interface StorageModule {
   readonly OrderedStateStore: new (storage: unknown) => OrderedStateStoreLike;
 }
 
+interface BrowserReconciliationModule {
+  readonly reconcileBrowserState: (
+    targetFingerprint: string,
+    knownItemIds: ReadonlySet<string>,
+    reconciliation: {
+      readonly migrations: readonly unknown[];
+      readonly knownSourceItemIds?: ReadonlySet<string>;
+      readonly targetItemClasses?: ReadonlyMap<string, 'current-known' | 'research'>;
+    },
+  ) => Promise<{ readonly ok: boolean; readonly changed: boolean; readonly error?: string }>;
+}
+
+export interface CollectionReconciliationOptions {
+  readonly migrations: readonly unknown[];
+  readonly knownSourceItemIds?: ReadonlySet<string>;
+  readonly targetItemClasses?: ReadonlyMap<string, 'current-known' | 'research'>;
+}
+
 interface DomainModule {
   readonly applyStatusCommand: (
     itemId: string,
@@ -401,8 +419,20 @@ export class BrowserCollectionStateController implements CollectionStateControll
 export async function createCollectionStateController(
   catalogueFingerprint: string,
   knownTrackableItemIds: ReadonlySet<string>,
+  reconciliation?: CollectionReconciliationOptions,
 ): Promise<CollectionStateController | undefined> {
   try {
+    if (reconciliation !== undefined) {
+      const reconciliationModule =
+        // @ts-expect-error The runtime-relative module is emitted by the separate state build.
+        (await import('./state/browser-reconciliation.js')) as BrowserReconciliationModule;
+      const migrated = await reconciliationModule.reconcileBrowserState(
+        catalogueFingerprint,
+        knownTrackableItemIds,
+        reconciliation,
+      );
+      if (!migrated.ok) return undefined;
+    }
     const [storageModule, domainModule] = await Promise.all([
       // @ts-expect-error The runtime-relative module is emitted by the separate state build.
       import('./state/storage.js') as Promise<StorageModule>,

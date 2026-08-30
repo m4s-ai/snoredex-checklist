@@ -4,6 +4,7 @@ export type SiteProvenance =
   | {
       readonly mode: 'synthetic-fixture';
       readonly sourceCommit: 'synthetic-fixture';
+      readonly appRevision?: string;
       readonly contractVersion: string;
       readonly sourceRepository: string;
       readonly catalogueFingerprint: string;
@@ -12,6 +13,7 @@ export type SiteProvenance =
   | {
       readonly mode: 'pinned-snapshot';
       readonly sourceCommit: string;
+      readonly appRevision?: string;
       readonly contractVersion: string;
       readonly sourceRepository: string;
       readonly catalogueFingerprint: string;
@@ -24,6 +26,7 @@ export type SiteProvenance =
 export const provenance: SiteProvenance = Object.freeze({
   mode: 'synthetic-fixture',
   sourceCommit: 'synthetic-fixture',
+  appRevision: 'synthetic-fixture',
   contractVersion: '1.0.0',
   sourceRepository: 'https://github.com/m4s-ai/snoredex-data',
   catalogueFingerprint: `sha256:${'0'.repeat(64)}`,

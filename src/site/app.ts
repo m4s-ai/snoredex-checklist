@@ -26,6 +26,7 @@ import {
 import { readPrivateState, type PrivateStateRead } from './private-state.js';
 import { parseQuery, serializeQuery, type QueryCriteria } from './query.js';
 import { buildBrowseHierarchy, buildProgressViewModel, buildResultViewModel } from './results.js';
+import { knownSourceItemIds, migrationManifest } from './migrations.js';
 import snapshot, { provenance } from './snapshot.js';
 
 const $ = <T extends Element>(selector: string): T => {
@@ -1165,10 +1166,20 @@ async function renderCollection(catalogue: CatalogueSnapshot): Promise<void> {
   const knownTrackableItemIds = new Set(
     catalogue.items.filter((item) => item.active && item.progressClass === 'current-known').map((item) => item.itemId),
   );
+  const targetItemClasses = new Map(
+    catalogue.items
+      .filter((item) => item.active)
+      .map((item) => [item.itemId, item.progressClass === 'current-known' ? 'current-known' : 'research'] as const),
+  );
   const state = await readPrivateState(catalogue.meta.catalogueFingerprint, knownTrackableItemIds);
   const stateController = await createCollectionStateController(
     catalogue.meta.catalogueFingerprint,
     knownTrackableItemIds,
+    {
+      migrations: migrationManifest.catalogueTransitions,
+      knownSourceItemIds,
+      targetItemClasses,
+    },
   );
   const renderState = stateController?.state.readable === true ? stateController.state : state;
   renderQueryForm($('[data-query]'), parsed.criteria, catalogue);

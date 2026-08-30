@@ -64,7 +64,10 @@ npm run check
 
 `npm run build:site` assembles the static Pages artifact in `dist/site/` from the reviewed,
 digest-pinned vendor snapshot and lock. The generated directory is ignored; Pages publication is
-still an explicit `workflow_dispatch` operation and is never triggered by merge.
+still an explicit `workflow_dispatch` operation and is never triggered by merge. Dispatch it from a
+durable workflow revision and provide the full lowercase `consumer_revision` commit SHA to deploy;
+the workflow validates and checks out that exact consumer revision before building, and the smoke
+test verifies the same SHA.
 
 The build also copies the authored card-shaped placeholders from `site-src/assets/` into the
 same-origin `assets/images/` tree and writes a digest-pinned `assets/image-manifest.json`. The
