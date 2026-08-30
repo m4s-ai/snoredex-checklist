@@ -189,16 +189,29 @@ function isObjectLiteralScope(tokens, from) {
   return [SyntaxKind.OpenBraceToken, SyntaxKind.CommaToken].includes(beforeProperty);
 }
 
+function isParenthesizedTypePosition(tokens, open) {
+  if (tokens[open - 1]?.kind !== SyntaxKind.OpenParenToken) return false;
+  return [
+    SyntaxKind.ColonToken,
+    SyntaxKind.BarToken,
+    SyntaxKind.AmpersandToken,
+    SyntaxKind.LessThanToken,
+    SyntaxKind.CommaToken,
+    SyntaxKind.OpenBracketToken,
+  ].includes(tokens[open - 2]?.kind);
+}
+
 function isTypeOnlyArrow(tokens, arrowIndex) {
   const close = arrowIndex - 1;
   if (tokens[close]?.kind !== SyntaxKind.CloseParenToken) return false;
   const open = matchingOpen(tokens, close, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
   if (open === undefined) return false;
   if (isTypeDeclarationScope(tokens, open)) return true;
+  if (isObjectLiteralScope(tokens, open)) return false;
   if (tokens[open - 1]?.kind === SyntaxKind.NewKeyword) return true;
-  if (tokens[open - 1]?.kind === SyntaxKind.ColonToken) {
-    return !isObjectLiteralScope(tokens, open);
-  }
+  if (tokens[open - 1]?.kind === SyntaxKind.LessThanToken) return true;
+  if (isParenthesizedTypePosition(tokens, open)) return true;
+  if (tokens[open - 1]?.kind === SyntaxKind.ColonToken) return true;
   if (tokens[open - 1]?.kind === SyntaxKind.AsKeyword) return true;
   for (let index = open - 1; index >= 0; index -= 1) {
     const kind = tokens[index].kind;
@@ -553,6 +566,14 @@ if (process.argv.includes('--self-test')) {
         readonly withAtomicUpdate?: <T>(callback: () => T) => T;
       }`,
       expected: [],
+    },
+    {
+      source: `function wrappedTypes() {
+        let retryAction: (() => Promise<unknown>) | undefined;
+        const callbacks = new Set<() => void>();
+        return retryAction ?? callbacks;
+      }`,
+      expected: [{ name: 'wrappedTypes', complexity: 2 }],
     },
   ];
   for (const sample of samples) {
