@@ -1,42 +1,37 @@
-import {
-  serializePrivateState,
-  validatePrivateState,
-  type PrivateState,
-  type StateErrorCode,
-} from "./domain.ts";
-import { readStateAuthority } from "./authority.ts";
+import { serializePrivateState, validatePrivateState, type PrivateState, type StateErrorCode } from './domain.ts';
+import { readStateAuthority } from './authority.ts';
+import { reconcilePrivateState, type ReconciliationContext } from './reconciliation.ts';
 
-export const PRIVATE_STATE_STORAGE_KEY = "snoredex-checklist.private-state";
+export const PRIVATE_STATE_STORAGE_KEY = 'snoredex-checklist.private-state';
 /** Optional recovery sidecar; the active state key remains legacy-readable for rollback. */
-export const PRIVATE_STATE_RECOVERY_STORAGE_KEY = "snoredex-checklist.private-state.recovery";
-export const PRIVATE_STATE_LOCK_NAME = "snoredex-checklist.private-state-write";
-export const PRIVATE_STATE_NOTE_DRAFT_KEY = "snoredex-checklist.private-state.note-draft";
+export const PRIVATE_STATE_RECOVERY_STORAGE_KEY = 'snoredex-checklist.private-state.recovery';
+export const PRIVATE_STATE_LOCK_NAME = 'snoredex-checklist.private-state-write';
+export const PRIVATE_STATE_NOTE_DRAFT_KEY = 'snoredex-checklist.private-state.note-draft';
 export const NOTE_AUTOSAVE_DELAY_MS = 3_000;
 const DRAFT_OWNER_HEARTBEAT_MS = 5_000;
 
-const PRIVATE_STATE_NOTE_DRAFT_SCHEMA = "snoredex-checklist.pending-note";
+const PRIVATE_STATE_NOTE_DRAFT_SCHEMA = 'snoredex-checklist.pending-note';
 const PRIVATE_STATE_NOTE_DRAFT_VERSION = 1;
 const PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:`;
-const PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_SCHEMA = "snoredex-checklist.pending-note-tombstone";
+const PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_SCHEMA = 'snoredex-checklist.pending-note-tombstone';
 const PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION = 1;
 const PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX = `${PRIVATE_STATE_NOTE_DRAFT_KEY}:tombstone:`;
-const PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA = "snoredex-checklist.pending-note-pointer";
+const PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA = 'snoredex-checklist.pending-note-pointer';
 const PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION = 2;
 const PRIVATE_STATE_NOTE_DRAFT_POINTER_LEGACY_VERSION = 1;
 
 export const PERSISTENCE_ERROR_CODES = [
-  "LOCAL_STATE_UNSUPPORTED",
-  "LOCAL_STATE_UNREADABLE",
-  "STORAGE_UNAVAILABLE",
-  "STORAGE_QUOTA_EXCEEDED",
-  "STORAGE_WRITE_FAILED",
-  "STORAGE_COMMIT_UNCERTAIN",
+  'LOCAL_STATE_UNSUPPORTED',
+  'LOCAL_STATE_UNREADABLE',
+  'STORAGE_UNAVAILABLE',
+  'STORAGE_QUOTA_EXCEEDED',
+  'STORAGE_WRITE_FAILED',
+  'STORAGE_COMMIT_UNCERTAIN',
 ] as const;
 export type PersistenceErrorCode = (typeof PERSISTENCE_ERROR_CODES)[number];
 
 export type PersistenceResult<T> =
-  | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly error: PersistenceErrorCode };
+  { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: PersistenceErrorCode };
 
 export interface StorageLockLike {
   request<T>(name: string, callback: () => Promise<T>): Promise<T>;
@@ -62,10 +57,7 @@ export interface StorageLike {
   readonly withLock?: <T>(callback: () => Promise<T>) => Promise<T>;
   readonly draftStorage?: DraftStorageLike;
   readonly draftId?: string;
-  readonly registerDraftLifecycle?: (
-    onInactive: () => void,
-    onActive: () => void,
-  ) => () => void;
+  readonly registerDraftLifecycle?: (onInactive: () => void, onActive: () => void) => () => void;
 }
 
 export interface TimerClock {
@@ -91,7 +83,7 @@ interface PendingNote {
 }
 
 interface SaveOperation {
-  readonly kind: "immediate" | "note";
+  readonly kind: 'immediate' | 'note';
   readonly generation: number;
   readonly draftToken: number;
   readonly draftStorageReference: DraftReference | undefined;
@@ -108,7 +100,7 @@ interface PendingNoteDraftRecord {
   readonly hasObservedRaw: boolean;
   readonly observedRaw: string | null;
   readonly updatedAt: number;
-  readonly ownerState: "active" | "inactive" | "consumed";
+  readonly ownerState: 'active' | 'inactive' | 'consumed';
 }
 
 interface ConsumedDraftRecord {
@@ -149,7 +141,7 @@ function getConsumedDraftKey(draftId: string, sourceKey?: string, sourceRevision
   if (sourceKey === undefined) {
     return `${PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX}${draftId}`;
   }
-  return `${PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX}${encodeURIComponent(draftId)}:${encodeURIComponent(sourceKey)}:${encodeURIComponent(sourceRevision ?? "legacy")}`;
+  return `${PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX}${encodeURIComponent(draftId)}:${encodeURIComponent(sourceKey)}:${encodeURIComponent(sourceRevision ?? 'legacy')}`;
 }
 
 function getDraftPointerKey(): string {
@@ -215,27 +207,27 @@ function success<T>(value: T): PersistenceResult<T> {
 }
 
 function isQuotaError(value: unknown): boolean {
-  if (typeof value !== "object" || value === null || !("name" in value)) {
+  if (typeof value !== 'object' || value === null || !('name' in value)) {
     return false;
   }
   const name = (value as { name?: unknown }).name;
-  return name === "QuotaExceededError" || name === "NS_ERROR_DOM_QUOTA_REACHED";
+  return name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED';
 }
 
 function classifyStateError(code: StateErrorCode): PersistenceErrorCode {
-  return code === "IMPORT_UNSUPPORTED_STATE_SCHEMA" || code === "IMPORT_UNSUPPORTED_STATE_VERSION"
-    ? "LOCAL_STATE_UNSUPPORTED"
-    : "LOCAL_STATE_UNREADABLE";
+  return code === 'IMPORT_UNSUPPORTED_STATE_SCHEMA' || code === 'IMPORT_UNSUPPORTED_STATE_VERSION'
+    ? 'LOCAL_STATE_UNSUPPORTED'
+    : 'LOCAL_STATE_UNREADABLE';
 }
 
 export function getBrowserStorage(): PersistenceResult<StorageLike> {
   try {
-    if (typeof globalThis.localStorage === "undefined") {
-      return error("STORAGE_UNAVAILABLE");
+    if (typeof globalThis.localStorage === 'undefined') {
+      return error('STORAGE_UNAVAILABLE');
     }
     const locks = getBrowserLockManager();
     if (locks === undefined) {
-      return error("STORAGE_UNAVAILABLE");
+      return error('STORAGE_UNAVAILABLE');
     }
     const storage = globalThis.localStorage;
     return success({
@@ -267,36 +259,32 @@ export function getBrowserStorage(): PersistenceResult<StorageLike> {
         if (target.addEventListener === undefined || target.removeEventListener === undefined) {
           return () => undefined;
         }
-        target.addEventListener("beforeunload", onInactive);
-        target.addEventListener("pageshow", onActive);
+        target.addEventListener('beforeunload', onInactive);
+        target.addEventListener('pageshow', onActive);
         return () => {
-          target.removeEventListener?.("beforeunload", onInactive);
-          target.removeEventListener?.("pageshow", onActive);
+          target.removeEventListener?.('beforeunload', onInactive);
+          target.removeEventListener?.('pageshow', onActive);
         };
       },
     });
   } catch {
-    return error("STORAGE_UNAVAILABLE");
+    return error('STORAGE_UNAVAILABLE');
   }
 }
 
 function getBrowserLockManager(): StorageLockLike | undefined {
   const navigatorValue = (globalThis as { navigator?: { locks?: unknown } }).navigator;
   const locks = navigatorValue?.locks;
-  if (typeof locks !== "object" || locks === null) {
+  if (typeof locks !== 'object' || locks === null) {
     return undefined;
   }
   const request = (locks as { request?: unknown }).request;
-  if (typeof request !== "function") {
+  if (typeof request !== 'function') {
     return undefined;
   }
   return {
     request: <T>(name: string, callback: () => Promise<T>): Promise<T> =>
-      (request as (lockName: string, lockCallback: () => Promise<T>) => Promise<T>).call(
-        locks,
-        name,
-        callback,
-      ),
+      (request as (lockName: string, lockCallback: () => Promise<T>) => Promise<T>).call(locks, name, callback),
   };
 }
 
@@ -323,6 +311,8 @@ export class OrderedStateStore {
   private activeDraftOwned = false;
   private recoveredForeignReference: DraftReference | undefined;
   private recoveredDraftPresented = false;
+  /** A recovered draft contains source records the target cannot represent. */
+  private unsavedDraftRequiresReview = false;
   private draftPersistenceError: PersistenceErrorCode | undefined;
   private supersededDraftReference: DraftReference | undefined;
   private pendingOwnedDraftRetirements: DraftReference[] = [];
@@ -355,7 +345,7 @@ export class OrderedStateStore {
       raw = this.storage.getItem(PRIVATE_STATE_STORAGE_KEY);
       recoveryRaw = this.storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY);
     } catch {
-      return error("STORAGE_UNAVAILABLE");
+      return error('STORAGE_UNAVAILABLE');
     }
     this.observedRaw = raw;
     this.hasObservedRaw = true;
@@ -377,10 +367,54 @@ export class OrderedStateStore {
     return this.unsavedDraft === undefined ? undefined : cloneState(this.unsavedDraft);
   }
 
+  /** Whether the visible draft contains source records awaiting review. */
+  public recoveryNeedsReview(): boolean {
+    return this.unsavedDraftRequiresReview;
+  }
+
+  /** Reconcile a recovered note draft before the catalogue fingerprint is validated. */
+  public reconcileUnsavedDraft(
+    targetFingerprint: string,
+    knownTargetItemIds: ReadonlySet<string>,
+    reconciliation: ReconciliationContext,
+  ): PersistenceResult<void> {
+    const draft = this.unsavedDraft;
+    if (draft === undefined || draft.catalogueFingerprint === targetFingerprint) {
+      this.unsavedDraftRequiresReview = false;
+      return success(undefined);
+    }
+    const result = reconcilePrivateState(draft, targetFingerprint, {
+      ...reconciliation,
+      knownTargetItemIds,
+    });
+    if (!result.ok) {
+      return error(
+        result.error === 'STATE_FINGERPRINT_UNSUPPORTED' ? 'LOCAL_STATE_UNSUPPORTED' : 'LOCAL_STATE_UNREADABLE',
+      );
+    }
+    // Keep the complete source draft available when reconciliation produces
+    // retired or otherwise orphaned records.  The target projection cannot
+    // represent those source identities, so replacing the draft would lose
+    // private state before the user can review or recover it.  The controller
+    // must remain reachable so the user can explicitly discard the draft;
+    // adoption is blocked until a reviewed transition can represent every
+    // source record.
+    if (result.value.orphans.length > 0 || result.value.conflicts.length > 0) {
+      this.unsavedDraftRequiresReview = true;
+      return success(undefined);
+    }
+    this.unsavedDraftRequiresReview = false;
+    this.unsavedDraft = cloneState(result.value.state);
+    return success(undefined);
+  }
+
   /** Explicitly accept the currently presented recovery draft for the next save. */
   public adoptUnsavedDraft(): PersistenceResult<PrivateState | undefined> {
     if (this.unsavedDraft === undefined) {
       return success(undefined);
+    }
+    if (this.unsavedDraftRequiresReview) {
+      return error('LOCAL_STATE_UNREADABLE');
     }
     this.recoveredDraftPresented = true;
     return success(cloneState(this.unsavedDraft));
@@ -409,7 +443,7 @@ export class OrderedStateStore {
       if (record.observedRaw === null) {
         return undefined;
       }
-      if (typeof record.observedRaw !== "string") {
+      if (typeof record.observedRaw !== 'string') {
         return null;
       }
       const authority = readStateAuthority(record.observedRaw);
@@ -463,7 +497,7 @@ export class OrderedStateStore {
     try {
       raw = this.storage.getItem(PRIVATE_STATE_STORAGE_KEY);
     } catch {
-      return error("STORAGE_UNAVAILABLE");
+      return error('STORAGE_UNAVAILABLE');
     }
     let current: PrivateState | undefined;
     if (raw !== null) {
@@ -487,7 +521,7 @@ export class OrderedStateStore {
       this.observedRaw = previousObservedRaw;
       this.hasObservedRaw = previousHasObservedRaw;
       this.lastKnownGood = previousLastKnownGood;
-      return error(this.draftPersistenceError ?? "STORAGE_WRITE_FAILED");
+      return error(this.draftPersistenceError ?? 'STORAGE_WRITE_FAILED');
     }
     if (persistedReference !== undefined && previousOwnedReference?.key !== persistedReference.key) {
       if (!this.clearPendingNoteDraft(previousOwnedReference)) {
@@ -525,9 +559,8 @@ export class OrderedStateStore {
     this.latestDraftToken = this.nextDraftToken;
     const reference = this.activeDraftOwned ? this.activeDraftReference : undefined;
     const recoveredReference = this.recoveredForeignReference;
-    const supersededReference = this.supersededDraftReference?.draftId === this.draftId
-      ? undefined
-      : this.supersededDraftReference;
+    const supersededReference =
+      this.supersededDraftReference?.draftId === this.draftId ? undefined : this.supersededDraftReference;
     const foreignReference = recoveredReference ?? supersededReference;
     const foreignRetired = foreignReference === undefined || this.consumeSupersededDraft(foreignReference);
     const ownedRetired = reference === undefined || this.clearPendingNoteDraft(reference, true);
@@ -559,6 +592,7 @@ export class OrderedStateStore {
     if (ownedRetired && foreignRetired) {
       this.unsavedDraft = undefined;
       this.supersededDraftReference = undefined;
+      this.unsavedDraftRequiresReview = false;
       this.stopDraftHeartbeat();
     } else if (!ownedRetired) {
       this.startDraftHeartbeat();
@@ -568,15 +602,13 @@ export class OrderedStateStore {
   public saveImmediate(state: PrivateState): Promise<SaveResult> {
     const generation = ++this.immediateGeneration;
     const previousDraft = this.activeDraftOwned ? this.activeDraftReference : undefined;
-    const recoveredDraft = this.isRecoveredDraftReplacement(state)
-      ? this.recoveredForeignReference
-      : undefined;
+    const recoveredDraft = this.isRecoveredDraftReplacement(state) ? this.recoveredForeignReference : undefined;
     const recoveryDraftReference = this.recoveredForeignReference;
     this.cancelPendingNote(previousDraft !== undefined);
     const draftToken = this.rememberDraft(state);
     const persistedReference = this.persistPendingNoteDraft(state);
     if (this.storage.draftStorage !== undefined && persistedReference === undefined) {
-      return Promise.resolve(error(this.draftPersistenceError ?? "STORAGE_WRITE_FAILED"));
+      return Promise.resolve(error(this.draftPersistenceError ?? 'STORAGE_WRITE_FAILED'));
     }
     if (persistedReference !== undefined && previousDraft?.key !== persistedReference.key) {
       if (!this.clearPendingNoteDraft(previousDraft)) {
@@ -584,7 +616,7 @@ export class OrderedStateStore {
       }
     }
     return this.enqueue(state, {
-      kind: "immediate",
+      kind: 'immediate',
       generation,
       draftToken,
       draftStorageReference: persistedReference ?? previousDraft,
@@ -597,9 +629,7 @@ export class OrderedStateStore {
     const generation = ++this.noteGeneration;
     this.cancelPendingNote();
     const previousDraft = this.activeDraftOwned ? this.activeDraftReference : undefined;
-    const recoveredDraft = this.isRecoveredDraftReplacement(state)
-      ? this.recoveredForeignReference
-      : undefined;
+    const recoveredDraft = this.isRecoveredDraftReplacement(state) ? this.recoveredForeignReference : undefined;
     const recoveryDraftReference = this.recoveredForeignReference;
     const draftToken = this.rememberDraft(state);
     const supersededDraftReference = this.supersededDraftReference ?? recoveredDraft;
@@ -626,9 +656,7 @@ export class OrderedStateStore {
       recoveryDraftReference,
     };
     this.startDraftHeartbeat();
-    return this.draftPersistenceError === undefined
-      ? success(undefined)
-      : error(this.draftPersistenceError);
+    return this.draftPersistenceError === undefined ? success(undefined) : error(this.draftPersistenceError);
   }
 
   /** Flush on blur or pagehide; callers may ignore the returned promise for pagehide. */
@@ -647,7 +675,7 @@ export class OrderedStateStore {
     }
     this.cancelPendingNote(true);
     return this.enqueue(pending.state, {
-      kind: "note",
+      kind: 'note',
       generation: pending.generation,
       draftToken: pending.draftToken,
       draftStorageReference: pending.draftStorageReference,
@@ -674,7 +702,10 @@ export class OrderedStateStore {
     return draftToken;
   }
 
-  private persistPendingNoteDraft(state: PrivateState, revision = this.latestDraftRevision): DraftReference | undefined {
+  private persistPendingNoteDraft(
+    state: PrivateState,
+    revision = this.latestDraftRevision,
+  ): DraftReference | undefined {
     this.draftPersistenceError = undefined;
     const draftStorage = this.storage.draftStorage;
     if (draftStorage === undefined) {
@@ -682,23 +713,25 @@ export class OrderedStateStore {
     }
     const serialized = serializePrivateState(state);
     if (!serialized.ok) {
-      this.draftPersistenceError = "STORAGE_WRITE_FAILED";
+      this.draftPersistenceError = 'STORAGE_WRITE_FAILED';
       return undefined;
     }
     if (this.hasObservedRaw && this.observedRaw === undefined) {
-      this.draftPersistenceError = "STORAGE_COMMIT_UNCERTAIN";
+      this.draftPersistenceError = 'STORAGE_COMMIT_UNCERTAIN';
       return undefined;
     }
     const hasValidObservedRaw = this.hasValidObservedRaw();
     const draftRevision = revision ?? createDraftRevision(this.draftId);
-    let ownerState: PendingNoteDraftRecord["ownerState"] = "active";
+    let ownerState: PendingNoteDraftRecord['ownerState'] = 'active';
     let editTimestamp = Date.now();
     const previousOwnedReference = this.activeDraftOwned ? this.activeDraftReference : undefined;
-    const sourceIsTombstoned = previousOwnedReference !== undefined
-      && this.isTombstonedDraftKey(previousOwnedReference.key, this.draftId, previousOwnedReference.revision);
-    let key = previousOwnedReference !== undefined
-      ? createRotatedDraftStorageKey(this.draftId)
-      : getPendingNoteDraftKey(this.draftId);
+    const sourceIsTombstoned =
+      previousOwnedReference !== undefined &&
+      this.isTombstonedDraftKey(previousOwnedReference.key, this.draftId, previousOwnedReference.revision);
+    let key =
+      previousOwnedReference !== undefined
+        ? createRotatedDraftStorageKey(this.draftId)
+        : getPendingNoteDraftKey(this.draftId);
     if (previousOwnedReference !== undefined) {
       try {
         const raw = draftStorage.getItem(previousOwnedReference.key);
@@ -708,10 +741,10 @@ export class OrderedStateStore {
             value: raw,
             draftId: this.draftId,
           });
-          if (current !== undefined && (sourceIsTombstoned || current.ownerState === "consumed")) {
+          if (current !== undefined && (sourceIsTombstoned || current.ownerState === 'consumed')) {
             const validatedCurrent = validatePrivateState(current.state);
             if (validatedCurrent.ok && sameState(validatedCurrent.value, state)) {
-              ownerState = "consumed";
+              ownerState = 'consumed';
             }
           }
           if (current !== undefined && current.revision === draftRevision) {
@@ -729,33 +762,36 @@ export class OrderedStateStore {
       state: JSON.parse(serialized.value) as unknown,
       revision: draftRevision,
       hasObservedRaw: hasValidObservedRaw,
-      observedRaw: hasValidObservedRaw ? this.observedRaw ?? null : null,
+      observedRaw: hasValidObservedRaw ? (this.observedRaw ?? null) : null,
       updatedAt: editTimestamp,
       ownerState,
     };
     try {
       const value = JSON.stringify(record);
-      let consumedSourceDetected = sourceIsTombstoned
-        && previousOwnedReference !== undefined
-        && ownerState === "consumed";
-      if (!consumedSourceDetected
-        && previousOwnedReference !== undefined
-        && ownerState === "active"
-        && this.isTombstonedDraftKey(previousOwnedReference.key, this.draftId, previousOwnedReference.revision)) {
+      let consumedSourceDetected =
+        sourceIsTombstoned && previousOwnedReference !== undefined && ownerState === 'consumed';
+      if (
+        !consumedSourceDetected &&
+        previousOwnedReference !== undefined &&
+        ownerState === 'active' &&
+        this.isTombstonedDraftKey(previousOwnedReference.key, this.draftId, previousOwnedReference.revision)
+      ) {
         // Re-read the source after the initial snapshot. Another tab may have
         // consumed it between the first check and publication. Only treat a
         // matching revision/state as a heartbeat transfer; a new edit stays
         // active and must remain recoverable.
         try {
           const raw = draftStorage.getItem(previousOwnedReference.key);
-          const current = raw === null
-            ? this.parseDraftReference(previousOwnedReference)
-            : this.parseDraftReference({ ...previousOwnedReference, value: raw });
+          const current =
+            raw === null
+              ? this.parseDraftReference(previousOwnedReference)
+              : this.parseDraftReference({ ...previousOwnedReference, value: raw });
           const validatedCurrent = current === undefined ? undefined : validatePrivateState(current.state);
-          consumedSourceDetected = current !== undefined
-            && current.revision === draftRevision
-            && validatedCurrent?.ok === true
-            && sameState(validatedCurrent.value, state);
+          consumedSourceDetected =
+            current !== undefined &&
+            current.revision === draftRevision &&
+            validatedCurrent?.ok === true &&
+            sameState(validatedCurrent.value, state);
         } catch {
           // Keep the active path when the race cannot be verified; the caller
           // retains its in-memory draft and can retry on the next heartbeat.
@@ -763,7 +799,7 @@ export class OrderedStateStore {
       }
       if (consumedSourceDetected && previousOwnedReference !== undefined) {
         const rotatedKey = createRotatedDraftStorageKey(this.draftId);
-        const rotatedValue = JSON.stringify({ ...record, ownerState: "consumed" } satisfies PendingNoteDraftRecord);
+        const rotatedValue = JSON.stringify({ ...record, ownerState: 'consumed' } satisfies PendingNoteDraftRecord);
         // A heartbeat must not publish a rotated consumed copy without its
         // matching suppression marker; otherwise reclamation can never reach
         // the orphaned full-state envelope.
@@ -775,8 +811,10 @@ export class OrderedStateStore {
         } catch {
           return undefined;
         }
-        if (!this.writeConsumedDraftTombstone(draftStorage, rotatedKey, this.draftId, draftRevision)
-          || !this.isTombstonedDraftKey(rotatedKey, this.draftId, draftRevision)) {
+        if (
+          !this.writeConsumedDraftTombstone(draftStorage, rotatedKey, this.draftId, draftRevision) ||
+          !this.isTombstonedDraftKey(rotatedKey, this.draftId, draftRevision)
+        ) {
           try {
             if (draftStorage.getItem(rotatedKey) === rotatedValue) {
               draftStorage.removeItem(rotatedKey);
@@ -788,7 +826,7 @@ export class OrderedStateStore {
         }
         const reference = { key: rotatedKey, value: rotatedValue, draftId: this.draftId, revision: draftRevision };
         if (!this.writeDraftPointer(draftStorage, reference)) {
-          this.draftPersistenceError = "STORAGE_WRITE_FAILED";
+          this.draftPersistenceError = 'STORAGE_WRITE_FAILED';
           try {
             if (draftStorage.getItem(rotatedKey) === rotatedValue) {
               draftStorage.removeItem(rotatedKey);
@@ -811,10 +849,10 @@ export class OrderedStateStore {
         // source: that record is concurrently reclaimable and must remain
         // immutable until the rotated replacement is durable.
         if (
-          !isQuotaError(cause)
-          || previousOwnedReference === undefined
-          || sourceIsTombstoned
-          || !this.canFallbackToActiveDraftOverwrite(previousOwnedReference)
+          !isQuotaError(cause) ||
+          previousOwnedReference === undefined ||
+          sourceIsTombstoned ||
+          !this.canFallbackToActiveDraftOverwrite(previousOwnedReference)
         ) {
           throw cause;
         }
@@ -827,25 +865,29 @@ export class OrderedStateStore {
         draftStorage.setItem(key, value);
       }
       let persistedValue = value;
-      if (previousOwnedReference !== undefined
-        && ownerState === "active"
-        && this.isTombstonedDraftKey(previousOwnedReference.key, this.draftId, previousOwnedReference.revision)) {
+      if (
+        previousOwnedReference !== undefined &&
+        ownerState === 'active' &&
+        this.isTombstonedDraftKey(previousOwnedReference.key, this.draftId, previousOwnedReference.revision)
+      ) {
         let sourceStillMatches = false;
         try {
           const raw = draftStorage.getItem(previousOwnedReference.key);
-          const current = raw === null
-            ? this.parseDraftReference(previousOwnedReference)
-            : this.parseDraftReference({ ...previousOwnedReference, value: raw });
+          const current =
+            raw === null
+              ? this.parseDraftReference(previousOwnedReference)
+              : this.parseDraftReference({ ...previousOwnedReference, value: raw });
           const validatedCurrent = current === undefined ? undefined : validatePrivateState(current.state);
-          sourceStillMatches = current !== undefined
-            && current.revision === draftRevision
-            && validatedCurrent?.ok === true
-            && sameState(validatedCurrent.value, state);
+          sourceStillMatches =
+            current !== undefined &&
+            current.revision === draftRevision &&
+            validatedCurrent?.ok === true &&
+            sameState(validatedCurrent.value, state);
         } catch {
           // Keep a genuine active edit when the source cannot be verified.
         }
         if (sourceStillMatches) {
-          const consumedValue = JSON.stringify({ ...record, ownerState: "consumed" } satisfies PendingNoteDraftRecord);
+          const consumedValue = JSON.stringify({ ...record, ownerState: 'consumed' } satisfies PendingNoteDraftRecord);
           if (!this.writeConsumedDraftTombstone(draftStorage, key, this.draftId, draftRevision)) {
             try {
               if (draftStorage.getItem(key) === value) {
@@ -869,7 +911,7 @@ export class OrderedStateStore {
       }
       const reference = { key, value: persistedValue, draftId: this.draftId, revision: draftRevision };
       if (!this.writeDraftPointer(draftStorage, reference)) {
-        this.draftPersistenceError = "STORAGE_WRITE_FAILED";
+        this.draftPersistenceError = 'STORAGE_WRITE_FAILED';
         if (previousInPlaceValue !== undefined) {
           let restored = false;
           try {
@@ -898,9 +940,7 @@ export class OrderedStateStore {
       this.activeDraftOwned = true;
       return reference;
     } catch (cause) {
-      this.draftPersistenceError = isQuotaError(cause)
-        ? "STORAGE_QUOTA_EXCEEDED"
-        : "STORAGE_WRITE_FAILED";
+      this.draftPersistenceError = isQuotaError(cause) ? 'STORAGE_QUOTA_EXCEEDED' : 'STORAGE_WRITE_FAILED';
       // Keep the in-memory draft so the caller can retry after surfacing the
       // failure; do not silently present the previous durable record as new.
       return undefined;
@@ -944,8 +984,11 @@ export class OrderedStateStore {
         value: raw,
         draftId: this.draftId,
       });
-      return current !== undefined && current.ownerState === "active"
-        && !this.isTombstonedDraftKey(reference.key, this.draftId, current.revision);
+      return (
+        current !== undefined &&
+        current.ownerState === 'active' &&
+        !this.isTombstonedDraftKey(reference.key, this.draftId, current.revision)
+      );
     } catch {
       return false;
     }
@@ -969,7 +1012,8 @@ export class OrderedStateStore {
         return false;
       }
       const candidates: Array<PendingNoteDraftRecord & { readonly key: string; readonly value: string }> = [];
-      const keys = draftStorage.listKeys?.(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX)
+      const keys = draftStorage
+        .listKeys?.(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX)
         .filter((key) => !key.startsWith(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX));
       if (keys === undefined) {
         const raw = draftStorage.getItem(reference.key);
@@ -1000,7 +1044,7 @@ export class OrderedStateStore {
         if (this.isDraftTombstoned(current)) {
           continue;
         }
-        if (current.ownerState === "consumed") {
+        if (current.ownerState === 'consumed') {
           return false;
         }
         const currentState = validatePrivateState(current.state);
@@ -1063,13 +1107,14 @@ export class OrderedStateStore {
         return;
       }
       const previousReference = this.activeDraftReference;
-      const sourceIsTombstoned = previousReference !== undefined
-        && this.isTombstonedDraftKey(previousReference.key, this.draftId, previousReference.revision);
+      const sourceIsTombstoned =
+        previousReference !== undefined &&
+        this.isTombstonedDraftKey(previousReference.key, this.draftId, previousReference.revision);
       if (previousReference !== undefined && !sourceIsTombstoned) {
         // Refresh an uncontended owner in place. Keeping the heartbeat on the
         // same physical key means a concurrent tombstone suppresses exactly
         // that copy; it cannot orphan an active rotated heartbeat record.
-        this.setDraftOwnerState("active");
+        this.setDraftOwnerState('active');
       } else {
         const persistedReference = this.persistPendingNoteDraft(this.unsavedDraft);
         if (persistedReference !== undefined && previousReference?.key !== persistedReference.key) {
@@ -1083,18 +1128,18 @@ export class OrderedStateStore {
   }
 
   private markDraftOwnerInactive(): void {
-    this.setDraftOwnerState("inactive");
+    this.setDraftOwnerState('inactive');
     this.stopDraftHeartbeat();
   }
 
   private markDraftOwnerActive(): void {
-    this.setDraftOwnerState("active");
+    this.setDraftOwnerState('active');
     if (this.unsavedDraft !== undefined) {
       this.startDraftHeartbeat();
     }
   }
 
-  private setDraftOwnerState(ownerState: "active" | "inactive"): void {
+  private setDraftOwnerState(ownerState: 'active' | 'inactive'): void {
     if (!this.activeDraftOwned || this.activeDraftReference === undefined) {
       return;
     }
@@ -1112,23 +1157,28 @@ export class OrderedStateStore {
       if (parsed === undefined || parsed.draftId !== this.draftId) {
         return;
       }
-      let nextOwnerState: PendingNoteDraftRecord["ownerState"] = ownerState;
-      if (ownerState === "active" && parsed.ownerState === "consumed" && this.unsavedDraft !== undefined) {
+      let nextOwnerState: PendingNoteDraftRecord['ownerState'] = ownerState;
+      if (ownerState === 'active' && parsed.ownerState === 'consumed' && this.unsavedDraft !== undefined) {
         const validated = validatePrivateState(parsed.state);
         if (validated.ok && sameState(validated.value, this.unsavedDraft)) {
-          nextOwnerState = "consumed";
+          nextOwnerState = 'consumed';
         }
       }
-      if (ownerState === "inactive" && parsed.ownerState === "consumed"
-        && !this.isTombstonedDraftKey(reference.key, reference.draftId, parsed.revision)) {
-        nextOwnerState = "consumed";
+      if (
+        ownerState === 'inactive' &&
+        parsed.ownerState === 'consumed' &&
+        !this.isTombstonedDraftKey(reference.key, reference.draftId, parsed.revision)
+      ) {
+        nextOwnerState = 'consumed';
       }
-      if (nextOwnerState === "active"
-        && this.unsavedDraft !== undefined
-        && this.isTombstonedDraftKey(reference.key, reference.draftId, parsed.revision)) {
+      if (
+        nextOwnerState === 'active' &&
+        this.unsavedDraft !== undefined &&
+        this.isTombstonedDraftKey(reference.key, reference.draftId, parsed.revision)
+      ) {
         const validated = validatePrivateState(parsed.state);
         if (validated.ok && sameState(validated.value, this.unsavedDraft)) {
-          nextOwnerState = "consumed";
+          nextOwnerState = 'consumed';
         }
       }
       const value = JSON.stringify({
@@ -1142,7 +1192,7 @@ export class OrderedStateStore {
         updatedAt: parsed.updatedAt,
         ownerState: nextOwnerState,
       } satisfies PendingNoteDraftRecord);
-      if (ownerState === "active" && this.isTombstonedDraftKey(reference.key, reference.draftId, parsed.revision)) {
+      if (ownerState === 'active' && this.isTombstonedDraftKey(reference.key, reference.draftId, parsed.revision)) {
         const rotatedKey = createRotatedDraftStorageKey(this.draftId);
         // Install a marker before publishing the rotated record. The source
         // is written as consumed, then the marker is refreshed with a newer
@@ -1157,7 +1207,7 @@ export class OrderedStateStore {
           hasObservedRaw: parsed.hasObservedRaw,
           observedRaw: parsed.observedRaw,
           updatedAt: parsed.updatedAt,
-          ownerState: "consumed",
+          ownerState: 'consumed',
         } satisfies PendingNoteDraftRecord);
         if (!this.writeConsumedDraftTombstone(draftStorage, rotatedKey, this.draftId, parsed.revision)) {
           return;
@@ -1236,7 +1286,7 @@ export class OrderedStateStore {
         return false;
       }
       const parsed = this.parseDraftReference({ ...reference, value: raw });
-      return parsed !== undefined && parsed.ownerState === "active";
+      return parsed !== undefined && parsed.ownerState === 'active';
     } catch {
       // An unreadable owner marker is not evidence that a foreign tab is live.
       return false;
@@ -1244,7 +1294,7 @@ export class OrderedStateStore {
   }
 
   private isTombstonedDraftKey(key: string, draftId: string, revision: string | undefined): boolean {
-    const expectedRevision = revision ?? "legacy";
+    const expectedRevision = revision ?? 'legacy';
     try {
       const draftStorage = this.storage.draftStorage;
       if (draftStorage === undefined) {
@@ -1256,10 +1306,12 @@ export class OrderedStateStore {
           return false;
         }
         const tombstone = this.parseConsumedDraftRecord(raw);
-        return tombstone !== undefined
-          && tombstone.sourceKey === key
-          && tombstone.sourceDraftId === draftId
-          && tombstone.sourceRevision === expectedRevision;
+        return (
+          tombstone !== undefined &&
+          tombstone.sourceKey === key &&
+          tombstone.sourceDraftId === draftId &&
+          tombstone.sourceRevision === expectedRevision
+        );
       });
     } catch {
       return false;
@@ -1283,18 +1335,21 @@ export class OrderedStateStore {
         return this.clearDraftPointerIfMatches(draftStorage, expectedReference.key, expectedReference.revision);
       }
       const exactMatch = currentValue === expectedReference.value;
-      const refreshedOwnedMatch = allowRefreshedOwnedReference
-        && expectedReference.draftId === this.draftId
-        && this.activeDraftOwned
-        && this.activeDraftReference?.key === expectedReference.key
-        && currentValue === this.activeDraftReference.value;
+      const refreshedOwnedMatch =
+        allowRefreshedOwnedReference &&
+        expectedReference.draftId === this.draftId &&
+        this.activeDraftOwned &&
+        this.activeDraftReference?.key === expectedReference.key &&
+        currentValue === this.activeDraftReference.value;
       if (exactMatch || refreshedOwnedMatch) {
         draftStorage.removeItem(expectedReference.key);
         if (!this.clearDraftPointerIfMatches(draftStorage, expectedReference.key, expectedReference.revision)) {
           return false;
         }
-        if (this.activeDraftReference?.key === expectedReference.key
-          && (this.activeDraftReference.value === expectedReference.value || refreshedOwnedMatch)) {
+        if (
+          this.activeDraftReference?.key === expectedReference.key &&
+          (this.activeDraftReference.value === expectedReference.value || refreshedOwnedMatch)
+        ) {
           this.activeDraftReference = undefined;
           this.activeDraftOwned = false;
           this.stopDraftHeartbeat();
@@ -1327,7 +1382,7 @@ export class OrderedStateStore {
         if (raw === null) {
           continue;
         }
-      const parsed = this.parseDraftReference({
+        const parsed = this.parseDraftReference({
           key,
           value: raw,
           draftId: this.draftId,
@@ -1351,13 +1406,14 @@ export class OrderedStateStore {
     if (failed.length === 0) {
       return true;
     }
-    const retained = references.find((reference) => {
-      try {
-        return draftStorage.getItem(reference.key) !== null;
-      } catch {
-        return false;
-      }
-    }) ?? failed[0];
+    const retained =
+      references.find((reference) => {
+        try {
+          return draftStorage.getItem(reference.key) !== null;
+        } catch {
+          return false;
+        }
+      }) ?? failed[0];
     this.activeDraftReference = retained;
     this.activeDraftOwned = true;
     this.latestDraftRevision = retained.revision;
@@ -1406,10 +1462,13 @@ export class OrderedStateStore {
     if (draftStorage === undefined) {
       return;
     }
-    const pendingForeignRetirement = this.supersededDraftReference?.draftId === this.draftId
-      ? undefined
-      : this.supersededDraftReference;
-    if (retireExactMatch && pendingForeignRetirement !== undefined && this.consumeSupersededDraft(pendingForeignRetirement)) {
+    const pendingForeignRetirement =
+      this.supersededDraftReference?.draftId === this.draftId ? undefined : this.supersededDraftReference;
+    if (
+      retireExactMatch &&
+      pendingForeignRetirement !== undefined &&
+      this.consumeSupersededDraft(pendingForeignRetirement)
+    ) {
       this.supersededDraftReference = undefined;
       this.activeDraftReference = undefined;
       this.activeDraftOwned = false;
@@ -1433,7 +1492,7 @@ export class OrderedStateStore {
           let draftId = key.slice(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX.length);
           try {
             const parsed = JSON.parse(raw) as { draftId?: unknown };
-            if (typeof parsed.draftId === "string") {
+            if (typeof parsed.draftId === 'string') {
               draftId = parsed.draftId;
             }
           } catch {
@@ -1444,15 +1503,15 @@ export class OrderedStateStore {
           return undefined;
         }
       })
-      .filter((candidate): candidate is PendingNoteDraftRecord & { readonly key: string; readonly value: string } =>
-        candidate !== undefined
-        && candidate.ownerState !== "consumed"
-        && !this.isDraftTombstoned(candidate));
+      .filter(
+        (candidate): candidate is PendingNoteDraftRecord & { readonly key: string; readonly value: string } =>
+          candidate !== undefined && candidate.ownerState !== 'consumed' && !this.isDraftTombstoned(candidate),
+      );
     const sortByNewest = (left: PendingNoteDraftRecord, right: PendingNoteDraftRecord): number =>
       right.updatedAt - left.updatedAt || right.revision.localeCompare(left.revision);
-    const selected = candidates.filter((candidate) => candidate.draftId === this.draftId)
-      .sort(sortByNewest)[0]
-      ?? candidates.sort(sortByNewest)[0];
+    const selected =
+      candidates.filter((candidate) => candidate.draftId === this.draftId).sort(sortByNewest)[0] ??
+      candidates.sort(sortByNewest)[0];
     if (selected === undefined) {
       if (this.recoveredForeignReference !== undefined) {
         this.activeDraftReference = undefined;
@@ -1484,9 +1543,10 @@ export class OrderedStateStore {
         draftId: selected.draftId,
         revision: selected.revision,
       };
-      const retired = selected.draftId === this.draftId
-        ? this.clearOwnedDraftCopies(selectedReference)
-        : this.consumeSupersededDraft(selectedReference);
+      const retired =
+        selected.draftId === this.draftId
+          ? this.clearOwnedDraftCopies(selectedReference)
+          : this.consumeSupersededDraft(selectedReference);
       if (!retired) {
         return;
       }
@@ -1505,7 +1565,9 @@ export class OrderedStateStore {
     this.observedRaw = selected.hasObservedRaw ? selected.observedRaw : undefined;
   }
 
-  private isDraftTombstoned(candidate: PendingNoteDraftRecord & { readonly key: string; readonly value: string }): boolean {
+  private isDraftTombstoned(
+    candidate: PendingNoteDraftRecord & { readonly key: string; readonly value: string },
+  ): boolean {
     const draftStorage = this.storage.draftStorage;
     if (draftStorage === undefined) {
       return false;
@@ -1517,10 +1579,12 @@ export class OrderedStateStore {
           return false;
         }
         const tombstone = this.parseConsumedDraftRecord(raw);
-        return tombstone !== undefined
-          && tombstone.sourceKey === candidate.key
-          && tombstone.sourceDraftId === candidate.draftId
-          && tombstone.sourceRevision === candidate.revision;
+        return (
+          tombstone !== undefined &&
+          tombstone.sourceKey === candidate.key &&
+          tombstone.sourceDraftId === candidate.draftId &&
+          tombstone.sourceRevision === candidate.revision
+        );
       });
     } catch {
       return false;
@@ -1560,7 +1624,7 @@ export class OrderedStateStore {
         }
         // An explicit inactive lifecycle marker is the only safe reclamation
         // authority; active or uncleanly terminated owners remain recoverable.
-        if (source.ownerState !== "inactive") {
+        if (source.ownerState !== 'inactive') {
           continue;
         }
         const confirmedRaw = draftStorage.getItem(tombstone.sourceKey);
@@ -1589,11 +1653,7 @@ export class OrderedStateStore {
     }
   }
 
-  private removeTombstoneIfUnchanged(
-    draftStorage: DraftStorageLike,
-    tombstoneKey: string,
-    expectedRaw: string,
-  ): void {
+  private removeTombstoneIfUnchanged(draftStorage: DraftStorageLike, tombstoneKey: string, expectedRaw: string): void {
     try {
       if (draftStorage.getItem(tombstoneKey) === expectedRaw) {
         draftStorage.removeItem(tombstoneKey);
@@ -1607,15 +1667,15 @@ export class OrderedStateStore {
     try {
       const candidate = JSON.parse(raw) as Partial<ConsumedDraftRecord>;
       if (
-        candidate.schema !== PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_SCHEMA
-        || candidate.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION
-        || typeof candidate.sourceKey !== "string"
-        || !candidate.sourceKey.startsWith(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX)
-        || typeof candidate.sourceDraftId !== "string"
-        || typeof candidate.sourceRevision !== "string"
-        || candidate.sourceRevision.length === 0
-        || typeof candidate.consumedAt !== "number"
-        || !Number.isFinite(candidate.consumedAt)
+        candidate.schema !== PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_SCHEMA ||
+        candidate.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_VERSION ||
+        typeof candidate.sourceKey !== 'string' ||
+        !candidate.sourceKey.startsWith(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX) ||
+        typeof candidate.sourceDraftId !== 'string' ||
+        typeof candidate.sourceRevision !== 'string' ||
+        candidate.sourceRevision.length === 0 ||
+        typeof candidate.consumedAt !== 'number' ||
+        !Number.isFinite(candidate.consumedAt)
       ) {
         return undefined;
       }
@@ -1637,13 +1697,15 @@ export class OrderedStateStore {
     try {
       const keys = draftStorage.listKeys?.(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX);
       if (keys !== undefined) {
-        return keys.filter((key) => !key.startsWith(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX)
-          && key !== getDraftPointerKey());
+        return keys.filter(
+          (key) => !key.startsWith(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX) && key !== getDraftPointerKey(),
+        );
       }
       const pointers = this.readDraftPointers(draftStorage);
       if (pointers.length > 0) {
-        return [...pointers.map((pointer) => pointer.sourceKey), ownKey]
-          .filter((key, index, all) => all.indexOf(key) === index);
+        return [...pointers.map((pointer) => pointer.sourceKey), ownKey].filter(
+          (key, index, all) => all.indexOf(key) === index,
+        );
       }
     } catch {
       return [ownKey];
@@ -1652,21 +1714,23 @@ export class OrderedStateStore {
   }
 
   private parseDraftPointerRecord(candidate: unknown): CurrentDraftPointerRecord | undefined {
-    if (typeof candidate !== "object" || candidate === null) {
+    if (typeof candidate !== 'object' || candidate === null) {
       return undefined;
     }
     const pointer = candidate as Partial<CurrentDraftPointerRecord>;
-    if (pointer.schema !== PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA
-      || (pointer.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_POINTER_LEGACY_VERSION
-        && pointer.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION)
-      || typeof pointer.draftId !== "string"
-      || pointer.draftId.length === 0
-      || typeof pointer.sourceKey !== "string"
-      || !pointer.sourceKey.startsWith(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX)
-      || pointer.sourceKey.startsWith(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX)
-      || pointer.sourceKey === getDraftPointerKey()
-      || typeof pointer.sourceRevision !== "string"
-      || pointer.sourceRevision.length === 0) {
+    if (
+      pointer.schema !== PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA ||
+      (pointer.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_POINTER_LEGACY_VERSION &&
+        pointer.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION) ||
+      typeof pointer.draftId !== 'string' ||
+      pointer.draftId.length === 0 ||
+      typeof pointer.sourceKey !== 'string' ||
+      !pointer.sourceKey.startsWith(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX) ||
+      pointer.sourceKey.startsWith(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX) ||
+      pointer.sourceKey === getDraftPointerKey() ||
+      typeof pointer.sourceRevision !== 'string' ||
+      pointer.sourceRevision.length === 0
+    ) {
       return undefined;
     }
     return {
@@ -1685,13 +1749,15 @@ export class OrderedStateStore {
         return [];
       }
       const candidate = JSON.parse(raw) as unknown;
-      if (typeof candidate !== "object" || candidate === null) {
+      if (typeof candidate !== 'object' || candidate === null) {
         return undefined;
       }
       const registry = candidate as Partial<CurrentDraftPointerRegistry>;
-      if (registry.schema === PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA
-        && registry.schemaVersion === PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION
-        && Array.isArray(registry.pointers)) {
+      if (
+        registry.schema === PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA &&
+        registry.schemaVersion === PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION &&
+        Array.isArray(registry.pointers)
+      ) {
         const pointers = registry.pointers
           .map((pointer) => this.parseDraftPointerRecord(pointer))
           .filter((pointer): pointer is CurrentDraftPointerRecord => pointer !== undefined);
@@ -1711,13 +1777,15 @@ export class OrderedStateStore {
         return [];
       }
       const candidate = JSON.parse(raw) as unknown;
-      if (typeof candidate !== "object" || candidate === null) {
+      if (typeof candidate !== 'object' || candidate === null) {
         return [];
       }
       const registry = candidate as Partial<CurrentDraftPointerRegistry>;
-      if (registry.schema === PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA
-        && registry.schemaVersion === PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION
-        && Array.isArray(registry.pointers)) {
+      if (
+        registry.schema === PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA &&
+        registry.schemaVersion === PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION &&
+        Array.isArray(registry.pointers)
+      ) {
         // Discovery is read-only: keep every individually valid pointer so a
         // malformed sibling cannot hide an otherwise recoverable foreign draft.
         return registry.pointers
@@ -1746,14 +1814,15 @@ export class OrderedStateStore {
           schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
           draftId: this.draftId,
           sourceKey: reference.key,
-          sourceRevision: reference.revision ?? "legacy",
+          sourceRevision: reference.revision ?? 'legacy',
         };
         const pointers = this.readDraftPointersStrict(draftStorage);
         if (pointers === undefined) {
           return false;
         }
-        const nextPointers = pointers
-          .filter((pointer) => !(pointer.draftId === nextPointer.draftId && pointer.sourceKey === nextPointer.sourceKey));
+        const nextPointers = pointers.filter(
+          (pointer) => !(pointer.draftId === nextPointer.draftId && pointer.sourceKey === nextPointer.sourceKey),
+        );
         const serialized = JSON.stringify({
           schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
           schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
@@ -1786,8 +1855,7 @@ export class OrderedStateStore {
           return false;
         }
         const matching = pointers.filter((pointer) => pointer.sourceKey === sourceKey);
-        if (expectedRevision !== undefined
-          && matching.some((pointer) => pointer.sourceRevision !== expectedRevision)) {
+        if (expectedRevision !== undefined && matching.some((pointer) => pointer.sourceRevision !== expectedRevision)) {
           // A newer owner has republished this source key. The stale cleanup
           // marker is safe to retire, but the replacement pointer must remain.
           return true;
@@ -1797,11 +1865,14 @@ export class OrderedStateStore {
           if (remaining.length === 0) {
             draftStorage.removeItem(getDraftPointerKey());
           } else {
-            draftStorage.setItem(getDraftPointerKey(), JSON.stringify({
-              schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
-              schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
-              pointers: remaining,
-            } satisfies CurrentDraftPointerRegistry));
+            draftStorage.setItem(
+              getDraftPointerKey(),
+              JSON.stringify({
+                schema: PRIVATE_STATE_NOTE_DRAFT_POINTER_SCHEMA,
+                schemaVersion: PRIVATE_STATE_NOTE_DRAFT_POINTER_VERSION,
+                pointers: remaining,
+              } satisfies CurrentDraftPointerRegistry),
+            );
           }
         }
         return true;
@@ -1819,30 +1890,33 @@ export class OrderedStateStore {
       if (keys !== undefined) {
         return keys.filter((key) => key.startsWith(PRIVATE_STATE_NOTE_DRAFT_TOMBSTONE_KEY_PREFIX));
       }
-      const pointerKeys = this.readDraftPointers(draftStorage)
-        .flatMap((pointer) => {
-          const keys = [getConsumedDraftKey(pointer.draftId, pointer.sourceKey, pointer.sourceRevision)];
-          // A failed in-place rollback can leave the replacement bytes behind
-          // while the old pointer revision remains. Derive an equivalent marker
-          // from the discoverable source so adoption/discard still suppresses
-          // that replacement revision after a restart.
-          try {
-            const raw = draftStorage.getItem(pointer.sourceKey);
-            if (raw !== null) {
-              const parsed = this.parseDraftReference({
-                key: pointer.sourceKey,
-                value: raw,
-                draftId: pointer.draftId,
-              });
-              if (parsed !== undefined && parsed.draftId === pointer.draftId && parsed.revision !== pointer.sourceRevision) {
-                keys.push(getConsumedDraftKey(pointer.draftId, pointer.sourceKey, parsed.revision));
-              }
+      const pointerKeys = this.readDraftPointers(draftStorage).flatMap((pointer) => {
+        const keys = [getConsumedDraftKey(pointer.draftId, pointer.sourceKey, pointer.sourceRevision)];
+        // A failed in-place rollback can leave the replacement bytes behind
+        // while the old pointer revision remains. Derive an equivalent marker
+        // from the discoverable source so adoption/discard still suppresses
+        // that replacement revision after a restart.
+        try {
+          const raw = draftStorage.getItem(pointer.sourceKey);
+          if (raw !== null) {
+            const parsed = this.parseDraftReference({
+              key: pointer.sourceKey,
+              value: raw,
+              draftId: pointer.draftId,
+            });
+            if (
+              parsed !== undefined &&
+              parsed.draftId === pointer.draftId &&
+              parsed.revision !== pointer.sourceRevision
+            ) {
+              keys.push(getConsumedDraftKey(pointer.draftId, pointer.sourceKey, parsed.revision));
             }
-          } catch {
-            // Keep the pointer-declared marker when the source cannot be read.
           }
-          return keys;
-        });
+        } catch {
+          // Keep the pointer-declared marker when the source cannot be read.
+        }
+        return keys;
+      });
       return [ownKey, ...pointerKeys].filter((key, index, all) => all.indexOf(key) === index);
     } catch {
       return [ownKey];
@@ -1851,16 +1925,15 @@ export class OrderedStateStore {
 
   private tombstoneKeysForDraft(draftStorage: DraftStorageLike, draftId: string): readonly string[] {
     const ownKeys = this.tombstoneKeys(draftStorage);
-    return [
-      ...ownKeys,
-      getConsumedDraftKey(draftId),
-    ].filter((key, index, all) => all.indexOf(key) === index);
+    return [...ownKeys, getConsumedDraftKey(draftId)].filter((key, index, all) => all.indexOf(key) === index);
   }
 
-  private parseDraftReference(reference: DraftReference): (PendingNoteDraftRecord & {
-    readonly key: string;
-    readonly value: string;
-  }) | undefined {
+  private parseDraftReference(reference: DraftReference):
+    | (PendingNoteDraftRecord & {
+        readonly key: string;
+        readonly value: string;
+      })
+    | undefined {
     if (!reference.key.startsWith(PRIVATE_STATE_NOTE_DRAFT_KEY_PREFIX)) {
       return undefined;
     }
@@ -1871,20 +1944,20 @@ export class OrderedStateStore {
       return undefined;
     }
     if (
-      candidate.schema !== PRIVATE_STATE_NOTE_DRAFT_SCHEMA
-      || candidate.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_VERSION
-      || candidate.draftId !== reference.draftId
-      || (candidate.revision !== undefined
-        && (typeof candidate.revision !== "string" || candidate.revision.length === 0))
-      || typeof candidate.hasObservedRaw !== "boolean"
-      || typeof candidate.updatedAt !== "number"
-      || !Number.isFinite(candidate.updatedAt)
-      || (candidate.ownerState !== undefined
-        && candidate.ownerState !== "active"
-        && candidate.ownerState !== "inactive"
-        && candidate.ownerState !== "consumed")
-      || (candidate.hasObservedRaw
-        ? (typeof candidate.observedRaw !== "string" && candidate.observedRaw !== null)
+      candidate.schema !== PRIVATE_STATE_NOTE_DRAFT_SCHEMA ||
+      candidate.schemaVersion !== PRIVATE_STATE_NOTE_DRAFT_VERSION ||
+      candidate.draftId !== reference.draftId ||
+      (candidate.revision !== undefined &&
+        (typeof candidate.revision !== 'string' || candidate.revision.length === 0)) ||
+      typeof candidate.hasObservedRaw !== 'boolean' ||
+      typeof candidate.updatedAt !== 'number' ||
+      !Number.isFinite(candidate.updatedAt) ||
+      (candidate.ownerState !== undefined &&
+        candidate.ownerState !== 'active' &&
+        candidate.ownerState !== 'inactive' &&
+        candidate.ownerState !== 'consumed') ||
+      (candidate.hasObservedRaw
+        ? typeof candidate.observedRaw !== 'string' && candidate.observedRaw !== null
         : candidate.observedRaw !== null)
     ) {
       return undefined;
@@ -1893,7 +1966,7 @@ export class OrderedStateStore {
     if (!validated.ok) {
       return undefined;
     }
-    if (candidate.hasObservedRaw && typeof candidate.observedRaw === "string") {
+    if (candidate.hasObservedRaw && typeof candidate.observedRaw === 'string') {
       if (!readStateAuthority(candidate.observedRaw).ok) {
         return undefined;
       }
@@ -1907,7 +1980,7 @@ export class OrderedStateStore {
       hasObservedRaw: candidate.hasObservedRaw,
       observedRaw: candidate.observedRaw ?? null,
       updatedAt: candidate.updatedAt,
-      ownerState: candidate.ownerState ?? "active",
+      ownerState: candidate.ownerState ?? 'active',
       key: reference.key,
       value: reference.value,
     };
@@ -1915,9 +1988,7 @@ export class OrderedStateStore {
 
   private enqueue(state: PrivateState, operation: SaveOperation): Promise<SaveResult> {
     const run = this.queue.then(() => {
-      const latestGeneration = operation.kind === "immediate"
-        ? this.immediateGeneration
-        : this.noteGeneration;
+      const latestGeneration = operation.kind === 'immediate' ? this.immediateGeneration : this.noteGeneration;
       if (operation.generation < latestGeneration) {
         return success({ state: this.lastReadable(), skipped: true });
       }
@@ -1930,18 +2001,23 @@ export class OrderedStateStore {
               ? operation.supersededDraftReference
               : undefined,
             ...this.pendingOwnedDraftRetirements,
-          ].filter((reference): reference is DraftReference => reference !== undefined)
-            .filter((reference, index, references) => references.findIndex((candidate) => candidate.key === reference.key) === index);
+          ]
+            .filter((reference): reference is DraftReference => reference !== undefined)
+            .filter(
+              (reference, index, references) =>
+                references.findIndex((candidate) => candidate.key === reference.key) === index,
+            );
           const ownedRetired = ownedReferences.every((reference) => this.clearPendingNoteDraft(reference, true));
-          const foreignReference = operation.supersededDraftReference?.draftId === this.draftId
-            ? undefined
-            : operation.supersededDraftReference;
-          const foreignRetired = foreignReference === undefined
-            || this.consumeSupersededDraft(foreignReference);
+          const foreignReference =
+            operation.supersededDraftReference?.draftId === this.draftId
+              ? undefined
+              : operation.supersededDraftReference;
+          const foreignRetired = foreignReference === undefined || this.consumeSupersededDraft(foreignReference);
           if (ownedRetired && foreignRetired) {
             this.pendingOwnedDraftRetirements = [];
-            const retainRecovery = operation.recoveryDraftReference !== undefined
-              && (foreignReference === undefined || foreignReference.key !== operation.recoveryDraftReference.key);
+            const retainRecovery =
+              operation.recoveryDraftReference !== undefined &&
+              (foreignReference === undefined || foreignReference.key !== operation.recoveryDraftReference.key);
             if (retainRecovery) {
               this.retainForeignRecovery(operation.recoveryDraftReference);
               // This source was only retained because the submitted state did
@@ -1982,8 +2058,11 @@ export class OrderedStateStore {
               this.retainForeignRecovery(foreignReference);
               this.supersededDraftReference = foreignReference;
             }
-            if (foreignRetired && operation.recoveryDraftReference !== undefined
-              && (foreignReference === undefined || foreignReference.key !== operation.recoveryDraftReference.key)) {
+            if (
+              foreignRetired &&
+              operation.recoveryDraftReference !== undefined &&
+              (foreignReference === undefined || foreignReference.key !== operation.recoveryDraftReference.key)
+            ) {
               this.retainForeignRecovery(operation.recoveryDraftReference);
               // A retained, non-adopted recovery must not become superseded;
               // a later ordinary save must leave it recoverable.
@@ -1995,7 +2074,10 @@ export class OrderedStateStore {
         return result;
       });
     });
-    this.queue = run.then(() => undefined, () => undefined);
+    this.queue = run.then(
+      () => undefined,
+      () => undefined,
+    );
     return run;
   }
 
@@ -2006,16 +2088,18 @@ export class OrderedStateStore {
       }
       return Promise.resolve(this.commitWithinLock(state));
     }
-    return this.storage.withLock(() => {
-      if (!this.isOperationCurrent(operation)) {
-        return Promise.resolve(success({ state: this.lastReadable(), skipped: true }));
-      }
-      return Promise.resolve(this.commitWithinLock(state));
-    }).catch(() => error("STORAGE_COMMIT_UNCERTAIN"));
+    return this.storage
+      .withLock(() => {
+        if (!this.isOperationCurrent(operation)) {
+          return Promise.resolve(success({ state: this.lastReadable(), skipped: true }));
+        }
+        return Promise.resolve(this.commitWithinLock(state));
+      })
+      .catch(() => error('STORAGE_COMMIT_UNCERTAIN'));
   }
 
   private isOperationCurrent(operation: SaveOperation): boolean {
-    return operation.kind === "immediate"
+    return operation.kind === 'immediate'
       ? operation.generation === this.immediateGeneration
       : operation.generation === this.noteGeneration;
   }
@@ -2023,7 +2107,7 @@ export class OrderedStateStore {
   private commitWithinLock(state: PrivateState): SaveResult {
     const serialized = serializePrivateState(state);
     if (!serialized.ok) {
-      return error("STORAGE_WRITE_FAILED");
+      return error('STORAGE_WRITE_FAILED');
     }
     let previous: string | null;
     let previousRecoveryRaw: string | null;
@@ -2031,28 +2115,29 @@ export class OrderedStateStore {
       previous = this.storage.getItem(PRIVATE_STATE_STORAGE_KEY);
       previousRecoveryRaw = this.storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY);
     } catch {
-      return error("STORAGE_UNAVAILABLE");
+      return error('STORAGE_UNAVAILABLE');
     }
     if (!this.hasObservedRaw) {
       if (previous !== null) {
         const previousAuthority = readStateAuthority(previous);
         if (!previousAuthority.ok) return error(previousAuthority.error);
-        return error("STORAGE_COMMIT_UNCERTAIN");
+        return error('STORAGE_COMMIT_UNCERTAIN');
       }
       this.observedRaw = previous;
       this.hasObservedRaw = true;
     } else if (previous !== this.observedRaw) {
-      return error("STORAGE_COMMIT_UNCERTAIN");
+      return error('STORAGE_COMMIT_UNCERTAIN');
     }
     const previousAuthority = readStateAuthority(previous, previousRecoveryRaw);
     if (!previousAuthority.ok) return error(previousAuthority.error);
     if (previousAuthority.active !== undefined) this.lastKnownGood = cloneState(previousAuthority.active);
     const nextSerialized = serialized;
     if (previousAuthority.enveloped) {
-      const recoverySerialized = previousAuthority.recovery === undefined
-        ? { ok: true as const, value: "null" }
-        : serializePrivateState(previousAuthority.recovery);
-      if (!recoverySerialized.ok) return error("STORAGE_WRITE_FAILED");
+      const recoverySerialized =
+        previousAuthority.recovery === undefined
+          ? { ok: true as const, value: 'null' }
+          : serializePrivateState(previousAuthority.recovery);
+      if (!recoverySerialized.ok) return error('STORAGE_WRITE_FAILED');
       if (previousRecoveryRaw === recoverySerialized.value) {
         // The sidecar already contains the canonical recovery snapshot.
       } else {
@@ -2063,12 +2148,12 @@ export class OrderedStateStore {
           try {
             recoveryAfter = this.storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY);
           } catch {
-            return error("STORAGE_COMMIT_UNCERTAIN");
+            return error('STORAGE_COMMIT_UNCERTAIN');
           }
           if (recoveryAfter === previousRecoveryRaw) {
-            return error(isQuotaError(cause) ? "STORAGE_QUOTA_EXCEEDED" : "STORAGE_WRITE_FAILED");
+            return error(isQuotaError(cause) ? 'STORAGE_QUOTA_EXCEEDED' : 'STORAGE_WRITE_FAILED');
           }
-          return error("STORAGE_COMMIT_UNCERTAIN");
+          return error('STORAGE_COMMIT_UNCERTAIN');
         }
       }
     }
@@ -2081,14 +2166,14 @@ export class OrderedStateStore {
     try {
       readBack = this.storage.getItem(PRIVATE_STATE_STORAGE_KEY);
     } catch {
-      return error("STORAGE_COMMIT_UNCERTAIN");
+      return error('STORAGE_COMMIT_UNCERTAIN');
     }
     if (readBack !== nextSerialized.value) {
-      return error("STORAGE_COMMIT_UNCERTAIN");
+      return error('STORAGE_COMMIT_UNCERTAIN');
     }
     const validated = readStateAuthority(readBack);
     if (!validated.ok || validated.active === undefined) {
-      return error("STORAGE_COMMIT_UNCERTAIN");
+      return error('STORAGE_COMMIT_UNCERTAIN');
     }
     this.observedRaw = readBack;
     this.hasObservedRaw = true;
@@ -2100,11 +2185,11 @@ export class OrderedStateStore {
     try {
       const current = this.storage.getItem(PRIVATE_STATE_STORAGE_KEY);
       if (current === previous) {
-        return error(quota ? "STORAGE_QUOTA_EXCEEDED" : "STORAGE_WRITE_FAILED");
+        return error(quota ? 'STORAGE_QUOTA_EXCEEDED' : 'STORAGE_WRITE_FAILED');
       }
     } catch {
-      return error("STORAGE_COMMIT_UNCERTAIN");
+      return error('STORAGE_COMMIT_UNCERTAIN');
     }
-    return error("STORAGE_COMMIT_UNCERTAIN");
+    return error('STORAGE_COMMIT_UNCERTAIN');
   }
 }

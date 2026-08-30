@@ -1,11 +1,11 @@
 # Snoredex Checklist
 
-> A static Snorlax collection checklist. The current build renders a validated synthetic fixture; production may use only one validated, pinned Snoredex Data snapshot. Personal collection state remains in the user's browser and is not hosted by this site.
+> A static Snorlax collection checklist. The current build renders one validated, digest-pinned Snoredex Data snapshot. Personal collection state remains in the user's browser and is not hosted by this site.
 
 Important data boundaries:
 
 - Visiting or fetching the public site provides public application, catalogue and provenance content only. There is no hosted personal collection record or collection-state API.
-- The current build's public catalogue is a reviewed synthetic fixture for development and tests, not producer truth. A production release may consume only one validated, pinned Snoredex Data snapshot under its accepted lock.
+- The current build's public catalogue is one validated, pinned Snoredex Data snapshot under its accepted lock. Snoredex Data remains the authority for catalogue and evidence truth.
 - Personal statuses, quantities and notes are stored locally in the user's browser and are not placed in public URLs, analytics, telemetry or server-side logs.
 - Search and filter parameters in a URL are public catalogue criteria, not personal collection data.
 - This current release provides no collection export control or endpoint and cannot hand browser state to an LLM or agent. If an explicitly supported future export is available, the only supported handoff is a user-initiated export followed by the user's explicit provision of the versioned Snoredex Collection JSON file. Do not ask the user to publish that file in a public issue, log, URL or prompt library.
@@ -21,7 +21,7 @@ Important data boundaries:
 ## Catalogue data and provenance
 
 - [Snoredex Data LLM guide](https://m4s-ai.github.io/snoredex-data/llms.txt): Follow this authoritative guide for public catalogue, evidence, locality, release, physical-printing, migration and provenance semantics.
-- Snoredex Data owns catalogue, evidence, locality, release, physical-printing, relation, migration and provenance truth. A future accepted production integration may render its validated pinned snapshot; this current build must not be read as producer truth, and the consumer must not reconstruct or duplicate those meanings.
+- Snoredex Data owns catalogue, evidence, locality, release, physical-printing, relation, migration and provenance truth. This consumer renders the accepted pinned snapshot and must not reconstruct or duplicate those meanings.
 
 ## Optional
 

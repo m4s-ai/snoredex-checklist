@@ -4,6 +4,15 @@ import { chromium, firefox, webkit } from '@playwright/test';
 import { startStaticServer } from './static-server.mjs';
 
 const { server, baseUrl } = await startStaticServer();
+const { default: builtSnapshot } = await import('../dist/site/assets/snapshot.js');
+const scopeItem = builtSnapshot.items.find((item) => item.active && item.progressClass === 'current-known');
+const collectionScope = scopeItem
+  ? `/collection/?localization=${encodeURIComponent(scopeItem.localizationId)}`
+  : '/collection/?q=Snorlax';
+const researchItem = builtSnapshot.items.find((item) => item.active && item.progressClass === 'research');
+const researchScope = researchItem
+  ? `/collection/?localization=${encodeURIComponent(researchItem.localizationId)}`
+  : collectionScope;
 const engines = [
   ['chromium', chromium],
   ['firefox', firefox],
@@ -154,7 +163,7 @@ try {
         await Promise.all([page.waitForURL(/\/collection\/$/u), collectionLink.press('Enter')]);
         await page.waitForLoadState('networkidle');
         assert.match(page.url(), /\/collection\/$/u, `${engineName}/${viewportName}: keyboard navigation`);
-        await inspectPage(page, engineName, viewportName, '/collection/?localization=fixture-loc-west-es');
+        await inspectPage(page, engineName, viewportName, collectionScope);
         assert.equal(
           await page.getByRole('heading', { name: 'Current-known progress' }).count(),
           1,
@@ -239,7 +248,7 @@ try {
             .filter(({ right }) => right > window.innerWidth + 1),
         );
         assert.deepEqual(textResizeOverflow, [], `${engineName}/${viewportName}: 200% text reflow`);
-        await page.goto(`${baseUrl}/collection/?localization=fixture-loc-latam-es`, { waitUntil: 'networkidle' });
+        await page.goto(`${baseUrl}${researchScope}&research=true`, { waitUntil: 'networkidle' });
         await page.getByRole('combobox', { name: 'Research' }).selectOption('true');
         await Promise.all([
           page.waitForURL(/research=true/u),

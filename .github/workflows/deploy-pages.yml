@@ -1,0 +1,105 @@
+name: Deploy Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      consumer_revision:
+        description: Full 40-character consumer commit SHA to deploy
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: deploy
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      SNOREDEX_APP_REVISION: ${{ inputs.consumer_revision }}
+    steps:
+      - name: Check out workflow revision
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Validate consumer revision
+        env:
+          CONSUMER_REVISION: ${{ inputs.consumer_revision }}
+        run: |
+          if [[ ! "$CONSUMER_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "consumer_revision must be a full lowercase commit SHA"
+            exit 1
+          fi
+          git cat-file -e "$CONSUMER_REVISION^{commit}"
+      - name: Check out consumer revision
+        env:
+          CONSUMER_REVISION: ${{ inputs.consumer_revision }}
+        run: git checkout --detach "$CONSUMER_REVISION"
+      - name: Validate deployment tooling
+        run: |
+          for path in scripts/check-production-adoption.mjs scripts/create-deployment-manifest.mjs scripts/smoke-pages.mjs; do
+            if [[ ! -f "$path" ]]; then
+              echo "consumer_revision lacks required deployment tooling: $path"
+              exit 1
+            fi
+          done
+          for script in check test:browser test:accessibility deployment:manifest artifact:check smoke:pages; do
+            if ! grep -q "\"$script\"" package.json; then
+              echo "consumer_revision lacks required npm script: $script"
+              exit 1
+            fi
+          done
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Install supported Playwright engines
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Run repository gates
+        run: npm run check
+      - name: Require reviewed migration from the deployed fixture
+        run: node scripts/check-production-adoption.mjs
+      - name: Run browser and accessibility gates
+        run: |
+          npm run test:browser
+          npm run test:accessibility
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Add deployment provenance
+        env:
+          SNOREDEX_PAGE_URL: https://m4s-ai.github.io/snoredex-checklist/
+        run: npm run deployment:manifest
+      - name: Recheck published artifact
+        run: npm run artifact:check
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/site
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+      - name: Smoke-test deployed Pages site
+        env:
+          SNOREDEX_PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          SNOREDEX_EXPECTED_GITHUB_SHA: ${{ inputs.consumer_revision }}
+        run: |
+          export SNOREDEX_EXPECTED_PRODUCER_REVISION="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).producerRevision)")"
+          export SNOREDEX_EXPECTED_CONTRACT_VERSION="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).contractVersion)")"
+          export SNOREDEX_EXPECTED_CATALOGUE_FINGERPRINT="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).catalogueFingerprint)")"
+          export SNOREDEX_EXPECTED_CATALOGUE_BYTE_SHA256="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).catalogueByteSha256)")"
+          export SNOREDEX_EXPECTED_CATALOGUE_BYTE_LENGTH="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(String(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).catalogueByteLength))")"
+          npm run smoke:pages

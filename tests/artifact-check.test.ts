@@ -6,10 +6,61 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
+import { validatePagesDeployment } from '../src/site/deployment.ts';
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const checker = resolve(root, 'scripts/check-artifact.mjs');
 const csp =
   "default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'none'; media-src 'none'; manifest-src 'none'";
+
+test('requires Pages smoke provenance to match the expected workflow tuple', () => {
+  const expected = {
+    appRevision: 'a'.repeat(40),
+    producerRevision: 'b'.repeat(40),
+    contractVersion: '1.0.0',
+    catalogueFingerprint: `sha256:${'c'.repeat(64)}`,
+    catalogueByteSha256: `sha256:${'d'.repeat(64)}`,
+    catalogueByteLength: 123,
+  };
+  const provenance = {
+    schema: 'snoredex-site-provenance',
+    schemaVersion: '1.0.0',
+    appRevision: expected.appRevision,
+    catalogue: {
+      mode: 'pinned-snapshot',
+      sourceCommit: expected.producerRevision,
+      contractVersion: expected.contractVersion,
+      catalogueFingerprint: expected.catalogueFingerprint,
+      catalogueByteSha256: expected.catalogueByteSha256,
+      catalogueByteLength: expected.catalogueByteLength,
+    },
+  };
+  const deployment = {
+    schema: 'snoredex-checklist-deployment',
+    schemaVersion: '1.0.0',
+    pageUrl: 'https://m4s-ai.github.io/snoredex-checklist/',
+    publishedAt: '2026-08-29T21:00:00.000Z',
+    appRevision: expected.appRevision,
+    producerRevision: expected.producerRevision,
+    contractVersion: expected.contractVersion,
+    catalogueFingerprint: expected.catalogueFingerprint,
+    catalogueByteSha256: expected.catalogueByteSha256,
+    catalogueByteLength: expected.catalogueByteLength,
+  };
+  assert.equal(
+    validatePagesDeployment(deployment, provenance, 'https://m4s-ai.github.io/snoredex-checklist/', expected),
+    true,
+  );
+  assert.equal(
+    validatePagesDeployment(
+      { ...deployment, appRevision: 'e'.repeat(40) },
+      provenance,
+      'https://m4s-ai.github.io/snoredex-checklist/',
+      expected,
+    ),
+    false,
+  );
+});
 
 async function writeValidArtifact(
   directory: string,
