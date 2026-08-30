@@ -14,13 +14,24 @@ async function readJson(path) {
 const lock = await readJson('catalogue.lock.json');
 const migrations = await readJson('vendor/snoredex-data/collector_migrations.json');
 const targetFingerprint = lock?.catalogueFingerprint;
+const currentFingerprint = process.env.SNOREDEX_CURRENT_CATALOGUE_FINGERPRINT;
+const hasCurrentFingerprint = currentFingerprint !== undefined && currentFingerprint !== '';
+if (hasCurrentFingerprint && !/^sha256:[0-9a-f]{64}$/u.test(currentFingerprint)) {
+  throw new Error('PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_FINGERPRINT');
+}
 const route = migrations?.catalogueTransitions?.find((candidate) => candidate.toFingerprint === targetFingerprint);
+const currentRoute = hasCurrentFingerprint
+  ? migrations?.catalogueTransitions?.find(
+      (candidate) => candidate.fromFingerprint === currentFingerprint && candidate.toFingerprint === targetFingerprint,
+    )
+  : route;
+const hasRequiredRoute = hasCurrentFingerprint ? currentFingerprint === targetFingerprint || currentRoute : route;
 
 if (
   typeof targetFingerprint !== 'string' ||
-  !route ||
-  !Array.isArray(route.transitions) ||
-  route.transitions.length === 0
+  !hasRequiredRoute ||
+  (currentFingerprint !== targetFingerprint &&
+    (!Array.isArray(hasRequiredRoute.transitions) || hasRequiredRoute.transitions.length === 0))
 ) {
   throw new Error('PRODUCTION_ADOPTION_BLOCKED_MISSING_REVIEWED_TRANSITION');
 }

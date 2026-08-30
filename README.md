@@ -68,7 +68,9 @@ still an explicit `workflow_dispatch` operation and is never triggered by merge.
 durable workflow revision and provide the full lowercase `consumer_revision` commit SHA to deploy;
 the workflow validates and checks out that exact consumer revision before building, and the smoke
 test verifies the same SHA. Deployment also fails closed until the pinned producer migration
-manifest is reviewed, complete and targets the accepted catalogue fingerprint; a synthetic
+manifest is reviewed, complete and targets the accepted catalogue fingerprint. On the first
+deployment (when no production manifest exists), no source fingerprint is required; later
+deployments must provide a reviewed route from the currently published fingerprint. A synthetic
 fixture that was never production is not treated as a migration source, and no consumer-side
 identity mapping is inferred.
 

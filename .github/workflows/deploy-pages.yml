@@ -71,7 +71,27 @@ jobs:
         run: npx playwright install --with-deps chromium firefox webkit
       - name: Run repository gates
         run: npm run check
+      - name: Read current production catalogue fingerprint
+        id: current-production
+        env:
+          SNOREDEX_PAGE_URL: https://m4s-ai.github.io/snoredex-checklist/
+        run: |
+          set -euo pipefail
+          manifest="$(mktemp)"
+          trap 'rm -f "$manifest"' EXIT
+          status="$(curl --silent --show-error --location --output "$manifest" --write-out '%{http_code}' "$SNOREDEX_PAGE_URL/deployment.json")"
+          if [[ "$status" == "404" ]]; then
+            echo "catalogue_fingerprint=" >> "$GITHUB_OUTPUT"
+          elif [[ "$status" == "200" ]]; then
+            fingerprint="$(node --input-type=module -e 'import fs from "node:fs"; const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).catalogueFingerprint; if (!/^sha256:[0-9a-f]{64}$/.test(value ?? "")) process.exit(1); process.stdout.write(value);' "$manifest")"
+            echo "catalogue_fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+          else
+            echo "current production deployment manifest unavailable (HTTP $status)"
+            exit 1
+          fi
       - name: Require reviewed producer migration target
+        env:
+          SNOREDEX_CURRENT_CATALOGUE_FINGERPRINT: ${{ steps.current-production.outputs.catalogue_fingerprint }}
         run: node scripts/check-production-adoption.mjs
       - name: Run browser and accessibility gates
         run: |
