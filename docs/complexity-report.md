@@ -3,9 +3,9 @@
 > Advisory lexical estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (32 production code files).
-Lines: 12,019.
-Function-like nodes: 354.
-McCabe estimate: sum 1,800; mean 5.1; median 2; P90 14; P95 23.
+Lines: 12,024.
+Function-like nodes: 355.
+McCabe estimate: sum 1,802; mean 5.1; median 2; P90 14; P95 23.
 Hotspots: 49 functions exceed 10; 20 exceed 20.
 
 The estimate counts if/for/while/do/catch/case statements, conditional `?` tokens and `&&`/`||`/`??` operators inside function-like bodies. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
@@ -30,5 +30,5 @@ The estimate counts if/for/while/do/catch/case statements, conditional `?` token
 | `scripts/check-artifact.mjs:98`     | `parseHtmlTagAt`                |         24 |
 | `scripts/check-artifact.mjs:1048`   | `isJavaScriptBlockEnd`          |         24 |
 | `scripts/check-artifact.mjs:1241`   | `stripJavaScriptComments`       |         23 |
-| `scripts/complexity-report.mjs:192` | `collectFunctions`              |         23 |
+| `scripts/complexity-report.mjs:193` | `collectFunctions`              |         23 |
 | `scripts/check-artifact.mjs:467`    | `dynamicModuleDependencies`     |         22 |

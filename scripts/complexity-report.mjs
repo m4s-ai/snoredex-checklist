@@ -121,6 +121,7 @@ function isTypeOnlyArrow(tokens, arrowIndex) {
   const open = matchingOpen(tokens, close, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
   if (open === undefined) return false;
   if (tokens[open - 1]?.kind === SyntaxKind.ColonToken) return true;
+  if (tokens[open - 1]?.kind === SyntaxKind.AsKeyword) return true;
   for (let index = open - 1; index >= 0; index -= 1) {
     const kind = tokens[index].kind;
     if ([SyntaxKind.SemicolonToken, SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken].includes(kind)) break;
@@ -386,6 +387,10 @@ if (process.argv.includes('--self-test')) {
         interface Handlers { callback?: (value: string) => boolean; }
         const typed: (value: string) => boolean = (value) => value.length > 0;`,
       expected: [{ name: '<arrow>', complexity: 1 }],
+    },
+    {
+      source: `const invoke = (request) => (request as (name: string) => Promise<string>)(name);`,
+      expected: [{ name: 'invoke', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
