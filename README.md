@@ -63,11 +63,12 @@ npm run check
 ```
 
 `npm run build:site` assembles the static Pages artifact in `dist/site/` from the reviewed,
-digest-pinned vendor snapshot and lock. The generated directory is ignored; Pages publication is
-still an explicit `workflow_dispatch` operation and is never triggered by merge. Dispatch it from a
-durable workflow revision and provide the full lowercase `consumer_revision` commit SHA to deploy;
-the workflow validates and checks out that exact consumer revision before building, and the smoke
-test verifies the same SHA. Deployment also fails closed until the pinned producer migration
+digest-pinned vendor snapshot and lock. A push to `main` (normally the merge commit) automatically
+deploys that exact `github.sha` through the protected Pages workflow. Manual `workflow_dispatch`
+adoption may leave `consumer_revision` blank to use the selected workflow revision; an explicit
+full lowercase SHA is still required for rollback. The workflow validates and checks out the exact
+resolved consumer revision before building, and the smoke test verifies the same SHA. Deployment
+also fails closed until the pinned producer migration
 manifest is reviewed, complete and targets the accepted catalogue fingerprint. On the first
 deployment (when no production manifest exists), no source fingerprint is required; later
 deployments must provide a reviewed route from the currently published fingerprint. A synthetic

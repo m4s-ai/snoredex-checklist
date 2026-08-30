@@ -1,11 +1,15 @@
 name: Deploy Pages
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       consumer_revision:
-        description: Full 40-character consumer commit SHA to deploy
-        required: true
+        description: Optional full consumer commit SHA (adopt defaults to this workflow revision)
+        required: false
+        default: ''
         type: string
       deployment_mode:
         description: Forward catalogue adoption or rollback to a previous known-good revision
@@ -35,15 +39,42 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     env:
-      SNOREDEX_APP_REVISION: ${{ inputs.consumer_revision }}
+      SNOREDEX_APP_REVISION: ${{ github.sha }}
     steps:
       - name: Check out workflow revision
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Resolve deployment inputs
+        id: deployment-inputs
+        env:
+          DEPLOYMENT_MODE_INPUT: ${{ inputs.deployment_mode }}
+          CONSUMER_REVISION_INPUT: ${{ inputs.consumer_revision }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            deployment_mode=adopt
+            consumer_revision="$WORKFLOW_REVISION"
+          else
+            deployment_mode="${DEPLOYMENT_MODE_INPUT:-adopt}"
+            if [[ "$deployment_mode" == "rollback" && -z "$CONSUMER_REVISION_INPUT" ]]; then
+              echo "consumer_revision is required for rollback"
+              exit 1
+            fi
+            consumer_revision="${CONSUMER_REVISION_INPUT:-$WORKFLOW_REVISION}"
+          fi
+          if [[ ! "$consumer_revision" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "consumer_revision must resolve to a full lowercase commit SHA"
+            exit 1
+          fi
+          echo "deployment_mode=$deployment_mode" >> "$GITHUB_OUTPUT"
+          echo "consumer_revision=$consumer_revision" >> "$GITHUB_OUTPUT"
+          echo "SNOREDEX_APP_REVISION=$consumer_revision" >> "$GITHUB_ENV"
       - name: Validate consumer revision
         env:
-          CONSUMER_REVISION: ${{ inputs.consumer_revision }}
+          CONSUMER_REVISION: ${{ steps.deployment-inputs.outputs.consumer_revision }}
         run: |
           if [[ ! "$CONSUMER_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
             echo "consumer_revision must be a full lowercase commit SHA"
@@ -52,7 +83,7 @@ jobs:
           git cat-file -e "$CONSUMER_REVISION^{commit}"
       - name: Check out consumer revision
         env:
-          CONSUMER_REVISION: ${{ inputs.consumer_revision }}
+          CONSUMER_REVISION: ${{ steps.deployment-inputs.outputs.consumer_revision }}
         run: git checkout --detach "$CONSUMER_REVISION"
       - name: Validate deployment tooling
         run: |
@@ -68,11 +99,11 @@ jobs:
               exit 1
             fi
           done
-          if [[ "${{ inputs.deployment_mode }}" == "adopt" ]] && ! grep -q "SNOREDEX_CURRENT_DEPLOYMENT_PATH" scripts/check-production-adoption.mjs; then
+          if [[ "${{ steps.deployment-inputs.outputs.deployment_mode }}" == "adopt" ]] && ! grep -q "SNOREDEX_CURRENT_DEPLOYMENT_PATH" scripts/check-production-adoption.mjs; then
             echo "consumer_revision lacks the published deployment adoption guard"
             exit 1
           fi
-          if [[ "${{ inputs.deployment_mode }}" == "rollback" ]] && ! grep -q "SNOREDEX_CURRENT_DEPLOYMENT_PATH" scripts/create-deployment-manifest.mjs; then
+          if [[ "${{ steps.deployment-inputs.outputs.deployment_mode }}" == "rollback" ]] && ! grep -q "SNOREDEX_CURRENT_DEPLOYMENT_PATH" scripts/create-deployment-manifest.mjs; then
             echo "consumer_revision lacks recoverable deployment provenance"
             exit 1
           fi
@@ -111,9 +142,9 @@ jobs:
             exit 1
           fi
       - name: Validate rollback target
-        if: inputs.deployment_mode == 'rollback'
+        if: steps.deployment-inputs.outputs.deployment_mode == 'rollback'
         env:
-          CONSUMER_REVISION: ${{ inputs.consumer_revision }}
+          CONSUMER_REVISION: ${{ steps.deployment-inputs.outputs.consumer_revision }}
           CURRENT_DEPLOYMENT_PATH: ${{ steps.current-production.outputs.manifest_path }}
         run: |
           set -euo pipefail
@@ -160,9 +191,9 @@ jobs:
           }
           NODE
       - name: Require reviewed producer migration target
-        if: inputs.deployment_mode == 'adopt'
+        if: steps.deployment-inputs.outputs.deployment_mode == 'adopt'
         env:
-          SNOREDEX_DEPLOYMENT_MODE: ${{ inputs.deployment_mode }}
+          SNOREDEX_DEPLOYMENT_MODE: ${{ steps.deployment-inputs.outputs.deployment_mode }}
           SNOREDEX_CURRENT_DEPLOYMENT_PATH: ${{ steps.current-production.outputs.manifest_path }}
         run: node scripts/check-production-adoption.mjs
       - name: Run browser and accessibility gates
@@ -188,7 +219,7 @@ jobs:
       - name: Smoke-test deployed Pages site
         env:
           SNOREDEX_PAGE_URL: ${{ steps.deployment.outputs.page_url }}
-          SNOREDEX_EXPECTED_GITHUB_SHA: ${{ inputs.consumer_revision }}
+          SNOREDEX_EXPECTED_GITHUB_SHA: ${{ steps.deployment-inputs.outputs.consumer_revision }}
         run: |
           export SNOREDEX_EXPECTED_PRODUCER_REVISION="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).producerRevision)")"
           export SNOREDEX_EXPECTED_CONTRACT_VERSION="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).contractVersion)")"
