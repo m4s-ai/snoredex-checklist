@@ -95,9 +95,39 @@ function looksLikeMethodName(tokens, nameIndex) {
     SyntaxKind.GetKeyword,
     SyntaxKind.SetKeyword,
     SyntaxKind.StaticKeyword,
+    SyntaxKind.PublicKeyword,
+    SyntaxKind.PrivateKeyword,
+    SyntaxKind.ProtectedKeyword,
     SyntaxKind.AsyncKeyword,
     SyntaxKind.AsteriskToken,
   ].includes(previous.kind);
+}
+
+function matchingOpen(tokens, close, openKind, closeKind) {
+  let depth = 0;
+  for (let index = close; index >= 0; index -= 1) {
+    if (tokens[index].kind === closeKind) depth += 1;
+    if (tokens[index].kind === openKind) {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return undefined;
+}
+
+function isTypeOnlyArrow(tokens, arrowIndex) {
+  const close = arrowIndex - 1;
+  if (tokens[close]?.kind !== SyntaxKind.CloseParenToken) return false;
+  const open = matchingOpen(tokens, close, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+  if (open === undefined) return false;
+  if (tokens[open - 1]?.kind === SyntaxKind.ColonToken) return true;
+  for (let index = open - 1; index >= 0; index -= 1) {
+    const kind = tokens[index].kind;
+    if ([SyntaxKind.SemicolonToken, SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken].includes(kind)) break;
+    if ([SyntaxKind.ConstKeyword, SyntaxKind.LetKeyword, SyntaxKind.VarKeyword].includes(kind)) return false;
+    if ([SyntaxKind.TypeKeyword, SyntaxKind.InterfaceKeyword, SyntaxKind.DeclareKeyword].includes(kind)) return true;
+  }
+  return false;
 }
 
 function findBodyOpen(tokens, after, braces) {
@@ -200,6 +230,7 @@ function collectFunctions(tokens, source, path) {
       continue;
     }
     if (token.kind === SyntaxKind.EqualsGreaterThanToken) {
+      if (isTypeOnlyArrow(tokens, index)) continue;
       const name = arrowName(tokens, index);
       if (tokens[index + 1]?.kind === SyntaxKind.OpenBraceToken) {
         const bodyOpen = index + 1;
@@ -339,6 +370,22 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function slash(value) { const pattern = /a&&b/u; return value / 2 && value; }',
       expected: [{ name: 'slash', complexity: 2 }],
+    },
+    {
+      source: `class Visibility {
+        public visible(value) { if (value) return true; return false; }
+        private hidden(value) { if (value) return true; return false; }
+      }`,
+      expected: [
+        { name: 'visible', complexity: 2 },
+        { name: 'hidden', complexity: 2 },
+      ],
+    },
+    {
+      source: `type Handler = (value: string) => boolean;
+        interface Handlers { callback?: (value: string) => boolean; }
+        const typed: (value: string) => boolean = (value) => value.length > 0;`,
+      expected: [{ name: '<arrow>', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
