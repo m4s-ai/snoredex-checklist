@@ -170,6 +170,28 @@ function isTypeDeclarationScope(tokens, from) {
   return open !== undefined && hasTypeDeclarationBefore(tokens, open);
 }
 
+function isParameterTypeLiteral(tokens, open) {
+  if (tokens[open - 1]?.kind !== SyntaxKind.ColonToken) return false;
+  let parenDepth = 0;
+  for (let index = open - 2; index >= 0; index -= 1) {
+    const kind = tokens[index].kind;
+    if (kind === SyntaxKind.CloseParenToken) {
+      parenDepth += 1;
+      continue;
+    }
+    if (kind !== SyntaxKind.OpenParenToken) continue;
+    if (parenDepth > 0) {
+      parenDepth -= 1;
+      continue;
+    }
+    const close = matching(tokens, index, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+    return [SyntaxKind.OpenBraceToken, SyntaxKind.EqualsGreaterThanToken, SyntaxKind.ColonToken].includes(
+      tokens[close + 1]?.kind,
+    );
+  }
+  return false;
+}
+
 function isObjectLiteralOpen(tokens, open) {
   const previousKind = tokens[open - 1]?.kind;
   if (
@@ -183,6 +205,7 @@ function isObjectLiteralOpen(tokens, open) {
   )
     return true;
   if (previousKind !== SyntaxKind.ColonToken) return false;
+  if (isParameterTypeLiteral(tokens, open)) return false;
   const beforeProperty = tokens[open - 3]?.kind;
   if (beforeProperty === SyntaxKind.CommaToken) {
     const close = matching(tokens, open, SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken);
@@ -365,9 +388,27 @@ function isCatchClause(tokens, index) {
 }
 
 function isDoWhileContinuation(tokens, index) {
-  if (tokens[index - 1]?.kind !== SyntaxKind.CloseBraceToken) return false;
-  const open = matchingOpen(tokens, index - 1, SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken);
-  return open !== undefined && tokens[open - 1]?.kind === SyntaxKind.DoKeyword;
+  const previousKind = tokens[index - 1]?.kind;
+  if (previousKind === SyntaxKind.CloseBraceToken) {
+    const open = matchingOpen(tokens, index - 1, SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken);
+    if (open !== undefined && tokens[open - 1]?.kind === SyntaxKind.DoKeyword) return true;
+    return false;
+  }
+  if (previousKind !== SyntaxKind.SemicolonToken) return false;
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  for (let cursor = index - 2; cursor >= 0; cursor -= 1) {
+    const kind = tokens[cursor].kind;
+    if (kind === SyntaxKind.CloseParenToken) parenDepth += 1;
+    else if (kind === SyntaxKind.OpenParenToken) parenDepth = Math.max(0, parenDepth - 1);
+    else if (kind === SyntaxKind.CloseBracketToken) bracketDepth += 1;
+    else if (kind === SyntaxKind.OpenBracketToken) bracketDepth = Math.max(0, bracketDepth - 1);
+    else if (parenDepth === 0 && bracketDepth === 0) {
+      if (kind === SyntaxKind.DoKeyword) return true;
+      if ([SyntaxKind.WhileKeyword, SyntaxKind.SemicolonToken, SyntaxKind.CloseBraceToken].includes(kind)) return false;
+    }
+  }
+  return false;
 }
 
 function collectFunctions(tokens, source, path) {
@@ -674,7 +715,7 @@ if (process.argv.includes('--self-test')) {
     },
     {
       source: `class ParameterTypes {
-        constructor(storage: unknown, options: { readonly now?: () => string }) {}
+        constructor(first: unknown, options: { readonly now?: () => string }, last: unknown) {}
       }`,
       expected: [{ name: 'constructor', complexity: 1 }],
     },
@@ -686,6 +727,13 @@ if (process.argv.includes('--self-test')) {
         return value;
       }`,
       expected: [{ name: 'doWhile', complexity: 2 }],
+    },
+    {
+      source: `function doWhileUnbraced(value) {
+        do value -= 1; while (value > 0);
+        return value;
+      }`,
+      expected: [{ name: 'doWhileUnbraced', complexity: 2 }],
     },
   ];
   for (const sample of samples) {
