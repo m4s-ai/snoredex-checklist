@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, normalize, resolve } from 'node:path';
 
-const root = resolve(process.cwd(), 'dist/site');
+const root = resolve(process.env.SNOREDEX_SITE_ROOT ?? 'dist/site');
 const mimeTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
   ['.html', 'text/html; charset=utf-8'],

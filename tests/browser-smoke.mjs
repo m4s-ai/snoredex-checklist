@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
 import { chromium, firefox, webkit } from '@playwright/test';
 
-const root = resolve(process.cwd(), 'dist/site');
+const root = resolve(process.env.SNOREDEX_SITE_ROOT ?? 'dist/site');
 const mimeTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
   ['.html', 'text/html; charset=utf-8'],
@@ -140,6 +140,112 @@ try {
       assert.match(page.url(), /\/collection\/$/u, `${name}: collection URL`);
       assert.equal(await page.title(), 'Collection · Snoredex Checklist', `${name}: collection title`);
       await assertSecurityBoundary(page, `${name}/collection`);
+      assert.equal(
+        await page.getByRole('heading', { name: 'Collection data and recovery' }).count(),
+        1,
+        `${name}: recovery heading`,
+      );
+      assert.equal(
+        await page.getByRole('button', { name: 'Choose backup to preview' }).count(),
+        1,
+        `${name}: import entry point`,
+      );
+      assert.equal(
+        await page.getByRole('button', { name: 'Clear collection' }).count(),
+        1,
+        `${name}: clear entry point`,
+      );
+      const synthetic = await page.evaluate(async () => {
+        const module = await import('/assets/snapshot.js');
+        const catalogue = module.default;
+        const item = catalogue.items.find(
+          (candidate) => candidate.active && candidate.progressClass === 'current-known',
+        );
+        if (!item) return null;
+        return {
+          fingerprint: catalogue.meta.catalogueFingerprint,
+          itemId: item.itemId,
+        };
+      });
+      assert.notEqual(synthetic, null, `${name}: synthetic trackable item`);
+      if (synthetic !== null) {
+        await page.evaluate(({ fingerprint, itemId }) => {
+          localStorage.setItem(
+            'snoredex-checklist.private-state',
+            JSON.stringify({
+              schema: 'snoredex-collection-state',
+              schemaVersion: '1.0.0',
+              datasetId: 'snoredex-data/snorlax-current-known',
+              catalogueFingerprint: fingerprint,
+              items: [
+                { itemId, status: 'have', quantityOwned: 1, quantityOrdered: 0, note: 'synthetic browser smoke' },
+              ],
+            }),
+          );
+        }, synthetic);
+        await page.reload({ waitUntil: 'networkidle' });
+        const exportButton = page.getByRole('button', { name: 'Export collection' });
+        assert.equal(await exportButton.isEnabled(), true, `${name}: export enabled for synthetic state`);
+        const downloadPromise = page.waitForEvent('download');
+        await exportButton.click();
+        const download = await downloadPromise;
+        const stream = await download.createReadStream();
+        assert.ok(stream, `${name}: backup download stream`);
+        const chunks = [];
+        for await (const chunk of stream) chunks.push(chunk);
+        const backup = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        assert.equal(backup.catalogueFingerprint, synthetic.fingerprint, `${name}: exported fingerprint`);
+        const beforeImport = await page.evaluate(() => localStorage.getItem('snoredex-checklist.private-state'));
+        await page.locator('input[type="file"]').setInputFiles({
+          name: 'synthetic.snoredex-private.json',
+          mimeType: 'application/json',
+          buffer: Buffer.from(JSON.stringify(backup), 'utf8'),
+        });
+        await page.getByRole('heading', { name: /^(?:Import|Replace) preview$/u }).waitFor();
+        assert.equal(await page.getByText('Records in backup').count(), 1, `${name}: import preview aggregates`);
+        assert.equal(
+          await page.evaluate(() => localStorage.getItem('snoredex-checklist.private-state')),
+          beforeImport,
+          `${name}: preview is mutation-free`,
+        );
+        await page.locator('input[type="file"]').setInputFiles({
+          name: 'invalid.json',
+          mimeType: 'application/json',
+          buffer: Buffer.from('{"schema":', 'utf8'),
+        });
+        await page
+          .locator('[data-recovery-status]')
+          .filter({ hasText: 'The selected file is not valid JSON.' })
+          .waitFor();
+        assert.equal(
+          await page.getByRole('heading', { name: /^(?:Import|Replace) preview$/u }).count(),
+          0,
+          `${name}: invalid import clears preview`,
+        );
+        await page.locator('input[type="file"]').setInputFiles({
+          name: 'oversized.json',
+          mimeType: 'application/json',
+          buffer: Buffer.alloc(16 * 1024 * 1024 + 1),
+        });
+        await page
+          .locator('[data-recovery-status]')
+          .filter({ hasText: 'The selected file is larger than the 16 MiB safety limit.' })
+          .waitFor();
+        assert.equal(
+          await page.getByRole('heading', { name: /^(?:Import|Replace) preview$/u }).count(),
+          0,
+          `${name}: oversized import clears preview`,
+        );
+        await page.getByRole('button', { name: 'Clear collection' }).click();
+        const confirmation = page.getByRole('dialog', { name: 'Clear collection?' });
+        await confirmation.waitFor();
+        assert.equal(
+          await confirmation.getByRole('heading', { name: 'Clear collection?' }).count(),
+          1,
+          `${name}: confirmation name`,
+        );
+        await confirmation.getByRole('button', { name: 'Cancel' }).click();
+      }
       assert.equal(unexpectedRequests.length, 0, `${name}: unexpected network requests`);
       assert.deepEqual(failures, [], `${name}: browser failures`);
       await assertCspBlocksInlineEvaluation(browser, name);

@@ -532,6 +532,38 @@ textarea {
   flex-wrap: wrap;
   gap: 0.55rem;
 }
+.recovery-tools {
+  display: grid;
+  gap: 0.75rem;
+}
+.recovery-tools > p {
+  max-width: 70ch;
+}
+.recovery-preview {
+  border: 1px solid var(--control);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background: var(--surface);
+}
+.recovery-preview dl {
+  display: grid;
+  grid-template-columns: minmax(10rem, max-content) minmax(0, 1fr);
+  gap: 0.35rem 1rem;
+  margin: 0;
+}
+.recovery-preview dt {
+  font-weight: 700;
+}
+.recovery-preview dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.recovery-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
 .item-details {
   margin-top: 0.65rem;
 }

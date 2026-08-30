@@ -11,6 +11,7 @@ import { imageAssetUrl, resolveImageAsset } from './assets.js';
 import {
   createCollectionStateController,
   type CollectionEditResult,
+  type CollectionReconciliationOptions,
   type CollectionStateController,
 } from './collection-state.js';
 import { matchesResearch } from './filter.js';
@@ -28,6 +29,77 @@ import { parseQuery, serializeQuery, type QueryCriteria } from './query.js';
 import { buildBrowseHierarchy, buildProgressViewModel, buildResultViewModel } from './results.js';
 import { knownSourceItemIdsByFingerprint, migrationManifest } from './migrations.js';
 import snapshot, { provenance } from './snapshot.js';
+
+interface BackupExport {
+  readonly filename: string;
+  readonly bytes: Uint8Array;
+}
+
+interface BackupPreview {
+  readonly mode: 'create' | 'replace';
+  readonly sourceFingerprint: string;
+  readonly targetFingerprint: string;
+  readonly schemaVersion: string;
+  readonly explicitRecordCount: number;
+  readonly statusCounts: Readonly<Record<'need' | 'ordered' | 'have' | 'skip', number>>;
+  readonly quantityOwned: number;
+  readonly quantityOrdered: number;
+  readonly noteCount: number;
+  readonly recordsToReplace: number;
+  readonly reconciliation?: Readonly<{
+    readonly oldExplicitRecords: number;
+    readonly retained: number;
+    readonly migrated: number;
+    readonly retiredOrphans: number;
+    readonly conflicts: number;
+    readonly unresolved: number;
+    readonly newCurrentKnown: number;
+    readonly newResearch: number;
+    readonly accountedOldRecords: number;
+    readonly conservationSatisfied: boolean;
+  }>;
+}
+
+interface BackupPlan {
+  readonly preview: BackupPreview;
+  readonly candidate: unknown;
+}
+
+interface BackupReadState {
+  readonly active: { readonly items: readonly unknown[] } | undefined;
+  readonly recovery: { readonly items: readonly unknown[] } | undefined;
+}
+
+type BackupResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: string };
+
+interface BackupLifecycle {
+  read(): BackupResult<BackupReadState>;
+  exportActive(): BackupResult<BackupExport>;
+  exportRecovery(): BackupResult<BackupExport>;
+  prepareImport(
+    bytes: Uint8Array,
+    targetFingerprint: string,
+    knownItemIds: ReadonlySet<string>,
+  ): BackupResult<BackupPlan>;
+  commitImport(plan: BackupPlan, confirmed: boolean): Promise<BackupResult<unknown>>;
+  clear(confirmed: boolean): Promise<BackupResult<unknown>>;
+  restore(
+    confirmed: boolean,
+    targetFingerprint: string,
+    knownItemIds: ReadonlySet<string>,
+  ): Promise<BackupResult<unknown>>;
+}
+
+interface BackupModule {
+  readonly PrivateStateLifecycle: new (
+    storage: unknown,
+    options: { readonly appRevision: string; readonly reconciliation?: unknown },
+  ) => BackupLifecycle;
+}
+
+interface BrowserStorageModule {
+  readonly getBrowserStorage: () => BackupResult<unknown>;
+}
 
 const $ = <T extends Element>(selector: string): T => {
   const element = document.querySelector<T>(selector);
@@ -853,6 +925,337 @@ function announceRecoveryResult(container: HTMLElement, announcement: string): v
   target.focus();
 }
 
+const RECOVERY_ERROR_MESSAGES: Readonly<Record<string, string>> = {
+  EXPORT_FAILED: 'No readable collection data is available to export.',
+  IMPORT_FILE_TOO_LARGE: 'The selected file is larger than the 16 MiB safety limit.',
+  IMPORT_FILE_READ_FAILED: 'The selected file could not be read.',
+  IMPORT_INVALID_ENCODING: 'The selected file is not valid UTF-8 JSON.',
+  IMPORT_INVALID_JSON: 'The selected file is not valid JSON.',
+  IMPORT_UNSUPPORTED_STATE_SCHEMA: 'This backup uses an unsupported state format.',
+  IMPORT_UNSUPPORTED_STATE_VERSION: 'This backup uses an unsupported state version.',
+  IMPORT_UNKNOWN_FIELD: 'This backup contains unsupported fields.',
+  IMPORT_INVALID_STATE_DATA: 'The backup contains invalid collection data.',
+  IMPORT_DUPLICATE_ITEM_ID: 'The backup contains duplicate collection records.',
+  STATE_FINGERPRINT_UNSUPPORTED: 'This backup cannot be reconciled with the current catalogue.',
+  STATE_RECONCILIATION_BLOCKED: 'Reconciliation is blocked; your current collection was not changed.',
+  STATE_PORTABLE_LIMIT_EXCEEDED: 'The backup exceeds the safety limit.',
+  STATE_CHANGED_DURING_OPERATION: 'The collection changed while this operation was prepared. Please retry.',
+  STORAGE_UNAVAILABLE: 'Browser storage is unavailable; the current collection was not changed.',
+  STORAGE_QUOTA_EXCEEDED: 'Browser storage is full; the current collection was not changed.',
+  STORAGE_WRITE_FAILED: 'The collection could not be saved; the current collection was not changed.',
+  STORAGE_COMMIT_UNCERTAIN: 'The save result is uncertain. Reload to recover the last readable state.',
+  LOCAL_STATE_UNSUPPORTED: 'The saved collection format is unsupported.',
+  LOCAL_STATE_UNREADABLE: 'The saved collection could not be read. Import a valid backup to recover it.',
+};
+
+const MAX_RECOVERY_FILE_BYTES = 16 * 1024 * 1024;
+
+function recoveryErrorMessage(error: string): string {
+  return RECOVERY_ERROR_MESSAGES[error] ?? 'The collection operation failed; the current state was not changed.';
+}
+
+function appendRecoveryField(list: HTMLElement, label: string, value: unknown): void {
+  list.append(text('dt', label), text('dd', value));
+}
+
+function confirmationDialog(title: string, message: string): Promise<boolean> {
+  if (typeof document === 'undefined') return Promise.resolve(false);
+  const dialog = document.createElement('dialog');
+  dialog.className = 'recovery-confirmation';
+  const heading = text('h3', title);
+  heading.id = 'recovery-confirmation-title';
+  dialog.setAttribute('aria-labelledby', heading.id);
+  const body = text('p', message);
+  const actions = text('div', undefined, 'recovery-preview-actions');
+  const cancel = text('button', 'Cancel') as HTMLButtonElement;
+  cancel.type = 'button';
+  const confirm = text('button', 'Confirm') as HTMLButtonElement;
+  confirm.type = 'button';
+  actions.append(cancel, confirm);
+  dialog.append(heading, body, actions);
+  document.body.append(dialog);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: boolean): void => {
+      if (settled) return;
+      settled = true;
+      if (dialog.open && typeof dialog.close === 'function') dialog.close();
+      dialog.remove();
+      resolve(value);
+    };
+    cancel.addEventListener('click', () => finish(false));
+    confirm.addEventListener('click', () => finish(true));
+    dialog.addEventListener('cancel', () => finish(false));
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', '');
+    confirm.focus();
+  });
+}
+
+function downloadBackup(backup: BackupExport): boolean {
+  if (typeof Blob === 'undefined' || typeof URL?.createObjectURL !== 'function') return false;
+  const bytes = backup.bytes.buffer.slice(
+    backup.bytes.byteOffset,
+    backup.bytes.byteOffset + backup.bytes.byteLength,
+  ) as ArrayBuffer;
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/json' }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = backup.filename;
+  anchor.hidden = true;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  globalThis.setTimeout(() => URL.revokeObjectURL(url), 0);
+  return true;
+}
+
+function renderImportPreview(
+  container: HTMLElement,
+  plan: BackupPlan,
+  onConfirm: () => void,
+  onCancel: () => void,
+): void {
+  const preview = text('div', undefined, 'recovery-preview');
+  const heading = text('h3', plan.preview.mode === 'replace' ? 'Replace preview' : 'Import preview');
+  const details = text('dl');
+  appendRecoveryField(details, 'Schema version', plan.preview.schemaVersion);
+  appendRecoveryField(details, 'Source fingerprint', plan.preview.sourceFingerprint);
+  appendRecoveryField(details, 'Target fingerprint', plan.preview.targetFingerprint);
+  appendRecoveryField(details, 'Records in backup', plan.preview.explicitRecordCount);
+  appendRecoveryField(details, 'Records replaced', plan.preview.recordsToReplace);
+  appendRecoveryField(
+    details,
+    'Need / Ordered / Have / Skip',
+    `${plan.preview.statusCounts.need} / ${plan.preview.statusCounts.ordered} / ${plan.preview.statusCounts.have} / ${plan.preview.statusCounts.skip}`,
+  );
+  appendRecoveryField(
+    details,
+    'Owned / Ordered quantity',
+    `${plan.preview.quantityOwned} / ${plan.preview.quantityOrdered}`,
+  );
+  appendRecoveryField(details, 'Records with notes', plan.preview.noteCount);
+  const reconciliation = plan.preview.reconciliation;
+  if (reconciliation !== undefined) {
+    appendRecoveryField(
+      details,
+      'Reconciliation',
+      reconciliation.conservationSatisfied ? 'Conservation satisfied' : 'Blocked',
+    );
+    appendRecoveryField(details, 'Retained / migrated', `${reconciliation.retained} / ${reconciliation.migrated}`);
+    appendRecoveryField(
+      details,
+      'New current-known / research',
+      `${reconciliation.newCurrentKnown} / ${reconciliation.newResearch}`,
+    );
+    appendRecoveryField(
+      details,
+      'Retired orphans / conflicts',
+      `${reconciliation.retiredOrphans} / ${reconciliation.conflicts}`,
+    );
+    appendRecoveryField(details, 'Unresolved', reconciliation.unresolved);
+  }
+  const warning = text(
+    'p',
+    'This is a non-mutating preview. Applying it replaces the current collection after an explicit confirmation and creates a recovery backup first.',
+  );
+  const actions = text('div', undefined, 'recovery-preview-actions');
+  const apply = text(
+    'button',
+    plan.preview.mode === 'replace' ? 'Replace collection' : 'Import collection',
+  ) as HTMLButtonElement;
+  apply.type = 'button';
+  const cancel = text('button', 'Cancel preview') as HTMLButtonElement;
+  cancel.type = 'button';
+  apply.addEventListener('click', onConfirm);
+  cancel.addEventListener('click', onCancel);
+  actions.append(apply, cancel);
+  preview.append(heading, warning, details, actions);
+  container.replaceChildren(preview);
+  container.hidden = false;
+}
+
+async function createBackupLifecycle(
+  reconciliation: CollectionReconciliationOptions,
+): Promise<BackupLifecycle | undefined> {
+  try {
+    const [storageModule, backupModule] = await Promise.all([
+      // @ts-expect-error The runtime-relative module is emitted by the separate state build.
+      import('./state/storage.js') as Promise<BrowserStorageModule>,
+      // @ts-expect-error The runtime-relative module is emitted by the separate state build.
+      import('./state/backup.js') as Promise<BackupModule>,
+    ]);
+    const storage = storageModule.getBrowserStorage();
+    if (!storage.ok) return undefined;
+    return new backupModule.PrivateStateLifecycle(storage.value, {
+      appRevision: provenance.appRevision ?? provenance.sourceCommit,
+      reconciliation,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function renderRecoveryTools(
+  container: HTMLElement,
+  lifecycle: BackupLifecycle | undefined,
+  targetFingerprint: string,
+  knownItemIds: ReadonlySet<string>,
+): void {
+  const actionsContainer = container.querySelector<HTMLElement>('[data-recovery-actions]');
+  const previewContainer = container.querySelector<HTMLElement>('[data-recovery-preview]');
+  const status = container.querySelector<HTMLElement>('[data-recovery-status]');
+  if (!actionsContainer || !previewContainer || !status) return;
+  actionsContainer.replaceChildren();
+  previewContainer.replaceChildren();
+  previewContainer.hidden = true;
+  const setStatus = (value: string): void => {
+    status.textContent = value;
+  };
+  if (lifecycle === undefined) {
+    const unavailable = text('p', 'Recovery controls are unavailable because browser storage could not be opened.');
+    actionsContainer.append(unavailable);
+    setStatus('');
+    return;
+  }
+  const exportButton = text('button', 'Export collection') as HTMLButtonElement;
+  const exportRecoveryButton = text('button', 'Export recovery snapshot') as HTMLButtonElement;
+  const importButton = text('button', 'Choose backup to preview') as HTMLButtonElement;
+  const clearButton = text('button', 'Clear collection') as HTMLButtonElement;
+  const restoreButton = text('button', 'Restore previous snapshot') as HTMLButtonElement;
+  for (const button of [exportButton, exportRecoveryButton, importButton, clearButton, restoreButton])
+    button.type = 'button';
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = ['.snoredex-', 'private.json'].join('') + ',application/json';
+  fileInput.hidden = true;
+  importButton.addEventListener('click', () => fileInput.click());
+  let plan: BackupPlan | undefined;
+  let selectionGeneration = 0;
+  const clearPreview = (): void => {
+    plan = undefined;
+    previewContainer.replaceChildren();
+    previewContainer.hidden = true;
+  };
+  const refresh = (): void => {
+    const current = lifecycle.read();
+    if (!current.ok) {
+      for (const button of [exportButton, exportRecoveryButton, clearButton, restoreButton]) button.disabled = true;
+      setStatus(recoveryErrorMessage(current.error));
+      return;
+    }
+    const activeCount = current.value.active?.items.length ?? 0;
+    exportButton.disabled = activeCount === 0;
+    clearButton.disabled = activeCount === 0;
+    exportRecoveryButton.disabled = current.value.recovery === undefined;
+    restoreButton.disabled = current.value.recovery === undefined;
+  };
+  exportButton.addEventListener('click', () => {
+    const result = lifecycle.exportActive();
+    if (!result.ok) return setStatus(recoveryErrorMessage(result.error));
+    setStatus(
+      downloadBackup(result.value)
+        ? 'Private collection backup downloaded.'
+        : 'Backup download is unavailable in this browser.',
+    );
+  });
+  exportRecoveryButton.addEventListener('click', () => {
+    const result = lifecycle.exportRecovery();
+    if (!result.ok) return setStatus(recoveryErrorMessage(result.error));
+    setStatus(
+      downloadBackup(result.value)
+        ? 'Recovery snapshot downloaded.'
+        : 'Backup download is unavailable in this browser.',
+    );
+  });
+  clearButton.addEventListener('click', () => {
+    void confirmationDialog(
+      'Clear collection?',
+      'A private backup is retained in the recovery slot before the active collection is cleared.',
+    ).then((confirmed) => {
+      if (!confirmed) return;
+      setStatus('Clearing collection…');
+      void lifecycle.clear(true).then((result) => {
+        if (!result.ok) return setStatus(recoveryErrorMessage(result.error));
+        setStatus('Collection cleared. Reloading…');
+        globalThis.location?.reload();
+      });
+    });
+  });
+  restoreButton.addEventListener('click', () => {
+    void confirmationDialog(
+      'Restore previous snapshot?',
+      'The current collection will be retained as the recovery snapshot before restore.',
+    ).then((confirmed) => {
+      if (!confirmed) return;
+      setStatus('Restoring collection…');
+      void lifecycle.restore(true, targetFingerprint, knownItemIds).then((result) => {
+        if (!result.ok) return setStatus(recoveryErrorMessage(result.error));
+        setStatus('Previous snapshot restored. Reloading…');
+        globalThis.location?.reload();
+      });
+    });
+  });
+  fileInput.addEventListener('change', () => {
+    const generation = ++selectionGeneration;
+    const file = fileInput.files?.[0];
+    fileInput.value = '';
+    clearPreview();
+    if (!file) return;
+    setStatus('Validating backup…');
+    if (file.size > MAX_RECOVERY_FILE_BYTES) {
+      setStatus(recoveryErrorMessage('IMPORT_FILE_TOO_LARGE'));
+      return;
+    }
+    void file
+      .arrayBuffer()
+      .then((buffer) => {
+        if (generation !== selectionGeneration) return;
+        const result = lifecycle.prepareImport(new Uint8Array(buffer), targetFingerprint, knownItemIds);
+        if (!result.ok) {
+          clearPreview();
+          setStatus(recoveryErrorMessage(result.error));
+          return;
+        }
+        plan = result.value;
+        renderImportPreview(
+          previewContainer,
+          plan,
+          () => {
+            if (plan === undefined) return;
+            void confirmationDialog(
+              plan.preview.mode === 'replace' ? 'Replace collection?' : 'Import collection?',
+              'The preview is valid. Confirm to create a recovery backup and atomically apply this collection.',
+            ).then((confirmed) => {
+              if (!confirmed || plan === undefined) return;
+              setStatus('Applying collection…');
+              void lifecycle.commitImport(plan, true).then((commit) => {
+                if (!commit.ok) {
+                  setStatus(recoveryErrorMessage(commit.error));
+                  return;
+                }
+                setStatus('Collection imported. Reloading…');
+                globalThis.location?.reload();
+              });
+            });
+          },
+          () => {
+            clearPreview();
+            setStatus('Import preview cancelled.');
+          },
+        );
+        setStatus('Review the backup preview before applying it.');
+      })
+      .catch(() => {
+        if (generation !== selectionGeneration) return;
+        clearPreview();
+        setStatus(recoveryErrorMessage('IMPORT_FILE_READ_FAILED'));
+      });
+  });
+  actionsContainer.append(exportButton, exportRecoveryButton, importButton, clearButton, restoreButton, fileInput);
+  refresh();
+}
+
 function renderItemRow(
   item: SnapshotItem,
   catalogue: CatalogueSnapshot,
@@ -1176,18 +1579,24 @@ async function renderCollection(catalogue: CatalogueSnapshot): Promise<void> {
       .map((item) => [item.itemId, item.progressClass === 'current-known' ? 'current-known' : 'research'] as const),
   );
   const state = await readPrivateState(catalogue.meta.catalogueFingerprint, knownTrackableItemIds);
+  const reconciliation = {
+    migrations: migrationManifest.catalogueTransitions,
+    knownSourceItemIdsByFingerprint,
+    targetItemClasses,
+  };
   const stateController = await createCollectionStateController(
     catalogue.meta.catalogueFingerprint,
     knownTrackableItemIds,
-    {
-      migrations: migrationManifest.catalogueTransitions,
-      knownSourceItemIdsByFingerprint,
-      targetItemClasses,
-    },
+    reconciliation,
   );
   const renderState = stateController?.state.readable === true ? stateController.state : state;
   renderQueryForm($('[data-query]'), parsed.criteria, catalogue);
   renderResults($('[data-view]'), parsed.criteria, catalogue, renderState, stateController);
+  const recoveryTools = document.querySelector<HTMLElement>('[data-recovery-tools]');
+  if (recoveryTools) {
+    const lifecycle = await createBackupLifecycle(reconciliation);
+    renderRecoveryTools(recoveryTools, lifecycle, catalogue.meta.catalogueFingerprint, knownTrackableItemIds);
+  }
 }
 
 enableThemeControl();
