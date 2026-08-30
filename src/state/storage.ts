@@ -589,10 +589,10 @@ export class OrderedStateStore {
       this.supersededDraftReference = foreignReference;
     }
     this.recoveredDraftPresented = false;
-    this.unsavedDraftRequiresReview = false;
     if (ownedRetired && foreignRetired) {
       this.unsavedDraft = undefined;
       this.supersededDraftReference = undefined;
+      this.unsavedDraftRequiresReview = false;
       this.stopDraftHeartbeat();
     } else if (!ownedRetired) {
       this.startDraftHeartbeat();

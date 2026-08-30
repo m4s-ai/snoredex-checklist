@@ -774,6 +774,7 @@ function renderRecoveryPanel(
 ): HTMLElement | undefined {
   const recovery = controller.recovery;
   if (recovery === undefined) return undefined;
+  const adoptable = recovery.adoptable;
   const panel = text('section', undefined, 'state-panel recovery-panel');
   const feedback = text('p', undefined, 'state-feedback');
   feedback.setAttribute('role', 'status');
@@ -781,6 +782,7 @@ function renderRecoveryPanel(
   const actions = text('div', undefined, 'recovery-actions');
   const adopt = text('button', 'Adopt recovered changes') as HTMLButtonElement;
   adopt.type = 'button';
+  adopt.disabled = !adoptable;
   const discard = text('button', 'Discard recovered changes') as HTMLButtonElement;
   discard.type = 'button';
   const reload = text('button', 'Reload to reconcile') as HTMLButtonElement;
@@ -806,7 +808,7 @@ function renderRecoveryPanel(
         } else {
           feedback.textContent = 'Recovery action failed. The recovered draft is still available; retry when ready.';
         }
-        adopt.disabled = false;
+        adopt.disabled = !adoptable;
         discard.disabled = false;
       }
     });
@@ -824,7 +826,9 @@ function renderRecoveryPanel(
     text('h2', 'Recovered unsaved collection changes'),
     text(
       'p',
-      `A private draft from an interrupted save is available (${recovery.itemIds.length} item${recovery.itemIds.length === 1 ? '' : 's'}${recovery.noteItemIds.length > 0 ? `, including ${recovery.noteItemIds.length} note${recovery.noteItemIds.length === 1 ? '' : 's'}` : ''}). Choose whether to adopt or discard it before editing.`,
+      adoptable
+        ? `A private draft from an interrupted save is available (${recovery.itemIds.length} item${recovery.itemIds.length === 1 ? '' : 's'}${recovery.noteItemIds.length > 0 ? `, including ${recovery.noteItemIds.length} note${recovery.noteItemIds.length === 1 ? '' : 's'}` : ''}). Choose whether to adopt or discard it before editing.`
+        : `A private draft from an interrupted save contains records the current catalogue cannot represent yet. Adoption is disabled to prevent data loss; discard it or wait for a producer-reviewed reconciliation.`,
     ),
     actions,
     feedback,

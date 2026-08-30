@@ -93,6 +93,7 @@ export type CollectionEditResult =
 export interface CollectionRecoverySummary {
   readonly itemIds: readonly string[];
   readonly noteItemIds: readonly string[];
+  readonly adoptable: boolean;
 }
 
 export interface CollectionStateController {
@@ -142,6 +143,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
   private readonly noteAutosaveDelay: number;
   private records = new Map<string, PrivateItemState>();
   private recoveryDraft: PrivateState | undefined;
+  private readonly recoveryIsReviewOnly: boolean;
   private hasActiveState = false;
   private listeners = new Set<() => void>();
   private saveListeners = new Set<(itemId: string, result: CollectionEditResult) => void>();
@@ -172,6 +174,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     this.catalogueFingerprint = catalogueFingerprint;
     this.hasActiveState = active !== undefined;
     this.recoveryDraft = store.unsaved();
+    this.recoveryIsReviewOnly = store.recoveryNeedsReview?.() ?? false;
     for (const record of active?.items ?? []) this.records.set(record.itemId, record);
   }
 
@@ -187,7 +190,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     const noteItemIds = this.recoveryDraft.items
       .filter((record) => record.note !== undefined)
       .map((record) => record.itemId);
-    return { itemIds, noteItemIds };
+    return { itemIds, noteItemIds, adoptable: !this.recoveryIsReviewOnly };
   }
 
   public record(itemId: string): PrivateItemState | undefined {
