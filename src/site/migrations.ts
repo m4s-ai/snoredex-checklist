@@ -6,4 +6,4 @@ export const migrationManifest = Object.freeze({
   catalogueTransitions: [],
 });
 
-export const knownSourceItemIds = new Set<string>();
+export const knownSourceItemIdsByFingerprint = new Map<string, ReadonlySet<string>>();

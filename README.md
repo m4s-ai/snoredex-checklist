@@ -109,14 +109,18 @@ npm run sync:catalogue -- \
   --contract-version 1.0.0 \
   --fingerprint sha256:<64-hex-semantic-fingerprint> \
   --byte-sha256 sha256:<64-hex-byte-digest> \
+  --migration-artifact-url https://raw.githubusercontent.com/m4s-ai/snoredex-data/<40-hex-producer-commit>/collector_migrations.json \
+  --migration-byte-sha256 sha256:<64-hex-byte-digest> \
   --issue-url https://github.com/m4s-ai/snoredex-checklist/issues/25 \
   --issue-url https://github.com/m4s-ai/snoredex-data/issues/304
 ```
 
 The command rejects unsupported or malformed input, oversized files, encoding/JSON failures,
 digest or semantic-fingerprint mismatches, skewed existing pairs and interrupted replacements.
-It stages and validates the bytes before replacing `vendor/snoredex-data/collector_catalogue.json`
-and `catalogue.lock.json` together. Do not run it against mutable branches or a producer issue that
+It stages and validates both catalogue and migration bytes before replacing
+`vendor/snoredex-data/collector_catalogue.json`, `vendor/snoredex-data/collector_migrations.json`
+and `catalogue.lock.json` together. The migration artifact must declare the target catalogue
+fingerprint and is never inferred by the consumer. Do not run it against mutable branches or a producer issue that
 has not recorded the exact immutable URL, commit, contract version, fingerprint, digest and
 rollback identity.
 

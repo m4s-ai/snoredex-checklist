@@ -48,6 +48,7 @@ interface BrowserReconciliationModule {
     reconciliation: {
       readonly migrations: readonly unknown[];
       readonly knownSourceItemIds?: ReadonlySet<string>;
+      readonly knownSourceItemIdsByFingerprint?: ReadonlyMap<string, ReadonlySet<string>>;
       readonly targetItemClasses?: ReadonlyMap<string, 'current-known' | 'research'>;
     },
   ) => Promise<{ readonly ok: boolean; readonly changed: boolean; readonly error?: string }>;
@@ -56,6 +57,7 @@ interface BrowserReconciliationModule {
 export interface CollectionReconciliationOptions {
   readonly migrations: readonly unknown[];
   readonly knownSourceItemIds?: ReadonlySet<string>;
+  readonly knownSourceItemIdsByFingerprint?: ReadonlyMap<string, ReadonlySet<string>>;
   readonly targetItemClasses?: ReadonlyMap<string, 'current-known' | 'research'>;
 }
 

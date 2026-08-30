@@ -26,7 +26,7 @@ import {
 import { readPrivateState, type PrivateStateRead } from './private-state.js';
 import { parseQuery, serializeQuery, type QueryCriteria } from './query.js';
 import { buildBrowseHierarchy, buildProgressViewModel, buildResultViewModel } from './results.js';
-import { knownSourceItemIds, migrationManifest } from './migrations.js';
+import { knownSourceItemIdsByFingerprint, migrationManifest } from './migrations.js';
 import snapshot, { provenance } from './snapshot.js';
 
 const $ = <T extends Element>(selector: string): T => {
@@ -1177,7 +1177,7 @@ async function renderCollection(catalogue: CatalogueSnapshot): Promise<void> {
     knownTrackableItemIds,
     {
       migrations: migrationManifest.catalogueTransitions,
-      knownSourceItemIds,
+      knownSourceItemIdsByFingerprint,
       targetItemClasses,
     },
   );

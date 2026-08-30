@@ -170,14 +170,20 @@ try {
     'utf8',
   );
   const catalogueTransitions = migrationManifest.catalogueTransitions;
-  const knownSourceIds = new Set(
-    catalogueTransitions.flatMap((migration) =>
-      migration.transitions.flatMap((transition) => transition.fromItemIds ?? [transition.fromItemId]),
-    ),
+  const knownSourceIdsByFingerprint = new Map();
+  for (const migration of catalogueTransitions) {
+    const sourceIds = knownSourceIdsByFingerprint.get(migration.fromFingerprint) ?? new Set();
+    for (const transition of migration.transitions) {
+      for (const itemId of transition.fromItemIds ?? [transition.fromItemId]) sourceIds.add(itemId);
+    }
+    knownSourceIdsByFingerprint.set(migration.fromFingerprint, sourceIds);
+  }
+  const serializedKnownSourceIdsByFingerprint = [...knownSourceIdsByFingerprint.entries()].map(
+    ([fingerprint, itemIds]) => [fingerprint, [...itemIds]],
   );
   await writeFile(
     resolve(assets, 'migrations.js'),
-    `export const migrationManifest = Object.freeze(${JSON.stringify({ catalogueTransitions })});\nexport const knownSourceItemIds = new Set(${JSON.stringify([...knownSourceIds])});\n`,
+    `export const migrationManifest = Object.freeze(${JSON.stringify({ catalogueTransitions })});\nexport const knownSourceItemIdsByFingerprint = new Map(${JSON.stringify(serializedKnownSourceIdsByFingerprint)}.map(([fingerprint, itemIds]) => [fingerprint, new Set(itemIds)]));\n`,
     'utf8',
   );
   const javascriptModules = await stampJavascriptAssets(assets);

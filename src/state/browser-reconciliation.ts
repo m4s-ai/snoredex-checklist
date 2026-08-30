@@ -52,9 +52,10 @@ function restoreRaw(storage: StorageLike, key: string, value: string | null): bo
   }
 }
 
-function preserveRecovery(source: PrivateState, result: ReconciliationSuccess): PrivateState | undefined {
-  const items = [...result.orphans, ...result.conflicts];
-  return items.length === 0 ? undefined : { ...source, items };
+function preserveRecovery(source: PrivateState, _result: ReconciliationSuccess): PrivateState {
+  // Keep the complete source snapshot so a rollback build can restore even
+  // records that were successfully retained or rekeyed in the new state.
+  return { ...source, items: source.items.map((item) => ({ ...item })) };
 }
 
 function writeAuthority(
