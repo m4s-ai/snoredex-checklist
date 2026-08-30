@@ -29,7 +29,7 @@ test('production adoption validates the reviewed target migration without requir
   );
   assert.match(workflow, /new Set\(sources\)\.size !== sources\.length \|\|\s+!sameCatalogueDeployment/u);
   assert.match(workflow, /!digest\.test\(current\.catalogueFingerprint \?\? ''\)/u);
-  assert.match(workflow, /push:\s+branches:\s+- main/u);
+  assert.doesNotMatch(workflow, /push:\s+branches:\s+- main/u);
   assert.match(
     workflow,
     /description: Optional full consumer commit SHA \(adopt defaults to this workflow revision\)/u,

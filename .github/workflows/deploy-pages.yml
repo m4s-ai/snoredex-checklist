@@ -1,9 +1,6 @@
 name: Deploy Pages
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       consumer_revision:
@@ -50,21 +47,15 @@ jobs:
         env:
           DEPLOYMENT_MODE_INPUT: ${{ inputs.deployment_mode }}
           CONSUMER_REVISION_INPUT: ${{ inputs.consumer_revision }}
-          EVENT_NAME: ${{ github.event_name }}
           WORKFLOW_REVISION: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [[ "$EVENT_NAME" == "push" ]]; then
-            deployment_mode=adopt
-            consumer_revision="$WORKFLOW_REVISION"
-          else
-            deployment_mode="${DEPLOYMENT_MODE_INPUT:-adopt}"
-            if [[ "$deployment_mode" == "rollback" && -z "$CONSUMER_REVISION_INPUT" ]]; then
-              echo "consumer_revision is required for rollback"
-              exit 1
-            fi
-            consumer_revision="${CONSUMER_REVISION_INPUT:-$WORKFLOW_REVISION}"
+          deployment_mode="${DEPLOYMENT_MODE_INPUT:-adopt}"
+          if [[ "$deployment_mode" == "rollback" && -z "$CONSUMER_REVISION_INPUT" ]]; then
+            echo "consumer_revision is required for rollback"
+            exit 1
           fi
+          consumer_revision="${CONSUMER_REVISION_INPUT:-$WORKFLOW_REVISION}"
           if [[ ! "$consumer_revision" =~ ^[0-9a-f]{40}$ ]]; then
             echo "consumer_revision must resolve to a full lowercase commit SHA"
             exit 1
