@@ -205,7 +205,11 @@ function isObjectLiteralValueArrow(tokens, from) {
     else if (kind === SyntaxKind.CloseBracketToken) brackets = Math.max(0, brackets - 1);
     else if (kind === SyntaxKind.LessThanToken) angles += 1;
     else if (kind === SyntaxKind.GreaterThanToken) angles = Math.max(0, angles - 1);
-    else if (kind === SyntaxKind.ColonToken && parens === 0 && brackets === 0 && angles === 0) hasPropertyColon = true;
+    else if (kind === SyntaxKind.CommaToken && parens === 0 && brackets === 0 && angles === 0) {
+      sawArrow = false;
+      hasPropertyColon = false;
+    } else if (kind === SyntaxKind.ColonToken && parens === 0 && brackets === 0 && angles === 0)
+      hasPropertyColon = true;
   }
   return hasPropertyColon && parens === 0 && brackets === 0 && angles === 0 && !sawArrow;
 }
@@ -622,6 +626,19 @@ if (process.argv.includes('--self-test')) {
       expected: [
         { name: 'rejection', complexity: 1 },
         { name: '<arrow>', complexity: 1 },
+      ],
+    },
+    {
+      source: `function multipleProperties(value) {
+        return {
+          first: (entry) => (entry ? entry : value),
+          second: (entry) => entry && entry.ok,
+        };
+      }`,
+      expected: [
+        { name: 'multipleProperties', complexity: 1 },
+        { name: '<arrow>', complexity: 2 },
+        { name: '<arrow>', complexity: 2 },
       ],
     },
   ];
