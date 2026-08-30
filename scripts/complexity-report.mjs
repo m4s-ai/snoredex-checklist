@@ -15,9 +15,19 @@ function scan(source) {
   const scanner = createScanner(true, undefined, source);
   const tokens = [];
   let previous;
+  let templateDepth = 0;
   let kind;
   do {
     kind = scanner.scan();
+    if (kind === SyntaxKind.TemplateHead) templateDepth += 1;
+    if (kind === SyntaxKind.CloseBraceToken && templateDepth > 0) {
+      const templateKind = scanner.reScanTemplateToken();
+      if (templateKind === SyntaxKind.TemplateMiddle) kind = templateKind;
+      if (templateKind === SyntaxKind.TemplateTail) {
+        kind = templateKind;
+        templateDepth -= 1;
+      }
+    }
     if (kind === SyntaxKind.SlashToken && shouldRescanSlash(previous)) kind = scanner.reScanSlashToken();
     if (kind !== SyntaxKind.EndOfFile) {
       previous = { kind, text: scanner.getTokenText() };
@@ -46,6 +56,7 @@ function canEndExpression(token) {
     SyntaxKind.StringLiteral,
     SyntaxKind.NoSubstitutionTemplateLiteral,
     SyntaxKind.RegularExpressionLiteral,
+    SyntaxKind.TemplateTail,
   ].includes(token.kind);
 }
 
@@ -391,6 +402,10 @@ if (process.argv.includes('--self-test')) {
     {
       source: `const invoke = (request) => (request as (name: string) => Promise<string>)(name);`,
       expected: [{ name: 'invoke', complexity: 1 }],
+    },
+    {
+      source: 'function template(value) { return `raw ${value ? 1 : 2} literal?` ?? value; }',
+      expected: [{ name: 'template', complexity: 3 }],
     },
   ];
   for (const sample of samples) {
