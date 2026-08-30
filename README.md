@@ -100,6 +100,20 @@ are the accepted checks for this static application. Every failure prints the ow
 command, and CI keeps the Node/npm versions and dependency lock immutable with `npm ci`. Follow
 [`CONTRIBUTING.md`](CONTRIBUTING.md) and the owning issue before adding implementation commands.
 
+### Cyclomatic complexity baseline
+
+The repository keeps an advisory, reproducible lexical complexity report for `src/` and
+`scripts/`. Regenerate it after source changes, then verify that the committed report is current:
+
+```sh
+npm run complexity:report
+npm run complexity:check
+```
+
+This report is a refactoring aid, not a release threshold or a claim of parser-equivalent
+complexity. Review any proposed seam split and its regression coverage in the owning issue before
+changing the baseline or introducing a CI threshold.
+
 ### Issue-backed catalogue sync
 
 Catalogue ingestion is an operator-invoked transaction; normal checks and runtime never fetch

@@ -3,10 +3,10 @@
 > Advisory lexical estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (32 production code files).
-Lines: 12,039.
-Function-like nodes: 722.
-McCabe estimate: sum 3,551; mean 4.9; median 2; P90 11; P95 21.
-Hotspots: 80 functions exceed 10; 37 exceed 20.
+Lines: 12,083.
+Function-like nodes: 735.
+McCabe estimate: sum 3,703; mean 5.0; median 2; P90 12; P95 21.
+Hotspots: 87 functions exceed 10; 39 exceed 20.
 
 The estimate counts if/for/while/do/catch/case statements, conditional `?` tokens and `&&`/`||`/`??` operators inside function-like bodies. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
 

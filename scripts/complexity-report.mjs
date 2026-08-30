@@ -15,17 +15,23 @@ function scan(source) {
   const scanner = createScanner(true, undefined, source);
   const tokens = [];
   let previous;
-  let templateDepth = 0;
+  const templateSubstitutionBraces = [];
   let kind;
   do {
     kind = scanner.scan();
-    if (kind === SyntaxKind.TemplateHead) templateDepth += 1;
-    if (kind === SyntaxKind.CloseBraceToken && templateDepth > 0) {
-      const templateKind = scanner.reScanTemplateToken();
-      if (templateKind === SyntaxKind.TemplateMiddle) kind = templateKind;
-      if (templateKind === SyntaxKind.TemplateTail) {
-        kind = templateKind;
-        templateDepth -= 1;
+    if (kind === SyntaxKind.TemplateHead) templateSubstitutionBraces.push(0);
+    if (templateSubstitutionBraces.length > 0) {
+      if (kind === SyntaxKind.OpenBraceToken) {
+        templateSubstitutionBraces[templateSubstitutionBraces.length - 1] += 1;
+      } else if (kind === SyntaxKind.CloseBraceToken) {
+        const last = templateSubstitutionBraces.length - 1;
+        if (templateSubstitutionBraces[last] > 0) {
+          templateSubstitutionBraces[last] -= 1;
+        } else {
+          const templateKind = scanner.reScanTemplateToken();
+          kind = templateKind;
+          if (templateKind === SyntaxKind.TemplateTail) templateSubstitutionBraces.pop();
+        }
       }
     }
     if (kind === SyntaxKind.SlashToken && shouldRescanSlash(previous)) kind = scanner.reScanSlashToken();
@@ -143,20 +149,46 @@ function isTypeOnlyArrow(tokens, arrowIndex) {
 }
 
 function findBodyOpen(tokens, after, braces) {
+  let inReturnType = false;
+  let angleDepth = 0;
   for (let index = after + 1; index < tokens.length; index += 1) {
-    if (tokens[index].kind === SyntaxKind.OpenBraceToken) {
-      if (tokens[index - 1]?.kind === SyntaxKind.ColonToken) {
-        const typeClose = braces.get(index);
-        if (typeClose !== undefined) {
+    const token = tokens[index];
+    if (!inReturnType && token.kind === SyntaxKind.ColonToken) {
+      inReturnType = true;
+      continue;
+    }
+    if (inReturnType) {
+      if (token.kind === SyntaxKind.LessThanToken) angleDepth += 1;
+      if (token.kind === SyntaxKind.GreaterThanToken) angleDepth = Math.max(0, angleDepth - 1);
+      if (token.kind === SyntaxKind.GreaterThanGreaterThanToken) angleDepth = Math.max(0, angleDepth - 2);
+      if (token.kind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken) angleDepth = Math.max(0, angleDepth - 3);
+      if (token.kind === SyntaxKind.OpenBraceToken) {
+        const previousKind = tokens[index - 1]?.kind;
+        const typeBrace =
+          angleDepth > 0 ||
+          [
+            SyntaxKind.ColonToken,
+            SyntaxKind.LessThanToken,
+            SyntaxKind.BarToken,
+            SyntaxKind.AmpersandToken,
+            SyntaxKind.EqualsGreaterThanToken,
+            SyntaxKind.CommaToken,
+            SyntaxKind.OpenBracketToken,
+            SyntaxKind.OpenParenToken,
+          ].includes(previousKind);
+        if (typeBrace) {
+          const typeClose = braces.get(index);
+          if (typeClose === undefined) return undefined;
           index = typeClose;
           continue;
         }
+        return index;
       }
-      return index;
+      if (token.kind === SyntaxKind.SemicolonToken) return undefined;
+      continue;
     }
-    if (
-      [SyntaxKind.SemicolonToken, SyntaxKind.CommaToken, SyntaxKind.EqualsGreaterThanToken].includes(tokens[index].kind)
-    )
+    if (token.kind === SyntaxKind.OpenBraceToken) return index;
+    if ([SyntaxKind.SemicolonToken, SyntaxKind.CommaToken, SyntaxKind.EqualsGreaterThanToken].includes(token.kind))
       return undefined;
   }
   return undefined;
@@ -406,6 +438,18 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function template(value) { return `raw ${value ? 1 : 2} literal?` ?? value; }',
       expected: [{ name: 'template', complexity: 3 }],
+    },
+    {
+      source: 'function nestedTemplate(localization) { return `${{ localization }.localization ?? "unknown"}`; }',
+      expected: [{ name: 'nestedTemplate', complexity: 2 }],
+    },
+    {
+      source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
+      expected: [{ name: 'wrapped', complexity: 2 }],
+    },
+    {
+      source: 'function union(): { ok: boolean } | null { return null; }',
+      expected: [{ name: 'union', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
