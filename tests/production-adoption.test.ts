@@ -20,7 +20,7 @@ test('production adoption validates the reviewed target migration without requir
   assert.match(script, /sourceFingerprints/u);
   assert.match(manifestScript, /SNOREDEX_CURRENT_DEPLOYMENT_PATH/u);
   assert.match(manifestScript, /manifest\.rollback = deploymentTuple\(previous\)/u);
-  assert.match(manifestScript, /previousSources\.length > 0/u);
+  assert.match(manifestScript, /previous && lock\.catalogueFingerprint === previous\.catalogueFingerprint/u);
   assert.match(workflow, /rollback target must match the exact published recovery tuple/u);
   assert.match(workflow, /consumer_revision lacks recoverable deployment provenance/u);
   assert.match(
@@ -120,6 +120,31 @@ test('production adoption validates the reviewed target migration without requir
     const changedCatalogueManifest = JSON.parse(await readFile(resolve(temporaryDirectory, 'deployment.json'), 'utf8'));
     assert.equal(changedCatalogueManifest.rollback, undefined);
     assert.deepEqual(changedCatalogueManifest.sourceFingerprints, [reviewedSourceFingerprint]);
+
+    await writeFile(
+      currentManifestPath,
+      JSON.stringify({
+        ...previousDeployment,
+        catalogueFingerprint: reviewedSourceFingerprint,
+        sourceFingerprints: [reviewedSourceFingerprint],
+      }),
+      'utf8',
+    );
+    const changedWithRecovery = spawnSync(process.execPath, [manifestScriptPath, temporaryDirectory], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_PAGE_URL: 'https://m4s-ai.github.io/snoredex-checklist/',
+        SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+      },
+    });
+    assert.equal(changedWithRecovery.status, 0, `${changedWithRecovery.stdout}${changedWithRecovery.stderr}`);
+    const changedWithRecoveryManifest = JSON.parse(
+      await readFile(resolve(temporaryDirectory, 'deployment.json'), 'utf8'),
+    );
+    assert.equal(changedWithRecoveryManifest.rollback, undefined);
+    assert.deepEqual(changedWithRecoveryManifest.sourceFingerprints, [reviewedSourceFingerprint]);
 
     await writeFile(currentManifestPath, JSON.stringify(previousDeployment), 'utf8');
     const generated = spawnSync(process.execPath, [manifestScriptPath, temporaryDirectory], {
