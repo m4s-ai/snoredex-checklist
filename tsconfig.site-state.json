@@ -11,6 +11,7 @@
     "src/state/domain.ts",
     "src/state/authority.ts",
     "src/state/storage.ts",
+    "src/state/backup.ts",
     "src/state/reconciliation.ts",
     "src/state/browser-reconciliation.ts"
   ]
