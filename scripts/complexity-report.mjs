@@ -184,7 +184,31 @@ function isObjectLiteralOpen(tokens, open) {
     return true;
   if (previousKind !== SyntaxKind.ColonToken) return false;
   const beforeProperty = tokens[open - 3]?.kind;
+  if (beforeProperty === SyntaxKind.CommaToken) {
+    const close = matching(tokens, open, SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken);
+    if (
+      tokens[close + 1]?.kind === SyntaxKind.CloseParenToken &&
+      [SyntaxKind.OpenBraceToken, SyntaxKind.EqualsGreaterThanToken].includes(tokens[close + 2]?.kind)
+    )
+      return false;
+  }
   return [SyntaxKind.OpenBraceToken, SyntaxKind.CommaToken].includes(beforeProperty);
+}
+
+function isGenericOpen(tokens, index) {
+  const previous = tokens[index - 1]?.kind;
+  if (
+    [
+      SyntaxKind.ColonToken,
+      SyntaxKind.AsKeyword,
+      SyntaxKind.NewKeyword,
+      SyntaxKind.EqualsToken,
+      SyntaxKind.OpenParenToken,
+      SyntaxKind.OpenBracketToken,
+    ].includes(previous)
+  )
+    return true;
+  return identifierLike(tokens[index - 1]) && tokens[index - 2]?.kind === SyntaxKind.AsKeyword;
 }
 
 function isObjectLiteralValueArrow(tokens, from) {
@@ -203,7 +227,7 @@ function isObjectLiteralValueArrow(tokens, from) {
     else if (kind === SyntaxKind.CloseParenToken) parens = Math.max(0, parens - 1);
     else if (kind === SyntaxKind.OpenBracketToken) brackets += 1;
     else if (kind === SyntaxKind.CloseBracketToken) brackets = Math.max(0, brackets - 1);
-    else if (kind === SyntaxKind.LessThanToken) angles += 1;
+    else if (kind === SyntaxKind.LessThanToken && isGenericOpen(tokens, index)) angles += 1;
     else if (kind === SyntaxKind.GreaterThanToken) angles = Math.max(0, angles - 1);
     else if (kind === SyntaxKind.CommaToken && parens === 0 && brackets === 0 && angles === 0) {
       sawArrow = false;
@@ -340,6 +364,12 @@ function isCatchClause(tokens, index) {
   return ![SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[index - 1]?.kind);
 }
 
+function isDoWhileContinuation(tokens, index) {
+  if (tokens[index - 1]?.kind !== SyntaxKind.CloseBraceToken) return false;
+  const open = matchingOpen(tokens, index - 1, SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken);
+  return open !== undefined && tokens[open - 1]?.kind === SyntaxKind.DoKeyword;
+}
+
 function collectFunctions(tokens, source, path) {
   const braces = pairBraces(tokens);
   const functions = [];
@@ -431,7 +461,8 @@ function collectFunctions(tokens, source, path) {
       ) {
         if (
           !isOptionalTypeProperty(tokens, index) &&
-          (tokens[index].kind !== SyntaxKind.CatchKeyword || isCatchClause(tokens, index))
+          (tokens[index].kind !== SyntaxKind.CatchKeyword || isCatchClause(tokens, index)) &&
+          (tokens[index].kind !== SyntaxKind.WhileKeyword || !isDoWhileContinuation(tokens, index))
         )
           entry.complexity += 1;
       }
@@ -631,7 +662,7 @@ if (process.argv.includes('--self-test')) {
     {
       source: `function multipleProperties(value) {
         return {
-          first: (entry) => (entry ? entry : value),
+          first: (entry) => (entry < value ? entry : value),
           second: (entry) => entry && entry.ok,
         };
       }`,
@@ -640,6 +671,21 @@ if (process.argv.includes('--self-test')) {
         { name: '<arrow>', complexity: 2 },
         { name: '<arrow>', complexity: 2 },
       ],
+    },
+    {
+      source: `class ParameterTypes {
+        constructor(storage: unknown, options: { readonly now?: () => string }) {}
+      }`,
+      expected: [{ name: 'constructor', complexity: 1 }],
+    },
+    {
+      source: `function doWhile(value) {
+        do {
+          value -= 1;
+        } while (value > 0);
+        return value;
+      }`,
+      expected: [{ name: 'doWhile', complexity: 2 }],
     },
   ];
   for (const sample of samples) {
