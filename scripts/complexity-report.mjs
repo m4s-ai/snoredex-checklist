@@ -659,9 +659,16 @@ function collectFunctions(tokens, source, path) {
     if (identifierLike(tokens[nameIndex]) && looksLikeMethodName(tokens, nameIndex)) name = tokens[nameIndex].text;
     else if (tokens[nameIndex]?.kind === SyntaxKind.CloseBracketToken && isComputedMethodName(tokens, nameIndex))
       name = '<computed>';
-    else if (tokens[nameIndex]?.kind === SyntaxKind.GreaterThanToken) {
+    else if (
+      [
+        SyntaxKind.GreaterThanToken,
+        SyntaxKind.GreaterThanGreaterThanToken,
+        SyntaxKind.GreaterThanGreaterThanGreaterThanToken,
+      ].includes(tokens[nameIndex]?.kind)
+    ) {
       const genericName = genericMethodNameIndex(tokens, nameIndex);
-      if (genericName !== undefined) name = tokens[genericName].text;
+      if (genericName === undefined) continue;
+      name = tokens[genericName].text;
     } else continue;
     const close = matching(tokens, index, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
     const bodyOpen = close === undefined ? undefined : findBodyOpen(tokens, close, braces);
@@ -1036,6 +1043,18 @@ if (process.argv.includes('--self-test')) {
         return value;
       }`,
       expected: [{ name: 'labeledBody', complexity: 2 }],
+    },
+    {
+      source: `function comparison(value, minimum, ready) {
+        if (value > (minimum)) { if (ready) act(); }
+      }`,
+      expected: [{ name: 'comparison', complexity: 3 }],
+    },
+    {
+      source: `class NestedGenericMethod {
+        map<T extends Foo<Bar>>(value: T) { if (value) return value; return undefined; }
+      }`,
+      expected: [{ name: 'map', complexity: 2 }],
     },
   ];
   for (const sample of samples) {
