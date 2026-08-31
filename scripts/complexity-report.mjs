@@ -155,6 +155,15 @@ function matchingAngleClose(tokens, start) {
   return undefined;
 }
 
+function enclosingAngleOpen(tokens, index, start = 0) {
+  for (let cursor = index - 1; cursor >= start; cursor -= 1) {
+    if (tokens[cursor].kind !== SyntaxKind.LessThanToken) continue;
+    const close = matchingAngleClose(tokens, cursor);
+    if (close !== undefined && index < close) return cursor;
+  }
+  return undefined;
+}
+
 function isFunctionTypeParameterArrow(tokens, arrowIndex) {
   const close = arrowIndex - 1;
   if (tokens[close]?.kind !== SyntaxKind.CloseParenToken) return false;
@@ -998,7 +1007,7 @@ function findArrowBindingName(tokens, equalsIndex) {
 }
 
 function bindingNameLike(token) {
-  return identifierLike(token) || token?.kind === SyntaxKind.PrivateIdentifier;
+  return methodNameLike(token);
 }
 
 function arrowName(tokens, arrowIndex) {
@@ -1258,7 +1267,18 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
       continue;
     }
     if (kind === SyntaxKind.TypeKeyword) return sawExtends;
-    if (kind === SyntaxKind.ColonToken && sawExtends) return true;
+    if (kind === SyntaxKind.ColonToken && sawExtends) {
+      const angleOpen = extendsIndex === undefined ? undefined : enclosingAngleOpen(tokens, extendsIndex, start);
+      if (angleOpen !== undefined) {
+        const angleClose = matchingAngleClose(tokens, angleOpen);
+        if (angleClose !== undefined) {
+          if (index < angleClose) return true;
+          sawExtends = false;
+          continue;
+        }
+      }
+      return true;
+    }
     if (kind === SyntaxKind.LessThanToken && sawExtends && isConditionalTypeAngleStart(tokens, cursor)) {
       const angleClose = matchingAngleClose(tokens, cursor);
       if (angleClose === undefined) return false;
@@ -2246,6 +2266,10 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'class OptionalTypedField { cb?: Handler = () => ready ? first : second; }',
       expected: [{ name: 'cb', complexity: 2 }],
+    },
+    {
+      source: 'class OptionalLiteralTypedField { "cb"?: Handler = () => ready ? first : second; }',
+      expected: [{ name: '"cb"', complexity: 2 }],
     },
     {
       source: 'function tupleCallback(callback: [() => boolean]) { return callback; }',

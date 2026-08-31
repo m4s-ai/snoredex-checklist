@@ -3,9 +3,9 @@
 > Advisory lexical estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (32 production code files).
-Lines: 14,065.
-Function-like nodes: 781.
-McCabe estimate: sum 4,176; mean 5.3; median 2; P90 13; P95 23.
+Lines: 14,089.
+Function-like nodes: 782.
+McCabe estimate: sum 4,184; mean 5.4; median 2; P90 13; P95 23.
 Hotspots: 101 functions exceed 10; 47 exceed 20.
 
 The estimate counts if/for/while/do/catch/case statements, conditional `?` tokens and `&&`/`||`/`??` operators inside function-like bodies. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
@@ -18,13 +18,13 @@ The estimate counts if/for/while/do/catch/case statements, conditional `?` token
 | `src/catalogue/validate.ts:235`      | `validateSemantics`          |         56 |
 | `src/state/reconciliation.ts:513`    | `reconcilePrivateState`      |         55 |
 | `src/catalogue/validate.ts:416`      | `validateCatalogueFixture`   |         54 |
-| `scripts/complexity-report.mjs:1461` | `collectFunctions`           |         48 |
-| `scripts/complexity-report.mjs:873`  | `findArrowExpressionEnd`     |         47 |
+| `scripts/complexity-report.mjs:1481` | `collectFunctions`           |         48 |
+| `scripts/complexity-report.mjs:882`  | `findArrowExpressionEnd`     |         47 |
 | `scripts/check-artifact.mjs:1311`    | `extractHead`                |         45 |
 | `src/site/query.ts:31`               | `parseQuery`                 |         39 |
-| `scripts/complexity-report.mjs:1377` | `findStatementEnd`           |         36 |
+| `scripts/complexity-report.mjs:1397` | `findStatementEnd`           |         36 |
 | `src/state/storage.ts:1142`          | `setDraftOwnerState`         |         36 |
-| `scripts/complexity-report.mjs:350`  | `isSemicolonlessClassMethod` |         35 |
+| `scripts/complexity-report.mjs:359`  | `isSemicolonlessClassMethod` |         35 |
 | `src/catalogue/sync.ts:517`          | `parseJournal`               |         34 |
 | `scripts/check-artifact.mjs:239`     | `stripHtmlComments`          |         32 |
 | `src/state/domain.ts:211`            | `parseState`                 |         32 |
