@@ -191,12 +191,27 @@ function isFunctionLikeParameterList(tokens, open) {
     return true;
   if (identifierLike(previous))
     return looksLikeMethodName(tokens, open - 1) || tokens[open - 2]?.kind === SyntaxKind.FunctionKeyword;
-  if (previous.kind !== SyntaxKind.GreaterThanToken) return false;
+  if (
+    ![
+      SyntaxKind.GreaterThanToken,
+      SyntaxKind.GreaterThanGreaterThanToken,
+      SyntaxKind.GreaterThanGreaterThanGreaterThanToken,
+    ].includes(previous.kind)
+  )
+    return false;
   let angleDepth = 0;
   for (let index = open - 1; index >= 0; index -= 1) {
     const kind = tokens[index].kind;
     if (kind === SyntaxKind.GreaterThanToken) {
       angleDepth += 1;
+      continue;
+    }
+    if (kind === SyntaxKind.GreaterThanGreaterThanToken) {
+      angleDepth += 2;
+      continue;
+    }
+    if (kind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken) {
+      angleDepth += 3;
       continue;
     }
     if (kind === SyntaxKind.LessThanToken) {
@@ -500,6 +515,28 @@ function arrowName(tokens, arrowIndex) {
   if (parameterClose !== undefined) {
     const parameterOpen = matchingOpen(tokens, parameterClose, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
     cursor = parameterOpen === undefined ? parameterClose : parameterOpen - 1;
+  }
+  if (
+    [
+      SyntaxKind.GreaterThanToken,
+      SyntaxKind.GreaterThanGreaterThanToken,
+      SyntaxKind.GreaterThanGreaterThanGreaterThanToken,
+    ].includes(tokens[cursor]?.kind)
+  ) {
+    let angleDepth = 0;
+    for (let index = cursor; index >= 0; index -= 1) {
+      const kind = tokens[index].kind;
+      if (kind === SyntaxKind.GreaterThanToken) angleDepth += 1;
+      else if (kind === SyntaxKind.GreaterThanGreaterThanToken) angleDepth += 2;
+      else if (kind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken) angleDepth += 3;
+      else if (kind === SyntaxKind.LessThanToken) {
+        angleDepth -= 1;
+        if (angleDepth === 0) {
+          cursor = index - 1;
+          break;
+        }
+      }
+    }
   }
   if (tokens[cursor]?.kind === SyntaxKind.EqualsToken && identifierLike(tokens[cursor - 1]))
     return tokens[cursor - 1].text;
@@ -1055,6 +1092,19 @@ if (process.argv.includes('--self-test')) {
         map<T extends Foo<Bar>>(value: T) { if (value) return value; return undefined; }
       }`,
       expected: [{ name: 'map', complexity: 2 }],
+    },
+    {
+      source: `class GenericParameterTypes {
+        map<T extends Foo<Bar>>(first: T, options: { cb?: () => void }, last: T) {
+          if (first) return last;
+          return first;
+        }
+      }`,
+      expected: [{ name: 'map', complexity: 2 }],
+    },
+    {
+      source: 'const genericArrow = <T extends Element>(selector: string): T => selector ? selector : undefined;',
+      expected: [{ name: 'genericArrow', complexity: 2 }],
     },
   ];
   for (const sample of samples) {
