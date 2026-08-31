@@ -83,7 +83,11 @@ function isControlHeaderClose(tokens, closeIndex) {
 
 function shouldRescanSlash(previous, tokens = []) {
   const memberProperty = isMemberPropertyAccess(tokens, tokens.length - 1);
-  return (!canEndExpression(previous) && !memberProperty) || isControlHeaderClose(tokens, tokens.length - 1);
+  const postfixNonNull = isPostfixNonNullAssertion(tokens, tokens.length - 1);
+  return (
+    (!canEndExpression(previous) && !memberProperty && !postfixNonNull) ||
+    isControlHeaderClose(tokens, tokens.length - 1)
+  );
 }
 
 function pairBraces(tokens) {
@@ -790,6 +794,11 @@ function isMemberPropertyAccess(tokens, index) {
   return [SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[index - 1]?.kind);
 }
 
+function isPostfixNonNullAssertion(tokens, index) {
+  if (tokens[index]?.kind !== SyntaxKind.ExclamationToken) return false;
+  return canEndExpression(tokens[index - 1]) || isMemberPropertyAccess(tokens, index - 1);
+}
+
 function isKeywordNamedProperty(tokens, index) {
   return (
     [
@@ -879,6 +888,17 @@ function isConditionalTypeAngleStart(tokens, index) {
       SyntaxKind.UndefinedKeyword,
       SyntaxKind.UnknownKeyword,
       SyntaxKind.VoidKeyword,
+    ].includes(first?.kind)
+  )
+    return afterFirst === SyntaxKind.ExtendsKeyword;
+  if (
+    [
+      SyntaxKind.TrueKeyword,
+      SyntaxKind.FalseKeyword,
+      SyntaxKind.NumericLiteral,
+      SyntaxKind.StringLiteral,
+      SyntaxKind.BigIntLiteral,
+      SyntaxKind.NoSubstitutionTemplateLiteral,
     ].includes(first?.kind)
   )
     return afterFirst === SyntaxKind.ExtendsKeyword;
@@ -1485,6 +1505,10 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: 'memberPropertyDivision', complexity: 2 }],
     },
     {
+      source: 'function nonNullDivision(value) { return value! / 2 && other / 3; }',
+      expected: [{ name: 'nonNullDivision', complexity: 2 }],
+    },
+    {
       source:
         'function pairedComparison(value, flags, first, second, minimum) { return value < flags.extends ? first : second > (minimum); }',
       expected: [{ name: 'pairedComparison', complexity: 2 }],
@@ -1508,6 +1532,11 @@ if (process.argv.includes('--self-test')) {
       source:
         'function structuredConditional(value) { return factory<{ value: T } extends Foo ? A : B>() || factory<[T] extends Foo ? C : D>() || value; }',
       expected: [{ name: 'structuredConditional', complexity: 3 }],
+    },
+    {
+      source:
+        "function literalConditional(value) { return factory<true extends boolean ? A : B>() || factory<'ready' extends string ? C : D>() || factory<42 extends number ? E : F>() || value; }",
+      expected: [{ name: 'literalConditional', complexity: 4 }],
     },
     {
       source:
