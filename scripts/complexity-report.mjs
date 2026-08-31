@@ -371,6 +371,7 @@ function findBodyOpen(tokens, after, braces) {
 function findArrowExpressionEnd(tokens, start) {
   let parens = 0;
   let brackets = 0;
+  let braces = 0;
   for (let index = start; index < tokens.length; index += 1) {
     const kind = tokens[index].kind;
     if (kind === SyntaxKind.OpenParenToken) parens += 1;
@@ -381,7 +382,16 @@ function findArrowExpressionEnd(tokens, start) {
     else if (kind === SyntaxKind.CloseBracketToken) {
       if (brackets === 0 && parens === 0) return index;
       brackets -= 1;
-    } else if (parens === 0 && brackets === 0 && [SyntaxKind.CommaToken, SyntaxKind.SemicolonToken].includes(kind))
+    } else if (kind === SyntaxKind.OpenBraceToken) braces += 1;
+    else if (kind === SyntaxKind.CloseBraceToken) {
+      if (braces === 0 && parens === 0 && brackets === 0) return index;
+      braces -= 1;
+    } else if (
+      parens === 0 &&
+      brackets === 0 &&
+      braces === 0 &&
+      [SyntaxKind.CommaToken, SyntaxKind.SemicolonToken].includes(kind)
+    )
       return index;
   }
   return tokens.length;
@@ -527,9 +537,10 @@ function collectFunctions(tokens, source, path) {
     if (token.kind === SyntaxKind.FunctionKeyword) {
       let nameIndex = index + 1;
       if (tokens[nameIndex]?.kind === SyntaxKind.AsteriskToken) nameIndex += 1;
-      const name = identifierLike(tokens[nameIndex]) ? tokens[nameIndex].text : '<anonymous>';
+      const named = identifierLike(tokens[nameIndex]);
+      const name = named ? tokens[nameIndex].text : '<anonymous>';
       const parameterOpen = tokens.findIndex(
-        (candidate, candidateIndex) => candidateIndex > nameIndex && candidate.kind === SyntaxKind.OpenParenToken,
+        (candidate, candidateIndex) => candidateIndex >= nameIndex && candidate.kind === SyntaxKind.OpenParenToken,
       );
       const parameterClose =
         parameterOpen === -1
@@ -675,6 +686,24 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'const expression = (value) => value && value > 0 ? value : 0;',
       expected: [{ name: 'expression', complexity: 3 }],
+    },
+    {
+      source: `function anonymousHost(value) {
+        return function (input) { if (input) return input; return value; };
+      }
+      function generatorHost(value) {
+        return function* (input) { if (input) yield input; return value; };
+      }`,
+      expected: [
+        { name: 'anonymousHost', complexity: 1 },
+        { name: '<anonymous>', complexity: 2 },
+        { name: 'generatorHost', complexity: 1 },
+        { name: '<anonymous>', complexity: 2 },
+      ],
+    },
+    {
+      source: 'const conciseObject = (value, ready) => value ? { first: 1, second: ready && value } : null;',
+      expected: [{ name: 'conciseObject', complexity: 3 }],
     },
     {
       source: 'function outer(values) { return values.map((value) => value ? value : 0); }',
