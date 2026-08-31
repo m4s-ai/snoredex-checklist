@@ -180,6 +180,100 @@ function isTypeDeclarationScope(tokens, from) {
   return open !== undefined && hasTypeDeclarationBefore(tokens, open);
 }
 
+function isTypeMemberScope(tokens, from) {
+  const open = enclosingOpenBrace(tokens, from);
+  if (open === undefined) return false;
+  const before = tokens[open - 1]?.kind;
+  if (
+    [
+      SyntaxKind.CloseParenToken,
+      SyntaxKind.CloseBracketToken,
+      SyntaxKind.CloseBraceToken,
+      SyntaxKind.EqualsGreaterThanToken,
+    ].includes(before)
+  )
+    return false;
+  for (let index = open - 1; index >= 0; index -= 1) {
+    const kind = tokens[index].kind;
+    if ([SyntaxKind.TypeKeyword, SyntaxKind.InterfaceKeyword, SyntaxKind.DeclareKeyword].includes(kind)) return true;
+    if (
+      [
+        SyntaxKind.OpenBraceToken,
+        SyntaxKind.CloseBraceToken,
+        SyntaxKind.FunctionKeyword,
+        SyntaxKind.ConstKeyword,
+        SyntaxKind.LetKeyword,
+        SyntaxKind.VarKeyword,
+        SyntaxKind.ReturnKeyword,
+        SyntaxKind.EqualsGreaterThanToken,
+      ].includes(kind)
+    )
+      return false;
+  }
+  return false;
+}
+
+function isTypedFunctionBody(tokens, open) {
+  let braces = 0;
+  let brackets = 0;
+  let parens = 0;
+  let angles = 0;
+  for (let cursor = open - 1; cursor >= 0; cursor -= 1) {
+    const kind = tokens[cursor].kind;
+    if (kind === SyntaxKind.CloseBraceToken) {
+      braces += 1;
+      continue;
+    }
+    if (kind === SyntaxKind.OpenBraceToken) {
+      if (braces > 0) braces -= 1;
+      else return false;
+      continue;
+    }
+    if (kind === SyntaxKind.CloseBracketToken) {
+      brackets += 1;
+      continue;
+    }
+    if (kind === SyntaxKind.OpenBracketToken) {
+      if (brackets > 0) brackets -= 1;
+      else return false;
+      continue;
+    }
+    if (kind === SyntaxKind.CloseParenToken) {
+      parens += 1;
+      continue;
+    }
+    if (kind === SyntaxKind.OpenParenToken) {
+      if (parens > 0) parens -= 1;
+      continue;
+    }
+    if (kind === SyntaxKind.GreaterThanToken) {
+      angles += 1;
+      continue;
+    }
+    if ([SyntaxKind.GreaterThanGreaterThanToken, SyntaxKind.GreaterThanGreaterThanGreaterThanToken].includes(kind)) {
+      angles += kind === SyntaxKind.GreaterThanGreaterThanToken ? 2 : 3;
+      continue;
+    }
+    if (kind === SyntaxKind.LessThanToken && angles > 0) {
+      angles -= 1;
+      continue;
+    }
+    if (braces > 0 || brackets > 0 || parens > 0 || angles > 0) continue;
+    if (kind !== SyntaxKind.ColonToken) continue;
+    const parameterClose = cursor - 1;
+    if (tokens[parameterClose]?.kind !== SyntaxKind.CloseParenToken) continue;
+    const parameterOpen = matchingOpen(tokens, parameterClose, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+    if (parameterOpen === undefined) continue;
+    for (let parent = parameterOpen - 1; parent >= 0; parent -= 1) {
+      const parentKind = tokens[parent].kind;
+      if (parentKind === SyntaxKind.FunctionKeyword) return true;
+      if ([SyntaxKind.SemicolonToken, SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken].includes(parentKind))
+        break;
+    }
+  }
+  return false;
+}
+
 function isFunctionLikeParameterList(tokens, open) {
   const previous = tokens[open - 1];
   if (!previous) return false;
@@ -561,12 +655,7 @@ function isOptionalTypeProperty(tokens, index) {
 function isOptionalTypeMethod(tokens, index, start = 0) {
   if (tokens[index]?.kind !== SyntaxKind.QuestionToken || tokens[index + 1]?.kind !== SyntaxKind.OpenParenToken)
     return false;
-  for (let cursor = index - 1; cursor >= start; cursor -= 1) {
-    const kind = tokens[cursor].kind;
-    if (kind === SyntaxKind.TypeKeyword) return true;
-    if (kind === SyntaxKind.SemicolonToken) return false;
-  }
-  return false;
+  return isTypeMemberScope(tokens, index) || isTypeDeclarationScope(tokens, index);
 }
 
 function isCatchClause(tokens, index) {
@@ -591,6 +680,7 @@ function isMemberContext(tokens, index) {
       depth -= 1;
       continue;
     }
+    if (isTypedFunctionBody(tokens, cursor)) return false;
     const before = tokens[cursor - 1]?.kind;
     if (
       [
@@ -656,7 +746,20 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
     }
     if (kind === SyntaxKind.TypeKeyword) return sawExtends;
     if (kind === SyntaxKind.ColonToken && sawExtends) return true;
-    if (kind === SyntaxKind.LessThanToken && sawExtends) return true;
+    if (kind === SyntaxKind.LessThanToken && sawExtends) {
+      let angleDepth = 0;
+      for (let boundary = cursor; boundary < tokens.length; boundary += 1) {
+        const boundaryKind = tokens[boundary].kind;
+        if (boundaryKind === SyntaxKind.LessThanToken) angleDepth += 1;
+        else if (boundaryKind === SyntaxKind.GreaterThanToken) angleDepth -= 1;
+        else if (boundaryKind === SyntaxKind.GreaterThanGreaterThanToken) angleDepth -= 2;
+        else if (boundaryKind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken) angleDepth -= 3;
+        if (angleDepth === 0) {
+          if (tokens[boundary + 1]?.kind === SyntaxKind.OpenParenToken) return true;
+          break;
+        }
+      }
+    }
     if (kind === SyntaxKind.SemicolonToken) return false;
   }
   return false;
@@ -1151,6 +1254,28 @@ if (process.argv.includes('--self-test')) {
         return value;
       }`,
       expected: [{ name: 'typedReturn', complexity: 3 }],
+    },
+    {
+      source: `function typedGenericReturn(value: T): Promise<Result> {
+        for (const item of value) if (item) return item;
+        return value;
+      }`,
+      expected: [{ name: 'typedGenericReturn', complexity: 3 }],
+    },
+    {
+      source: `function optionalTypeScopes(value) {
+        interface Hooks { ready?(): boolean }
+        type MoreHooks = { first(): boolean; ready?(): boolean };
+        if (value) return value;
+        return undefined;
+      }`,
+      expected: [{ name: 'optionalTypeScopes', complexity: 2 }],
+    },
+    {
+      source: `function relationalExtends(value, limit, flags) {
+        return value < limit && flags.extends ? value : limit;
+      }`,
+      expected: [{ name: 'relationalExtends', complexity: 3 }],
     },
     {
       source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
