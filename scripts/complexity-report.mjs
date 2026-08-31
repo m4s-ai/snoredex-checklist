@@ -1552,8 +1552,12 @@ function isConditionalTypeAngleStart(tokens, index) {
 
 function isConditionalTypeAssertionPrefix(tokens, index) {
   const previousKind = tokens[index - 1]?.kind;
+  const unbracedControlBody =
+    (previousKind === SyntaxKind.CloseParenToken && isControlHeaderClose(tokens, index - 1)) ||
+    [SyntaxKind.ElseKeyword, SyntaxKind.DoKeyword].includes(previousKind);
   return (
     isBinaryOperator(previousKind) ||
+    unbracedControlBody ||
     [
       SyntaxKind.ReturnKeyword,
       SyntaxKind.ThrowKeyword,
@@ -2923,6 +2927,26 @@ if (process.argv.includes('--self-test')) {
         <T extends U ? A : B>value;
       }`,
       expected: [{ name: 'expressionAfterBlock', complexity: 2 }],
+    },
+    {
+      source: `function expressionAfterUnbracedIf() {
+        if (ready) <T extends U ? A : B>value;
+      }`,
+      expected: [{ name: 'expressionAfterUnbracedIf', complexity: 2 }],
+    },
+    {
+      source: `function expressionAfterElse() {
+        if (ready) fallback;
+        else <T extends U ? A : B>value;
+      }`,
+      expected: [{ name: 'expressionAfterElse', complexity: 2 }],
+    },
+    {
+      source: `function expressionAfterDo() {
+        do <T extends U ? A : B>value;
+        while (ready);
+      }`,
+      expected: [{ name: 'expressionAfterDo', complexity: 2 }],
     },
   ];
   for (const sample of samples) {
