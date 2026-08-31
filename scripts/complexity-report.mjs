@@ -801,6 +801,7 @@ function isPostfixNonNullAssertion(tokens, index) {
 }
 
 function isTypeAssertionKeyword(tokens, index) {
+  if (isGenericTypeAssertionEnd(tokens, index)) return true;
   if (!isPrimitiveTypeKeyword(tokens[index]?.kind)) return false;
   for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
     const kind = tokens[cursor].kind;
@@ -817,6 +818,42 @@ function isTypeAssertionKeyword(tokens, index) {
     return false;
   }
   return false;
+}
+
+function isGenericTypeAssertionEnd(tokens, index) {
+  if (
+    ![
+      SyntaxKind.GreaterThanToken,
+      SyntaxKind.GreaterThanGreaterThanToken,
+      SyntaxKind.GreaterThanGreaterThanGreaterThanToken,
+    ].includes(tokens[index]?.kind)
+  )
+    return false;
+  const open = matchingAngleOpen(tokens, index);
+  if (open === undefined) return false;
+  for (let cursor = open - 1; cursor >= 0; cursor -= 1) {
+    const kind = tokens[cursor].kind;
+    if (kind === SyntaxKind.AsKeyword) return true;
+    if (isPrimitiveTypeKeyword(kind) || identifierLike(tokens[cursor])) continue;
+    if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(kind)) continue;
+    return false;
+  }
+  return false;
+}
+
+function matchingAngleOpen(tokens, closeIndex) {
+  let depth = 0;
+  for (let cursor = closeIndex; cursor >= 0; cursor -= 1) {
+    const kind = tokens[cursor].kind;
+    if (kind === SyntaxKind.GreaterThanToken) depth += 1;
+    else if (kind === SyntaxKind.GreaterThanGreaterThanToken) depth += 2;
+    else if (kind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken) depth += 3;
+    else if (kind === SyntaxKind.LessThanToken) {
+      depth -= 1;
+      if (depth === 0) return cursor;
+    }
+  }
+  return undefined;
 }
 
 function isPrimitiveTypeKeyword(kind) {
@@ -1572,6 +1609,10 @@ if (process.argv.includes('--self-test')) {
       source:
         'function qualifiedUnionAssertionDivision(value) { return value as Foo.Bar | undefined / 2 && other / 3; }',
       expected: [{ name: 'qualifiedUnionAssertionDivision', complexity: 2 }],
+    },
+    {
+      source: 'function genericAssertionDivision(value) { return value as Numeric<Tag> / 2 && other / 3; }',
+      expected: [{ name: 'genericAssertionDivision', complexity: 2 }],
     },
     {
       source:

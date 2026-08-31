@@ -3,10 +3,10 @@
 > Advisory lexical estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (32 production code files).
-Lines: 13,416.
-Function-like nodes: 769.
-McCabe estimate: sum 4,006; mean 5.2; median 2; P90 13; P95 22.
-Hotspots: 95 functions exceed 10; 43 exceed 20.
+Lines: 13,457.
+Function-like nodes: 771.
+McCabe estimate: sum 4,022; mean 5.2; median 2; P90 13; P95 22.
+Hotspots: 96 functions exceed 10; 43 exceed 20.
 
 The estimate counts if/for/while/do/catch/case statements, conditional `?` tokens and `&&`/`||`/`??` operators inside function-like bodies. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
 
@@ -20,9 +20,9 @@ The estimate counts if/for/while/do/catch/case statements, conditional `?` token
 | `src/catalogue/validate.ts:416`      | `validateCatalogueFixture` |         54 |
 | `scripts/complexity-report.mjs:592`  | `findArrowExpressionEnd`   |         47 |
 | `scripts/check-artifact.mjs:1311`    | `extractHead`              |         45 |
-| `scripts/complexity-report.mjs:1043` | `collectFunctions`         |         44 |
+| `scripts/complexity-report.mjs:1080` | `collectFunctions`         |         44 |
 | `src/site/query.ts:31`               | `parseQuery`               |         39 |
-| `scripts/complexity-report.mjs:959`  | `findStatementEnd`         |         36 |
+| `scripts/complexity-report.mjs:996`  | `findStatementEnd`         |         36 |
 | `src/state/storage.ts:1142`          | `setDraftOwnerState`       |         36 |
 | `src/catalogue/sync.ts:517`          | `parseJournal`             |         34 |
 | `scripts/check-artifact.mjs:239`     | `stripHtmlComments`        |         32 |
