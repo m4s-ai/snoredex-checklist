@@ -82,7 +82,8 @@ function isControlHeaderClose(tokens, closeIndex) {
 }
 
 function shouldRescanSlash(previous, tokens = []) {
-  return !canEndExpression(previous) || isControlHeaderClose(tokens, tokens.length - 1);
+  const memberProperty = isMemberPropertyAccess(tokens, tokens.length - 1);
+  return (!canEndExpression(previous) && !memberProperty) || isControlHeaderClose(tokens, tokens.length - 1);
 }
 
 function pairBraces(tokens) {
@@ -114,6 +115,23 @@ function identifierLike(token) {
   return token && (token.kind === SyntaxKind.Identifier || token.kind === SyntaxKind.ConstructorKeyword);
 }
 
+function isKeywordToken(token) {
+  return token && token.kind >= SyntaxKind.FirstKeyword && token.kind <= SyntaxKind.LastKeyword;
+}
+
+function methodNameLike(token) {
+  return (
+    identifierLike(token) ||
+    [
+      SyntaxKind.PrivateIdentifier,
+      SyntaxKind.StringLiteral,
+      SyntaxKind.NumericLiteral,
+      SyntaxKind.BigIntLiteral,
+    ].includes(token?.kind) ||
+    isKeywordToken(token)
+  );
+}
+
 function looksLikeMethodName(tokens, nameIndex) {
   const previous = tokens[nameIndex - 1];
   if (!previous) return true;
@@ -131,6 +149,7 @@ function looksLikeMethodName(tokens, nameIndex) {
     SyntaxKind.PrivateKeyword,
     SyntaxKind.ProtectedKeyword,
     SyntaxKind.AsyncKeyword,
+    SyntaxKind.OverrideKeyword,
     SyntaxKind.AsteriskToken,
   ].includes(previous.kind);
 }
@@ -845,7 +864,23 @@ function isConditionalTypeAngleStart(tokens, index) {
     const close = matching(tokens, index + 1, SyntaxKind.OpenBracketToken, SyntaxKind.CloseBracketToken);
     return close !== undefined && tokens[close + 1]?.kind === SyntaxKind.ExtendsKeyword;
   }
-  if ([SyntaxKind.StringKeyword, SyntaxKind.NumberKeyword, SyntaxKind.BooleanKeyword].includes(first?.kind))
+  if (
+    [
+      SyntaxKind.AnyKeyword,
+      SyntaxKind.BigIntKeyword,
+      SyntaxKind.BooleanKeyword,
+      SyntaxKind.NeverKeyword,
+      SyntaxKind.NullKeyword,
+      SyntaxKind.NumberKeyword,
+      SyntaxKind.ObjectKeyword,
+      SyntaxKind.StringKeyword,
+      SyntaxKind.SymbolKeyword,
+      SyntaxKind.ThisKeyword,
+      SyntaxKind.UndefinedKeyword,
+      SyntaxKind.UnknownKeyword,
+      SyntaxKind.VoidKeyword,
+    ].includes(first?.kind)
+  )
     return afterFirst === SyntaxKind.ExtendsKeyword;
   return [
     SyntaxKind.KeyOfKeyword,
@@ -1001,8 +1036,9 @@ function collectFunctions(tokens, source, path) {
     const nameIndex = index - 1;
     let name;
     if (
-      (identifierLike(tokens[nameIndex]) || tokens[nameIndex]?.kind === SyntaxKind.PrivateIdentifier) &&
-      looksLikeMethodName(tokens, nameIndex)
+      methodNameLike(tokens[nameIndex]) &&
+      looksLikeMethodName(tokens, nameIndex) &&
+      (!isKeywordToken(tokens[nameIndex]) || isMemberContext(tokens, nameIndex))
     )
       name = tokens[nameIndex].text;
     else if (isKeywordNamedMethod(tokens, nameIndex)) name = tokens[nameIndex].text;
@@ -1391,6 +1427,28 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: '#check', complexity: 2 }],
     },
     {
+      source: `class PropertyNameMethods {
+        "check"() { if (ready) return true; }
+        42() { if (ready) return true; }
+        return() { if (ready) return true; }
+      }`,
+      expected: [
+        { name: '"check"', complexity: 2 },
+        { name: '42', complexity: 2 },
+        { name: 'return', complexity: 2 },
+      ],
+    },
+    {
+      source: `class OverrideMethods {
+        override check() { if (ready) return true; }
+        public override checkAgain() { if (ready) return true; }
+      }`,
+      expected: [
+        { name: 'check', complexity: 2 },
+        { name: 'checkAgain', complexity: 2 },
+      ],
+    },
+    {
       source: `function inlineOptionalType(value) {
         const hooks: { ready?(): boolean } = value;
         if (value) return hooks;
@@ -1421,6 +1479,10 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function memberCallDivision(value) { obj.if(value) / 2 && value / 3; return value; }',
       expected: [{ name: 'memberCallDivision', complexity: 2 }],
+    },
+    {
+      source: 'function memberPropertyDivision(value) { return obj.if / 2 && value / 3; }',
+      expected: [{ name: 'memberPropertyDivision', complexity: 2 }],
     },
     {
       source:
@@ -1455,6 +1517,11 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function primitiveConditional(value) { return factory<string extends Foo ? A : B>() || value; }',
       expected: [{ name: 'primitiveConditional', complexity: 2 }],
+    },
+    {
+      source:
+        'function keywordConditional(value) { return factory<unknown extends Foo ? A : B>() || factory<any extends Foo ? A : B>() || value; }',
+      expected: [{ name: 'keywordConditional', complexity: 3 }],
     },
     {
       source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
