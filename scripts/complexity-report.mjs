@@ -255,6 +255,25 @@ function isSemicolonlessClassMethod(tokens, nameIndex, bracePairs) {
     } else if (parens === 0 && brackets === 0 && braces === 0) {
       if (kind === SyntaxKind.EqualsToken) return true;
       if ([SyntaxKind.ExclamationToken, SyntaxKind.QuestionToken].includes(tokens[cursor - 1]?.kind)) return true;
+      if (kind === SyntaxKind.ColonToken && identifierLike(tokens[cursor - 1])) {
+        for (let parent = cursor - 2; parent >= 0; parent -= 1) {
+          const parentKind = tokens[parent].kind;
+          if (parentKind === SyntaxKind.DeclareKeyword) return true;
+          if (parentKind === SyntaxKind.OpenBraceToken) return true;
+          if (
+            [
+              SyntaxKind.SemicolonToken,
+              SyntaxKind.CommaToken,
+              SyntaxKind.CloseBraceToken,
+              SyntaxKind.EqualsToken,
+              SyntaxKind.OpenParenToken,
+              SyntaxKind.FunctionKeyword,
+              SyntaxKind.ReturnKeyword,
+            ].includes(parentKind)
+          )
+            break;
+        }
+      }
       if ([SyntaxKind.SemicolonToken, SyntaxKind.CommaToken, SyntaxKind.OpenBraceToken].includes(kind)) return false;
     }
   }
@@ -664,7 +683,7 @@ function findBodyOpen(tokens, after, braces) {
       if (token.kind === SyntaxKind.OpenBraceToken) {
         const previousKind = tokens[index - 1]?.kind;
         const operatorKeywordBrace =
-          [SyntaxKind.KeyOfKeyword, SyntaxKind.ReadonlyKeyword].includes(previousKind) &&
+          [SyntaxKind.ExtendsKeyword, SyntaxKind.KeyOfKeyword, SyntaxKind.ReadonlyKeyword].includes(previousKind) &&
           ![SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[index - 2]?.kind);
         const typeBrace =
           angleDepth > 0 ||
@@ -673,7 +692,6 @@ function findBodyOpen(tokens, after, braces) {
             SyntaxKind.LessThanToken,
             SyntaxKind.BarToken,
             SyntaxKind.AmpersandToken,
-            SyntaxKind.ExtendsKeyword,
             SyntaxKind.EqualsGreaterThanToken,
             SyntaxKind.CommaToken,
             SyntaxKind.OpenBracketToken,
@@ -1909,8 +1927,19 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: 'keyofMemberReturn', complexity: 2 }],
     },
     {
+      source: 'function extendsMemberReturn(): typeof obj.extends { if (ready) return true; }',
+      expected: [{ name: 'extendsMemberReturn', complexity: 2 }],
+    },
+    {
       source: `class DeclarationOnlyField {
         field!: number
+        check(ready) { if (ready) return true; return false; }
+      }`,
+      expected: [{ name: 'check', complexity: 2 }],
+    },
+    {
+      source: `class DeclaredField {
+        declare field: number
         check(ready) { if (ready) return true; return false; }
       }`,
       expected: [{ name: 'check', complexity: 2 }],
