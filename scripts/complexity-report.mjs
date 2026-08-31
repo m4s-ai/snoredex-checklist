@@ -756,6 +756,8 @@ function genericMethodNameIndex(tokens, closeAngleIndex, bracePairs) {
       angles -= 1;
       if (angles === 0) {
         const nameIndex = cursor - 1;
+        if (tokens[nameIndex]?.kind === SyntaxKind.CloseBracketToken && isComputedMethodName(tokens, nameIndex))
+          return nameIndex;
         return methodNameLike(tokens[nameIndex]) &&
           (looksLikeMethodName(tokens, nameIndex) || isSemicolonlessClassMethod(tokens, nameIndex, bracePairs))
           ? nameIndex
@@ -963,7 +965,9 @@ function findArrowBindingName(tokens, equalsIndex) {
     const kind = tokens[cursor].kind;
     if (kind === SyntaxKind.ColonToken) {
       const optionalMarker = tokens[cursor - 1]?.kind === SyntaxKind.QuestionToken;
-      const name = tokens[cursor - (optionalMarker ? 2 : 1)];
+      const nameIndex = cursor - (optionalMarker ? 2 : 1);
+      const name = tokens[nameIndex];
+      if (name?.kind === SyntaxKind.CloseBracketToken && isComputedMemberName(tokens, nameIndex)) return '<computed>';
       return bindingNameLike(name) ? name.text : undefined;
     }
     const closeOpenPairs = [
@@ -1570,7 +1574,7 @@ function collectFunctions(tokens, source, path) {
     ) {
       const genericName = genericMethodNameIndex(tokens, nameIndex, braces);
       if (genericName === undefined) continue;
-      name = tokens[genericName].text;
+      name = tokens[genericName].kind === SyntaxKind.CloseBracketToken ? '<computed>' : tokens[genericName].text;
     } else continue;
     const close = matching(tokens, index, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
     const bodyOpen = close === undefined ? undefined : findBodyOpen(tokens, close, braces);
@@ -2391,6 +2395,16 @@ if (process.argv.includes('--self-test')) {
       source: `class ComputedMethod {
         [Symbol.iterator]() { if (ready) return value; return undefined; }
       }`,
+      expected: [{ name: '<computed>', complexity: 2 }],
+    },
+    {
+      source: `class GenericComputedMethod {
+        [key]<T>(ready: T) { if (ready) return value; return undefined; }
+      }`,
+      expected: [{ name: '<computed>', complexity: 2 }],
+    },
+    {
+      source: 'class ComputedTypedField { ["cb"]: Handler = () => ready ? first : second; }',
       expected: [{ name: '<computed>', complexity: 2 }],
     },
     {
