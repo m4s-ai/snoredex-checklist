@@ -473,6 +473,8 @@ function findStatementEnd(tokens, start) {
     }
     return statementEnd;
   }
+  if (identifierLike(tokens[start]) && tokens[start + 1]?.kind === SyntaxKind.ColonToken)
+    return findStatementEnd(tokens, start + 2);
   let parens = 0;
   let brackets = 0;
   for (let index = start; index < tokens.length; index += 1) {
@@ -855,6 +857,13 @@ if (process.argv.includes('--self-test')) {
         { name: 'namedParameterTypes', complexity: 1 },
         { name: 'tryBody', complexity: 2 },
       ],
+    },
+    {
+      source: `function labeledBody(value, ready) {
+        do body: { step(value); } while (ready);
+        return value;
+      }`,
+      expected: [{ name: 'labeledBody', complexity: 2 }],
     },
   ];
   for (const sample of samples) {
