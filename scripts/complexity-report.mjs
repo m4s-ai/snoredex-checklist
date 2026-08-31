@@ -142,6 +142,19 @@ function matching(tokens, start, openKind, closeKind) {
   return undefined;
 }
 
+function matchingAngleClose(tokens, start) {
+  let depth = 0;
+  for (let index = start; index < tokens.length; index += 1) {
+    const kind = tokens[index].kind;
+    if (kind === SyntaxKind.LessThanToken) depth += 1;
+    else if (kind === SyntaxKind.GreaterThanToken) depth -= 1;
+    else if (kind === SyntaxKind.GreaterThanGreaterThanToken) depth -= 2;
+    else if (kind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken) depth -= 3;
+    if (depth === 0) return index;
+  }
+  return undefined;
+}
+
 function identifierLike(token) {
   return token && (token.kind === SyntaxKind.Identifier || token.kind === SyntaxKind.ConstructorKeyword);
 }
@@ -661,7 +674,15 @@ function isTypeOnlyArrow(tokens, arrowIndex) {
     const kind = tokens[index].kind;
     if ([SyntaxKind.SemicolonToken, SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken].includes(kind)) break;
     if ([SyntaxKind.ConstKeyword, SyntaxKind.LetKeyword, SyntaxKind.VarKeyword].includes(kind)) return false;
-    if ([SyntaxKind.TypeKeyword, SyntaxKind.InterfaceKeyword, SyntaxKind.DeclareKeyword].includes(kind)) return true;
+    if (
+      [
+        SyntaxKind.TypeKeyword,
+        SyntaxKind.InterfaceKeyword,
+        SyntaxKind.DeclareKeyword,
+        SyntaxKind.FunctionKeyword,
+      ].includes(kind)
+    )
+      return true;
   }
   return false;
 }
@@ -1084,8 +1105,15 @@ function isConditionalTypeAngleStart(tokens, index) {
   const first = tokens[index + 1];
   const afterFirst = tokens[index + 2]?.kind;
   if (identifierLike(first)) {
-    if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken, SyntaxKind.OpenParenToken].includes(afterFirst))
-      return false;
+    if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(afterFirst)) {
+      let cursor = index + 2;
+      while ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[cursor]?.kind)) {
+        if (!identifierLike(tokens[cursor + 1])) return false;
+        cursor += 2;
+      }
+      return tokens[cursor]?.kind === SyntaxKind.ExtendsKeyword;
+    }
+    if (afterFirst === SyntaxKind.OpenParenToken) return false;
     return true;
   }
   if (first?.kind === SyntaxKind.OpenBraceToken) {
@@ -1258,8 +1286,15 @@ function collectFunctions(tokens, source, path) {
       if (tokens[nameIndex]?.kind === SyntaxKind.AsteriskToken) nameIndex += 1;
       const named = identifierLike(tokens[nameIndex]);
       const name = named ? tokens[nameIndex].text : '<anonymous>';
+      let parameterSearchStart = nameIndex;
+      if (named && tokens[nameIndex + 1]?.kind === SyntaxKind.LessThanToken) {
+        const genericClose = matchingAngleClose(tokens, nameIndex + 1);
+        if (genericClose === undefined) continue;
+        parameterSearchStart = genericClose + 1;
+      }
       const parameterOpen = tokens.findIndex(
-        (candidate, candidateIndex) => candidateIndex >= nameIndex && candidate.kind === SyntaxKind.OpenParenToken,
+        (candidate, candidateIndex) =>
+          candidateIndex >= parameterSearchStart && candidate.kind === SyntaxKind.OpenParenToken,
       );
       const parameterClose =
         parameterOpen === -1
@@ -1947,6 +1982,15 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function constrained<T>(): T extends { ready: boolean } ? string : number { if (ready) return true; }',
       expected: [{ name: 'constrained', complexity: 2 }],
+    },
+    {
+      source:
+        'function callableConstraint<T extends (value: string) => boolean>(ready: boolean) { if (ready) return true; }',
+      expected: [{ name: 'callableConstraint', complexity: 2 }],
+    },
+    {
+      source: 'function qualifiedConditional() { return factory<Types.T extends Foo ? A : B>() || value; }',
+      expected: [{ name: 'qualifiedConditional', complexity: 2 }],
     },
     {
       source: `function storage() {
