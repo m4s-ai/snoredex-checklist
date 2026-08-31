@@ -88,7 +88,7 @@ jobs:
               activeRuns.splice(
                 0,
                 activeRuns.length,
-                ...currentRuns().filter((run) => run.status === 'in_progress' || run.status === 'waiting' || run.status === 'pending'),
+                ...currentRuns().filter((run) => activeStatuses.has(run.status)),
               );
             }
             if (activeRuns.length > 0) throw new Error('rollback could not acquire the deployment lane');
