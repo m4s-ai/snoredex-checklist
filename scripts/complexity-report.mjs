@@ -844,6 +844,8 @@ function isConditionalTypeAngleStart(tokens, index) {
     const close = matching(tokens, index + 1, SyntaxKind.OpenBracketToken, SyntaxKind.CloseBracketToken);
     return close !== undefined && tokens[close + 1]?.kind === SyntaxKind.ExtendsKeyword;
   }
+  if ([SyntaxKind.StringKeyword, SyntaxKind.NumberKeyword, SyntaxKind.BooleanKeyword].includes(first?.kind))
+    return afterFirst === SyntaxKind.ExtendsKeyword;
   return [
     SyntaxKind.KeyOfKeyword,
     SyntaxKind.TypeOfKeyword,
@@ -1433,6 +1435,10 @@ if (process.argv.includes('--self-test')) {
       source:
         'function structuredConditional(value) { return factory<{ value: T } extends Foo ? A : B>() || factory<[T] extends Foo ? C : D>() || value; }',
       expected: [{ name: 'structuredConditional', complexity: 3 }],
+    },
+    {
+      source: 'function primitiveConditional(value) { return factory<string extends Foo ? A : B>() || value; }',
+      expected: [{ name: 'primitiveConditional', complexity: 2 }],
     },
     {
       source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
