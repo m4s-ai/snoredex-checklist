@@ -120,6 +120,16 @@ function looksLikeMethodName(tokens, nameIndex) {
   ].includes(previous.kind);
 }
 
+function isComputedMethodName(tokens, closeBracketIndex) {
+  const openBracket = matchingOpen(
+    tokens,
+    closeBracketIndex,
+    SyntaxKind.OpenBracketToken,
+    SyntaxKind.CloseBracketToken,
+  );
+  return openBracket !== undefined && looksLikeMethodName(tokens, openBracket);
+}
+
 function matchingOpen(tokens, close, openKind, closeKind) {
   let depth = 0;
   for (let index = close; index >= 0; index -= 1) {
@@ -373,6 +383,7 @@ function findArrowExpressionEnd(tokens, start) {
   let brackets = 0;
   let braces = 0;
   let templateDepth = 0;
+  let conditionalDepth = 0;
   for (let index = start; index < tokens.length; index += 1) {
     const kind = tokens[index].kind;
     if (kind === SyntaxKind.TemplateHead) {
@@ -400,10 +411,16 @@ function findArrowExpressionEnd(tokens, start) {
     else if (kind === SyntaxKind.CloseBraceToken) {
       if (braces === 0 && parens === 0 && brackets === 0) return index;
       braces -= 1;
+    } else if (parens === 0 && brackets === 0 && braces === 0 && kind === SyntaxKind.QuestionToken) {
+      conditionalDepth += 1;
+    } else if (parens === 0 && brackets === 0 && braces === 0 && kind === SyntaxKind.ColonToken) {
+      if (conditionalDepth === 0) return index;
+      conditionalDepth -= 1;
     } else if (
       parens === 0 &&
       brackets === 0 &&
       braces === 0 &&
+      conditionalDepth === 0 &&
       [SyntaxKind.CommaToken, SyntaxKind.SemicolonToken].includes(kind)
     )
       return index;
@@ -575,15 +592,16 @@ function collectFunctions(tokens, source, path) {
       }
       continue;
     }
-    if (
-      token.kind !== SyntaxKind.OpenParenToken ||
-      !identifierLike(tokens[index - 1]) ||
-      !looksLikeMethodName(tokens, index - 1)
-    )
-      continue;
+    if (token.kind !== SyntaxKind.OpenParenToken) continue;
+    const nameIndex = index - 1;
+    let name;
+    if (identifierLike(tokens[nameIndex]) && looksLikeMethodName(tokens, nameIndex)) name = tokens[nameIndex].text;
+    else if (tokens[nameIndex]?.kind === SyntaxKind.CloseBracketToken && isComputedMethodName(tokens, nameIndex))
+      name = '<computed>';
+    else continue;
     const close = matching(tokens, index, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
     const bodyOpen = close === undefined ? undefined : findBodyOpen(tokens, close, braces);
-    if (bodyOpen !== undefined) add(index - 1, { bodyOpen, bodyClose: braces.get(bodyOpen) }, tokens[index - 1].text);
+    if (bodyOpen !== undefined) add(nameIndex, { bodyOpen, bodyClose: braces.get(bodyOpen) }, name);
   }
 
   for (const entry of functions) {
@@ -778,6 +796,14 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: 'templateArrow', complexity: 3 }],
     },
     {
+      source:
+        'function conditionalArrow(cond, fallback, other) { return cond ? (x) => x && fallback : fallback || other; }',
+      expected: [
+        { name: 'conditionalArrow', complexity: 3 },
+        { name: '<arrow>', complexity: 2 },
+      ],
+    },
+    {
       source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
       expected: [{ name: 'wrapped', complexity: 2 }],
     },
@@ -860,6 +886,12 @@ if (process.argv.includes('--self-test')) {
         constructor(first: unknown, options: { readonly now?: () => string }, last: unknown) {}
       }`,
       expected: [{ name: 'constructor', complexity: 1 }],
+    },
+    {
+      source: `class ComputedMethod {
+        [Symbol.iterator]() { if (ready) return value; return undefined; }
+      }`,
+      expected: [{ name: '<computed>', complexity: 2 }],
     },
     {
       source: `function doWhile(value) {
