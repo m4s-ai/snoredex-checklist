@@ -953,7 +953,8 @@ function findArrowBindingName(tokens, equalsIndex) {
   for (let cursor = equalsIndex - 1; cursor >= 0; cursor -= 1) {
     const kind = tokens[cursor].kind;
     if (kind === SyntaxKind.ColonToken) {
-      const name = tokens[cursor - 1];
+      const optionalMarker = tokens[cursor - 1]?.kind === SyntaxKind.QuestionToken;
+      const name = tokens[cursor - (optionalMarker ? 2 : 1)];
       return bindingNameLike(name) ? name.text : undefined;
     }
     const closeOpenPairs = [
@@ -1247,18 +1248,24 @@ function isKeywordNamedProperty(tokens, index) {
 function isConditionalTypeQuestion(tokens, index, start = 0) {
   if (tokens[index]?.kind !== SyntaxKind.QuestionToken) return false;
   let sawExtends = false;
+  let extendsIndex;
   for (let cursor = index - 1; cursor >= start; cursor -= 1) {
     const kind = tokens[cursor].kind;
     if (kind === SyntaxKind.ExtendsKeyword) {
       if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[cursor - 1]?.kind)) return false;
       sawExtends = true;
+      extendsIndex = cursor;
       continue;
     }
     if (kind === SyntaxKind.TypeKeyword) return sawExtends;
     if (kind === SyntaxKind.ColonToken && sawExtends) return true;
     if (kind === SyntaxKind.LessThanToken && sawExtends && isConditionalTypeAngleStart(tokens, cursor)) {
       const angleClose = matchingAngleClose(tokens, cursor);
-      if (angleClose === undefined || index >= angleClose) continue;
+      if (angleClose === undefined) return false;
+      if (index >= angleClose) {
+        if (extendsIndex !== undefined && extendsIndex < angleClose) sawExtends = false;
+        continue;
+      }
       let angleDepth = 0;
       for (let boundary = cursor; boundary < tokens.length; boundary += 1) {
         const boundaryKind = tokens[boundary].kind;
@@ -2116,6 +2123,11 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: 'runtimeAfterConditionalType', complexity: 2 }],
     },
     {
+      source:
+        'function objectPropertyAfterConditionalType(value) { return { x: factory<T extends U ? A : B>() ? yes : no }; }',
+      expected: [{ name: 'objectPropertyAfterConditionalType', complexity: 2 }],
+    },
+    {
       source: 'function parenthesizedConditional(value) { return factory<(T) extends Foo ? A : B>() || value; }',
       expected: [{ name: 'parenthesizedConditional', complexity: 2 }],
     },
@@ -2230,6 +2242,10 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'class PrivateTypedField { #cb: Handler = () => ready ? first : second; }',
       expected: [{ name: '#cb', complexity: 2 }],
+    },
+    {
+      source: 'class OptionalTypedField { cb?: Handler = () => ready ? first : second; }',
+      expected: [{ name: 'cb', complexity: 2 }],
     },
     {
       source: 'function tupleCallback(callback: [() => boolean]) { return callback; }',
