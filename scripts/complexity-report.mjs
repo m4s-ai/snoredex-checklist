@@ -1453,6 +1453,7 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
         SyntaxKind.CommaToken,
         SyntaxKind.ColonToken,
         SyntaxKind.QuestionToken,
+        SyntaxKind.PlusToken,
         SyntaxKind.AmpersandAmpersandToken,
         SyntaxKind.BarBarToken,
         SyntaxKind.QuestionQuestionToken,
@@ -1499,6 +1500,7 @@ function isConditionalTypeAngleStart(tokens, index) {
     SyntaxKind.CommaToken,
     SyntaxKind.ColonToken,
     SyntaxKind.QuestionToken,
+    SyntaxKind.PlusToken,
     SyntaxKind.AmpersandAmpersandToken,
     SyntaxKind.BarBarToken,
     SyntaxKind.QuestionQuestionToken,
@@ -2804,6 +2806,12 @@ if (process.argv.includes('--self-test')) {
         return ready ?? <T extends U ? A : B>value;
       }`,
       expected: [{ name: 'nullishAssertion', complexity: 2 }],
+    },
+    {
+      source: `function plusAssertion() {
+        return ready + <T extends U ? A : B>value;
+      }`,
+      expected: [{ name: 'plusAssertion', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
