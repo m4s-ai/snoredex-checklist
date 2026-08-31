@@ -564,7 +564,34 @@ function isCatchClause(tokens, index) {
 }
 
 function isCaseClause(tokens, index) {
-  return tokens[index + 1]?.kind !== SyntaxKind.ColonToken;
+  return tokens[index + 1]?.kind !== SyntaxKind.ColonToken && !isKeywordNamedMethod(tokens, index);
+}
+
+function isKeywordNamedMethod(tokens, index) {
+  if (tokens[index]?.kind !== SyntaxKind.CaseKeyword) return false;
+  if (!looksLikeMethodName(tokens, index) || tokens[index + 1]?.kind !== SyntaxKind.OpenParenToken) return false;
+  const close = matching(tokens, index + 1, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+  return close !== undefined && tokens[close + 1]?.kind === SyntaxKind.OpenBraceToken;
+}
+
+function isConditionalTypeQuestion(tokens, index) {
+  if (tokens[index]?.kind !== SyntaxKind.QuestionToken) return false;
+  let sawExtends = false;
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const kind = tokens[cursor].kind;
+    if (kind === SyntaxKind.ExtendsKeyword) {
+      sawExtends = true;
+      continue;
+    }
+    if (kind === SyntaxKind.TypeKeyword) return sawExtends;
+    if (kind === SyntaxKind.SemicolonToken) return false;
+  }
+  return false;
+}
+
+function countSourceLines(source) {
+  const lines = source.split(/\r\n|\n|\r/u).length;
+  return lines - (/(?:\r\n|\n|\r)$/u.test(source) ? 1 : 0);
 }
 
 function findStatementEnd(tokens, start) {
@@ -707,6 +734,7 @@ function collectFunctions(tokens, source, path) {
     const nameIndex = index - 1;
     let name;
     if (identifierLike(tokens[nameIndex]) && looksLikeMethodName(tokens, nameIndex)) name = tokens[nameIndex].text;
+    else if (isKeywordNamedMethod(tokens, nameIndex)) name = tokens[nameIndex].text;
     else if (tokens[nameIndex]?.kind === SyntaxKind.CloseBracketToken && isComputedMethodName(tokens, nameIndex))
       name = '<computed>';
     else if (
@@ -754,6 +782,7 @@ function collectFunctions(tokens, source, path) {
       ) {
         if (
           !isOptionalTypeProperty(tokens, index) &&
+          !isConditionalTypeQuestion(tokens, index) &&
           (tokens[index].kind !== SyntaxKind.CatchKeyword || isCatchClause(tokens, index)) &&
           (tokens[index].kind !== SyntaxKind.CaseKeyword || isCaseClause(tokens, index)) &&
           (tokens[index].kind !== SyntaxKind.WhileKeyword || !isDoWhileContinuation(tokens, index))
@@ -795,7 +824,7 @@ function reportFor(files) {
   let lines = 0;
   for (const path of files) {
     const source = files.sourceByPath.get(path);
-    lines += source.split(/\r\n|\n|\r/u).length;
+    lines += countSourceLines(source);
     entries.push(...collectFunctions(scan(source), source, path));
   }
   entries.sort(
@@ -950,6 +979,42 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function caseProperty(value, ready) { return { case: value && ready }; }',
       expected: [{ name: 'caseProperty', complexity: 2 }],
+    },
+    {
+      source: `function caseMethodHost(ready) {
+        return { case() { if (ready) return 1; return 0; } };
+      }`,
+      expected: [
+        { name: 'caseMethodHost', complexity: 1 },
+        { name: 'case', complexity: 2 },
+      ],
+    },
+    {
+      source: `function switchCase(value) {
+        switch (value) {
+          case 1:
+            return true;
+          default:
+            return false;
+        }
+      }`,
+      expected: [{ name: 'switchCase', complexity: 2 }],
+    },
+    {
+      source: `function conditionalType(value) {
+        type Choice<T> = T extends true ? string : number;
+        if (value) return value;
+        return undefined;
+      }`,
+      expected: [{ name: 'conditionalType', complexity: 2 }],
+    },
+    {
+      source: `function conditionalObjectType(value) {
+        type Choice<T> = T extends { value: unknown } ? string : number;
+        if (value) return value;
+        return undefined;
+      }`,
+      expected: [{ name: 'conditionalObjectType', complexity: 2 }],
     },
     {
       source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
@@ -1143,6 +1208,8 @@ if (process.argv.includes('--self-test')) {
     }));
     assert.deepEqual(actual, sample.expected);
   }
+  assert.equal(countSourceLines('one\n'), 1);
+  assert.equal(countSourceLines('one\n\ntwo\n'), 3);
   console.log('complexity self-test passed');
   process.exit(0);
 }
