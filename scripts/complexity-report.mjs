@@ -211,7 +211,11 @@ function isClassTypeParameterArrow(tokens, arrowIndex) {
     const genericClose = matchingAngleClose(tokens, cursor);
     if (genericClose === undefined || arrowIndex >= genericClose) continue;
     const nameIndex = cursor - 1;
-    if (identifierLike(tokens[nameIndex]) && tokens[nameIndex - 1]?.kind === SyntaxKind.ClassKeyword) return true;
+    if (
+      tokens[nameIndex]?.kind === SyntaxKind.ClassKeyword ||
+      (identifierLike(tokens[nameIndex]) && tokens[nameIndex - 1]?.kind === SyntaxKind.ClassKeyword)
+    )
+      return true;
   }
   return false;
 }
@@ -2564,6 +2568,12 @@ if (process.argv.includes('--self-test')) {
     },
     {
       source: `class NestedCallableConstraintClass<T extends Wrapper<() => boolean>> {
+        check(ready) { if (ready) return true; }
+      }`,
+      expected: [{ name: 'check', complexity: 2 }],
+    },
+    {
+      source: `const AnonymousCallableConstraintClass = class<T extends Wrapper<() => boolean>> {
         check(ready) { if (ready) return true; }
       }`,
       expected: [{ name: 'check', complexity: 2 }],
