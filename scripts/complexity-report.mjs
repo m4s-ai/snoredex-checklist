@@ -1563,6 +1563,7 @@ function isConditionalTypeAssertionPrefix(tokens, index) {
       SyntaxKind.VoidKeyword,
       SyntaxKind.TypeOfKeyword,
       SyntaxKind.DeleteKeyword,
+      SyntaxKind.EqualsGreaterThanToken,
       SyntaxKind.OpenParenToken,
       SyntaxKind.OpenBracketToken,
       SyntaxKind.ColonToken,
@@ -2886,6 +2887,10 @@ if (process.argv.includes('--self-test')) {
         return delete <T extends U ? A : B>value;
       }`,
       expected: [{ name: 'deleteAssertion', complexity: 1 }],
+    },
+    {
+      source: `const conciseAssertion = () => <T extends U ? A : B>value;`,
+      expected: [{ name: 'conciseAssertion', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
