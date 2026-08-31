@@ -20,7 +20,7 @@
     }
   },
   "scripts": {
-    "check": "npm run check:toolchain && npm run format:check && npm run typecheck && npm run test:unit && npm run test:contract && npm run smoke && npm run build:site && npm run build:reproducible && npm run artifact:check",
+    "check": "npm run check:toolchain && npm run complexity:check && npm run format:check && npm run typecheck && npm run test:unit && npm run test:contract && npm run smoke && npm run build:site && npm run build:reproducible && npm run artifact:check",
     "check:toolchain": "node scripts/check-toolchain.mjs",
     "format": "node scripts/format-changed.mjs --write",
     "format:check": "node scripts/format-changed.mjs --check",
