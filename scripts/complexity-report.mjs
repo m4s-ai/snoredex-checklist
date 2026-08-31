@@ -3,7 +3,7 @@ import { strict as assert } from 'node:assert';
 import { extname, join, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { format } from 'prettier';
-import { createScanner, SyntaxKind } from 'typescript/unstable/ast';
+import { createScanner, isBinaryOperator, SyntaxKind } from 'typescript/unstable/ast';
 
 const root = resolve(process.cwd());
 const outputPath = join(root, 'docs', 'complexity-report.md');
@@ -1445,24 +1445,7 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
         continue;
       }
       let angleDepth = 0;
-      const assertionAngle = [
-        SyntaxKind.EqualsToken,
-        SyntaxKind.ReturnKeyword,
-        SyntaxKind.OpenParenToken,
-        SyntaxKind.OpenBracketToken,
-        SyntaxKind.CommaToken,
-        SyntaxKind.ColonToken,
-        SyntaxKind.QuestionToken,
-        SyntaxKind.PlusToken,
-        SyntaxKind.MinusToken,
-        SyntaxKind.AsteriskToken,
-        SyntaxKind.AsteriskAsteriskToken,
-        SyntaxKind.PercentToken,
-        SyntaxKind.SlashToken,
-        SyntaxKind.AmpersandAmpersandToken,
-        SyntaxKind.BarBarToken,
-        SyntaxKind.QuestionQuestionToken,
-      ].includes(tokens[cursor - 1]?.kind);
+      const assertionAngle = isConditionalTypeAssertionPrefix(tokens, cursor);
       for (let boundary = cursor; boundary < tokens.length; boundary += 1) {
         const boundaryKind = tokens[boundary].kind;
         if (boundaryKind === SyntaxKind.LessThanToken) angleDepth += 1;
@@ -1496,25 +1479,7 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
 }
 
 function isConditionalTypeAngleStart(tokens, index) {
-  const previousKind = tokens[index - 1]?.kind;
-  const assertionPrefix = [
-    SyntaxKind.EqualsToken,
-    SyntaxKind.ReturnKeyword,
-    SyntaxKind.OpenParenToken,
-    SyntaxKind.OpenBracketToken,
-    SyntaxKind.CommaToken,
-    SyntaxKind.ColonToken,
-    SyntaxKind.QuestionToken,
-    SyntaxKind.PlusToken,
-    SyntaxKind.MinusToken,
-    SyntaxKind.AsteriskToken,
-    SyntaxKind.AsteriskAsteriskToken,
-    SyntaxKind.PercentToken,
-    SyntaxKind.SlashToken,
-    SyntaxKind.AmpersandAmpersandToken,
-    SyntaxKind.BarBarToken,
-    SyntaxKind.QuestionQuestionToken,
-  ].includes(previousKind);
+  const assertionPrefix = isConditionalTypeAssertionPrefix(tokens, index);
   if (!identifierLike(tokens[index - 1]) && !assertionPrefix) return false;
   const first = tokens[index + 1];
   const afterFirst = tokens[index + 2]?.kind;
@@ -1583,6 +1548,20 @@ function isConditionalTypeAngleStart(tokens, index) {
     SyntaxKind.ReadonlyKeyword,
     SyntaxKind.UniqueKeyword,
   ].includes(first?.kind);
+}
+
+function isConditionalTypeAssertionPrefix(tokens, index) {
+  const previousKind = tokens[index - 1]?.kind;
+  return (
+    isBinaryOperator(previousKind) ||
+    [
+      SyntaxKind.ReturnKeyword,
+      SyntaxKind.OpenParenToken,
+      SyntaxKind.OpenBracketToken,
+      SyntaxKind.ColonToken,
+      SyntaxKind.QuestionToken,
+    ].includes(previousKind)
+  );
 }
 
 function countSourceLines(source) {
@@ -2852,6 +2831,12 @@ if (process.argv.includes('--self-test')) {
         return ready ** <T extends U ? A : B>value;
       }`,
       expected: [{ name: 'exponentiationAssertion', complexity: 1 }],
+    },
+    {
+      source: `function bitwiseAssertion() {
+        return ready & <T extends U ? A : B>value;
+      }`,
+      expected: [{ name: 'bitwiseAssertion', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
