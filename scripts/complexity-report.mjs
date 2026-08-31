@@ -172,6 +172,34 @@ function isFunctionTypeParameterArrow(tokens, arrowIndex) {
   return false;
 }
 
+function isTupleTypeArrow(tokens, arrowIndex) {
+  const arrowClose = arrowIndex - 1;
+  if (tokens[arrowClose]?.kind !== SyntaxKind.CloseParenToken) return false;
+  const arrowOpen = matchingOpen(tokens, arrowClose, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+  if (arrowOpen === undefined) return false;
+  for (let bracket = arrowOpen - 1; bracket >= 0; bracket -= 1) {
+    if (tokens[bracket].kind !== SyntaxKind.OpenBracketToken) continue;
+    const bracketClose = matching(tokens, bracket, SyntaxKind.OpenBracketToken, SyntaxKind.CloseBracketToken);
+    if (bracketClose === undefined || arrowIndex >= bracketClose) continue;
+    for (let cursor = bracket - 1; cursor >= 0; cursor -= 1) {
+      const kind = tokens[cursor].kind;
+      if (kind === SyntaxKind.ColonToken) return true;
+      if (
+        [
+          SyntaxKind.EqualsToken,
+          SyntaxKind.CommaToken,
+          SyntaxKind.SemicolonToken,
+          SyntaxKind.OpenBraceToken,
+          SyntaxKind.CloseBraceToken,
+        ].includes(kind)
+      )
+        return false;
+    }
+    return false;
+  }
+  return false;
+}
+
 function identifierLike(token) {
   return token && (token.kind === SyntaxKind.Identifier || token.kind === SyntaxKind.ConstructorKeyword);
 }
@@ -688,6 +716,7 @@ function isTypeOnlyArrow(tokens, arrowIndex) {
   if (tokens[open - 1]?.kind === SyntaxKind.ColonToken) return true;
   if (tokens[open - 1]?.kind === SyntaxKind.AsKeyword) return true;
   if (isFunctionTypeParameterArrow(tokens, arrowIndex)) return true;
+  if (isTupleTypeArrow(tokens, arrowIndex)) return true;
   for (let index = open - 1; index >= 0; index -= 1) {
     const kind = tokens[index].kind;
     if ([SyntaxKind.SemicolonToken, SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken].includes(kind)) break;
@@ -2008,6 +2037,10 @@ if (process.argv.includes('--self-test')) {
         { name: 'defaultArrow', complexity: 1 },
         { name: 'callback', complexity: 2 },
       ],
+    },
+    {
+      source: 'function tupleCallback(callback: [() => boolean]) { return callback; }',
+      expected: [{ name: 'tupleCallback', complexity: 1 }],
     },
     {
       source: `function storage() {
