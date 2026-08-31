@@ -558,6 +558,17 @@ function isOptionalTypeProperty(tokens, index) {
   return tokens[index]?.kind === SyntaxKind.QuestionToken && tokens[index + 1]?.kind === SyntaxKind.ColonToken;
 }
 
+function isOptionalTypeMethod(tokens, index, start = 0) {
+  if (tokens[index]?.kind !== SyntaxKind.QuestionToken || tokens[index + 1]?.kind !== SyntaxKind.OpenParenToken)
+    return false;
+  for (let cursor = index - 1; cursor >= start; cursor -= 1) {
+    const kind = tokens[cursor].kind;
+    if (kind === SyntaxKind.TypeKeyword) return true;
+    if (kind === SyntaxKind.SemicolonToken) return false;
+  }
+  return false;
+}
+
 function isCatchClause(tokens, index) {
   if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[index - 1]?.kind)) return false;
   return [SyntaxKind.OpenParenToken, SyntaxKind.OpenBraceToken].includes(tokens[index + 1]?.kind);
@@ -602,6 +613,9 @@ function isMemberContext(tokens, index) {
             SyntaxKind.OpenBraceToken,
             SyntaxKind.CloseBraceToken,
             SyntaxKind.EqualsToken,
+            SyntaxKind.ColonToken,
+            SyntaxKind.CloseParenToken,
+            SyntaxKind.FunctionKeyword,
           ].includes(tokens[parent].kind)
         )
           return false;
@@ -642,6 +656,7 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
     }
     if (kind === SyntaxKind.TypeKeyword) return sawExtends;
     if (kind === SyntaxKind.ColonToken && sawExtends) return true;
+    if (kind === SyntaxKind.LessThanToken && sawExtends) return true;
     if (kind === SyntaxKind.SemicolonToken) return false;
   }
   return false;
@@ -840,6 +855,7 @@ function collectFunctions(tokens, source, path) {
       ) {
         if (
           !isOptionalTypeProperty(tokens, index) &&
+          !isOptionalTypeMethod(tokens, index, start) &&
           !isKeywordNamedMethod(tokens, index) &&
           !isConditionalTypeQuestion(tokens, index, start) &&
           (tokens[index].kind !== SyntaxKind.CatchKeyword || isCatchClause(tokens, index)) &&
@@ -1114,6 +1130,27 @@ if (process.argv.includes('--self-test')) {
         return value ? value : undefined;
       }`,
       expected: [{ name: 'conditionalParameter', complexity: 2 }],
+    },
+    {
+      source: `function optionalTypeMethod(value) {
+        type Hooks = { ready?(): boolean };
+        if (value) return value;
+        return undefined;
+      }`,
+      expected: [{ name: 'optionalTypeMethod', complexity: 2 }],
+    },
+    {
+      source: `function genericConditional(value) {
+        return factory<T extends string ? A : B>() || value;
+      }`,
+      expected: [{ name: 'genericConditional', complexity: 2 }],
+    },
+    {
+      source: `function typedReturn(value: T): Result {
+        for (const item of value) if (item) return item;
+        return value;
+      }`,
+      expected: [{ name: 'typedReturn', complexity: 3 }],
     },
     {
       source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
