@@ -184,6 +184,7 @@ function isTypeMemberScope(tokens, from) {
   const open = enclosingOpenBrace(tokens, from);
   if (open === undefined) return false;
   const before = tokens[open - 1]?.kind;
+  if (before === SyntaxKind.ColonToken) return true;
   if (
     [
       SyntaxKind.CloseParenToken,
@@ -264,6 +265,7 @@ function isTypedFunctionBody(tokens, open) {
     if (tokens[parameterClose]?.kind !== SyntaxKind.CloseParenToken) continue;
     const parameterOpen = matchingOpen(tokens, parameterClose, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
     if (parameterOpen === undefined) continue;
+    if (identifierLike(tokens[parameterOpen - 1]) && looksLikeMethodName(tokens, parameterOpen - 1)) return true;
     for (let parent = parameterOpen - 1; parent >= 0; parent -= 1) {
       const parentKind = tokens[parent].kind;
       if (parentKind === SyntaxKind.FunctionKeyword) return true;
@@ -755,7 +757,21 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
         else if (boundaryKind === SyntaxKind.GreaterThanGreaterThanToken) angleDepth -= 2;
         else if (boundaryKind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken) angleDepth -= 3;
         if (angleDepth === 0) {
-          if (tokens[boundary + 1]?.kind === SyntaxKind.OpenParenToken) return true;
+          if (
+            boundary + 1 >= tokens.length ||
+            [
+              SyntaxKind.OpenParenToken,
+              SyntaxKind.SemicolonToken,
+              SyntaxKind.CommaToken,
+              SyntaxKind.CloseParenToken,
+              SyntaxKind.CloseBracketToken,
+              SyntaxKind.CloseBraceToken,
+              SyntaxKind.DotToken,
+              SyntaxKind.QuestionDotToken,
+              SyntaxKind.EqualsToken,
+            ].includes(tokens[boundary + 1]?.kind)
+          )
+            return true;
           break;
         }
       }
@@ -1276,6 +1292,31 @@ if (process.argv.includes('--self-test')) {
         return value < limit && flags.extends ? value : limit;
       }`,
       expected: [{ name: 'relationalExtends', complexity: 3 }],
+    },
+    {
+      source: `class TypedMethod {
+        load(value: T): Promise<Result> {
+          for (const item of value) if (item) return item;
+          return value;
+        }
+      }`,
+      expected: [{ name: 'load', complexity: 3 }],
+    },
+    {
+      source: `function inlineOptionalType(value) {
+        const hooks: { ready?(): boolean } = value;
+        if (value) return hooks;
+        return undefined;
+      }`,
+      expected: [{ name: 'inlineOptionalType', complexity: 2 }],
+    },
+    {
+      source: `function instantiationConditional(value) {
+        const specialized = factory<T extends string ? A : B>;
+        if (value) return specialized;
+        return undefined;
+      }`,
+      expected: [{ name: 'instantiationConditional', complexity: 2 }],
     },
     {
       source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
