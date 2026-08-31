@@ -216,7 +216,16 @@ function isFunctionLikeParameterList(tokens, open) {
     }
     if (kind === SyntaxKind.LessThanToken) {
       angleDepth -= 1;
-      if (angleDepth === 0) return identifierLike(tokens[index - 1]) && looksLikeMethodName(tokens, index - 1);
+      if (angleDepth === 0) {
+        const beforeGeneric = tokens[index - 1];
+        return (
+          [SyntaxKind.EqualsToken, SyntaxKind.FunctionKeyword, SyntaxKind.AsyncKeyword, SyntaxKind.NewKeyword].includes(
+            beforeGeneric?.kind,
+          ) ||
+          (identifierLike(beforeGeneric) &&
+            (looksLikeMethodName(tokens, index - 1) || tokens[index - 2]?.kind === SyntaxKind.FunctionKeyword))
+        );
+      }
     }
   }
   return false;
@@ -554,6 +563,10 @@ function isCatchClause(tokens, index) {
   return [SyntaxKind.OpenParenToken, SyntaxKind.OpenBraceToken].includes(tokens[index + 1]?.kind);
 }
 
+function isCaseClause(tokens, index) {
+  return tokens[index + 1]?.kind !== SyntaxKind.ColonToken;
+}
+
 function findStatementEnd(tokens, start) {
   if (start >= tokens.length) return undefined;
   const firstKind = tokens[start].kind;
@@ -742,6 +755,7 @@ function collectFunctions(tokens, source, path) {
         if (
           !isOptionalTypeProperty(tokens, index) &&
           (tokens[index].kind !== SyntaxKind.CatchKeyword || isCatchClause(tokens, index)) &&
+          (tokens[index].kind !== SyntaxKind.CaseKeyword || isCaseClause(tokens, index)) &&
           (tokens[index].kind !== SyntaxKind.WhileKeyword || !isDoWhileContinuation(tokens, index))
         )
           entry.complexity += 1;
@@ -934,6 +948,10 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: 'keywordProperty', complexity: 2 }],
     },
     {
+      source: 'function caseProperty(value, ready) { return { case: value && ready }; }',
+      expected: [{ name: 'caseProperty', complexity: 2 }],
+    },
+    {
       source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
       expected: [{ name: 'wrapped', complexity: 2 }],
     },
@@ -1105,6 +1123,17 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'const genericArrow = <T extends Element>(selector: string): T => selector ? selector : undefined;',
       expected: [{ name: 'genericArrow', complexity: 2 }],
+    },
+    {
+      source: `function genericFunctionWithObject<T extends Foo<Bar>>(first: T, options: { cb?: () => void }, last: T) {
+        return last;
+      }`,
+      expected: [{ name: 'genericFunctionWithObject', complexity: 1 }],
+    },
+    {
+      source:
+        'const genericArrowWithObject = <T extends Foo<Bar>>(first: T, options: { cb?: () => void }, last: T) => last;',
+      expected: [{ name: 'genericArrowWithObject', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
