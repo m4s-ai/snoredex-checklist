@@ -808,6 +808,8 @@ function isTypeAssertionKeyword(tokens, index) {
     if (
       kind === SyntaxKind.BarToken ||
       kind === SyntaxKind.AmpersandToken ||
+      kind === SyntaxKind.DotToken ||
+      kind === SyntaxKind.QuestionDotToken ||
       isPrimitiveTypeKeyword(kind) ||
       identifierLike(tokens[cursor])
     )
@@ -1565,6 +1567,11 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function unionAssertionDivision(value) { return value as number | undefined / 2 && other / 3; }',
       expected: [{ name: 'unionAssertionDivision', complexity: 2 }],
+    },
+    {
+      source:
+        'function qualifiedUnionAssertionDivision(value) { return value as Foo.Bar | undefined / 2 && other / 3; }',
+      expected: [{ name: 'qualifiedUnionAssertionDivision', complexity: 2 }],
     },
     {
       source:
