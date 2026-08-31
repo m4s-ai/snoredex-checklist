@@ -70,6 +70,7 @@ function isControlHeaderClose(tokens, closeIndex) {
   if (tokens[closeIndex]?.kind !== SyntaxKind.CloseParenToken) return false;
   const openIndex = matchingOpen(tokens, closeIndex, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
   if (openIndex === undefined) return false;
+  if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[openIndex - 2]?.kind)) return false;
   return [
     SyntaxKind.IfKeyword,
     SyntaxKind.WhileKeyword,
@@ -405,8 +406,19 @@ function isGenericOpen(tokens, index) {
     return true;
   return (
     (identifierLike(tokens[index - 1]) && tokens[index - 2]?.kind === SyntaxKind.AsKeyword) ||
-    (identifierLike(tokens[index - 1]) && tokens[index - 2]?.kind === SyntaxKind.SatisfiesKeyword)
+    isSatisfiesTypeReference(tokens, index)
   );
+}
+
+function isSatisfiesTypeReference(tokens, index) {
+  if (!identifierLike(tokens[index - 1])) return false;
+  for (let cursor = index - 2; cursor >= 0; cursor -= 1) {
+    const kind = tokens[cursor].kind;
+    if (kind === SyntaxKind.SatisfiesKeyword) return true;
+    if (identifierLike(tokens[cursor]) || [SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(kind)) continue;
+    return false;
+  }
+  return false;
 }
 
 function isCallTypeArgumentOpen(tokens, index) {
@@ -754,6 +766,10 @@ function isKeywordNamedMethod(tokens, index) {
   return close !== undefined && tokens[close + 1]?.kind === SyntaxKind.OpenBraceToken;
 }
 
+function isMemberPropertyAccess(tokens, index) {
+  return [SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[index - 1]?.kind);
+}
+
 function isConditionalTypeQuestion(tokens, index, start = 0) {
   if (tokens[index]?.kind !== SyntaxKind.QuestionToken) return false;
   let sawExtends = false;
@@ -802,9 +818,18 @@ function isConditionalTypeAngleStart(tokens, index) {
   if (!identifierLike(tokens[index - 1])) return false;
   const first = tokens[index + 1];
   const afterFirst = tokens[index + 2]?.kind;
-  if (!identifierLike(first)) return false;
-  if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken, SyntaxKind.OpenParenToken].includes(afterFirst)) return false;
-  return true;
+  if (identifierLike(first)) {
+    if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken, SyntaxKind.OpenParenToken].includes(afterFirst))
+      return false;
+    return true;
+  }
+  return [
+    SyntaxKind.KeyOfKeyword,
+    SyntaxKind.TypeOfKeyword,
+    SyntaxKind.InferKeyword,
+    SyntaxKind.ReadonlyKeyword,
+    SyntaxKind.UniqueKeyword,
+  ].includes(first?.kind);
 }
 
 function countSourceLines(source) {
@@ -1001,6 +1026,7 @@ function collectFunctions(tokens, source, path) {
         if (
           !isOptionalTypeProperty(tokens, index) &&
           !isOptionalTypeMethod(tokens, index, start) &&
+          !isMemberPropertyAccess(tokens, index) &&
           !isKeywordNamedMethod(tokens, index) &&
           !isConditionalTypeQuestion(tokens, index, start) &&
           (tokens[index].kind !== SyntaxKind.CatchKeyword || isCatchClause(tokens, index)) &&
@@ -1349,13 +1375,25 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: 'satisfiesConditional', complexity: 2 }],
     },
     {
+      source: 'const qualifiedSatisfies = () => value satisfies Types.Pair<A, B> && ready;',
+      expected: [{ name: 'qualifiedSatisfies', complexity: 2 }],
+    },
+    {
       source: 'function controlRegex(value) { if (value) /a&&b/u.test(value); return value; }',
       expected: [{ name: 'controlRegex', complexity: 2 }],
+    },
+    {
+      source: 'function memberCallDivision(value) { obj.if(value) / 2 && value / 3; return value; }',
+      expected: [{ name: 'memberCallDivision', complexity: 2 }],
     },
     {
       source:
         'function pairedComparison(value, flags, first, second, minimum) { return value < flags.extends ? first : second > (minimum); }',
       expected: [{ name: 'pairedComparison', complexity: 2 }],
+    },
+    {
+      source: 'function keyofConditional(value) { return factory<keyof T extends string ? A : B>() || value; }',
+      expected: [{ name: 'keyofConditional', complexity: 2 }],
     },
     {
       source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
