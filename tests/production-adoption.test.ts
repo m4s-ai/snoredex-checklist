@@ -30,6 +30,13 @@ test('production adoption validates the reviewed target migration without requir
   assert.match(workflow, /new Set\(sources\)\.size !== sources\.length \|\|\s+!sameCatalogueDeployment/u);
   assert.match(workflow, /!digest\.test\(current\.catalogueFingerprint \?\? ''\)/u);
   assert.match(workflow, /push:\s+branches:\s+- main/u);
+  assert.match(workflow, /run-name: Deploy Pages \/ \$\{\{/u);
+  assert.match(workflow, /group: pages-\$\{\{/u);
+  assert.match(workflow, /deployment-lane:/u);
+  assert.match(workflow, /actions: read/u);
+  assert.match(workflow, /automatic adoption deferred while a rollback run is queued or active/u);
+  assert.match(workflow, /needs: deployment-lane/u);
+  assert.match(workflow, /if: needs\.deployment-lane\.outputs\.proceed == 'true'/u);
   assert.match(
     workflow,
     /description: Optional full consumer commit SHA \(rollback only; adopt uses the workflow revision\)/u,
