@@ -181,6 +181,23 @@ function isFunctionTypeParameterArrow(tokens, arrowIndex) {
   return false;
 }
 
+function isMethodTypeParameterArrow(tokens, arrowIndex) {
+  const close = arrowIndex - 1;
+  if (tokens[close]?.kind !== SyntaxKind.CloseParenToken) return false;
+  for (let cursor = close; cursor >= 0; cursor -= 1) {
+    if (tokens[cursor].kind !== SyntaxKind.LessThanToken) continue;
+    const genericClose = matchingAngleClose(tokens, cursor);
+    if (genericClose === undefined || arrowIndex >= genericClose) continue;
+    const nameIndex = cursor - 1;
+    if (
+      (methodNameLike(tokens[nameIndex]) && looksLikeMethodName(tokens, nameIndex)) ||
+      (tokens[nameIndex]?.kind === SyntaxKind.CloseBracketToken && isComputedMethodName(tokens, nameIndex))
+    )
+      return isMemberContext(tokens, nameIndex);
+  }
+  return false;
+}
+
 function isConditionalExpressionColon(tokens, colonIndex) {
   if (tokens[colonIndex - 1]?.kind === SyntaxKind.QuestionToken) return false;
   if (
@@ -472,6 +489,14 @@ function isClassMemberContext(tokens, index) {
       return false;
   }
   return false;
+}
+
+function isDestructuringBindingContext(tokens, index) {
+  const open = enclosingOpenBrace(tokens, index);
+  return (
+    open !== undefined &&
+    [SyntaxKind.ConstKeyword, SyntaxKind.LetKeyword, SyntaxKind.VarKeyword].includes(tokens[open - 1]?.kind)
+  );
 }
 
 function matchingOpen(tokens, close, openKind, closeKind) {
@@ -842,8 +867,9 @@ function isTypeOnlyArrow(tokens, arrowIndex) {
   if (tokens[open - 1]?.kind === SyntaxKind.LessThanToken) return true;
   if (isParenthesizedTypePosition(tokens, open)) return true;
   if (tokens[open - 1]?.kind === SyntaxKind.ColonToken) return !isConditionalExpressionColon(tokens, open - 1);
-  if (tokens[open - 1]?.kind === SyntaxKind.AsKeyword) return true;
+  if ([SyntaxKind.AsKeyword, SyntaxKind.SatisfiesKeyword].includes(tokens[open - 1]?.kind)) return true;
   if (isFunctionTypeParameterArrow(tokens, arrowIndex)) return true;
+  if (isMethodTypeParameterArrow(tokens, arrowIndex)) return true;
   if (isTupleTypeArrow(tokens, arrowIndex)) return true;
   for (let index = open - 1; index >= 0; index -= 1) {
     const kind = tokens[index].kind;
@@ -991,6 +1017,10 @@ function findArrowBindingName(tokens, equalsIndex) {
       const optionalMarker = tokens[cursor - 1]?.kind === SyntaxKind.QuestionToken;
       const nameIndex = cursor - (optionalMarker ? 2 : 1);
       const name = tokens[nameIndex];
+      if (isDestructuringBindingContext(tokens, cursor)) {
+        const binding = tokens[cursor + 1];
+        return bindingNameLike(binding) ? binding.text : undefined;
+      }
       if (name?.kind === SyntaxKind.CloseBracketToken) {
         if (isComputedMemberName(tokens, nameIndex)) return '<computed>';
         const binding = tokens[cursor + 1];
@@ -2432,12 +2462,26 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: '<computed>', complexity: 2 }],
     },
     {
+      source: `class CallableConstraintMethod {
+        method<T extends (value: string) => boolean>(value: T) { if (value) return value; }
+      }`,
+      expected: [{ name: 'method', complexity: 2 }],
+    },
+    {
       source: 'class ComputedTypedField { ["cb"]: Handler = () => ready ? first : second; }',
       expected: [{ name: '<computed>', complexity: 2 }],
     },
     {
       source: 'const { ["cb"]: cb = () => ready ? first : second } = source;',
       expected: [{ name: 'cb', complexity: 2 }],
+    },
+    {
+      source: 'const { property: cb = () => ready ? first : second } = source;',
+      expected: [{ name: 'cb', complexity: 2 }],
+    },
+    {
+      source: 'const satisfied = (() => true) satisfies () => boolean;',
+      expected: [{ name: 'satisfied', complexity: 1 }],
     },
     {
       source: `function doWhile(value) {
