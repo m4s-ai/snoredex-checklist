@@ -203,6 +203,19 @@ function isMethodTypeParameterArrow(tokens, arrowIndex) {
   return false;
 }
 
+function isClassTypeParameterArrow(tokens, arrowIndex) {
+  const close = arrowIndex - 1;
+  if (tokens[close]?.kind !== SyntaxKind.CloseParenToken) return false;
+  for (let cursor = close; cursor >= 0; cursor -= 1) {
+    if (tokens[cursor].kind !== SyntaxKind.LessThanToken) continue;
+    const genericClose = matchingAngleClose(tokens, cursor);
+    if (genericClose === undefined || arrowIndex >= genericClose) continue;
+    const nameIndex = cursor - 1;
+    return identifierLike(tokens[nameIndex]) && tokens[nameIndex - 1]?.kind === SyntaxKind.ClassKeyword;
+  }
+  return false;
+}
+
 function isConditionalExpressionColon(tokens, colonIndex) {
   if (tokens[colonIndex - 1]?.kind === SyntaxKind.QuestionToken) return false;
   if (
@@ -944,6 +957,7 @@ function isTypeOnlyArrow(tokens, arrowIndex) {
   if ([SyntaxKind.AsKeyword, SyntaxKind.SatisfiesKeyword].includes(tokens[open - 1]?.kind)) return true;
   if (isFunctionTypeParameterArrow(tokens, arrowIndex)) return true;
   if (isMethodTypeParameterArrow(tokens, arrowIndex)) return true;
+  if (isClassTypeParameterArrow(tokens, arrowIndex)) return true;
   if (isTupleTypeArrow(tokens, arrowIndex)) return true;
   for (let index = open - 1; index >= 0; index -= 1) {
     const kind = tokens[index].kind;
@@ -2541,6 +2555,12 @@ if (process.argv.includes('--self-test')) {
         method<T extends (value: string) => boolean>(value: T) { if (value) return value; }
       }`,
       expected: [{ name: 'method', complexity: 2 }],
+    },
+    {
+      source: `class CallableConstraintClass<T extends () => boolean> {
+        check(ready) { if (ready) return true; }
+      }`,
+      expected: [{ name: 'check', complexity: 2 }],
     },
     {
       source: 'class ComputedTypedField { ["cb"]: Handler = () => ready ? first : second; }',
