@@ -567,6 +567,52 @@ function isCaseClause(tokens, index) {
   return tokens[index + 1]?.kind !== SyntaxKind.ColonToken && !isKeywordNamedMethod(tokens, index);
 }
 
+function isMemberContext(tokens, index) {
+  let depth = 0;
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const kind = tokens[cursor].kind;
+    if (kind === SyntaxKind.CloseBraceToken) {
+      depth += 1;
+      continue;
+    }
+    if (kind !== SyntaxKind.OpenBraceToken) continue;
+    if (depth > 0) {
+      depth -= 1;
+      continue;
+    }
+    const before = tokens[cursor - 1]?.kind;
+    if (
+      [
+        SyntaxKind.CloseParenToken,
+        SyntaxKind.CloseBraceToken,
+        SyntaxKind.EqualsGreaterThanToken,
+        SyntaxKind.ElseKeyword,
+        SyntaxKind.TryKeyword,
+        SyntaxKind.FinallyKeyword,
+        SyntaxKind.DoKeyword,
+      ].includes(before)
+    )
+      return false;
+    if (before === SyntaxKind.Identifier) {
+      for (let parent = cursor - 2; parent >= 0; parent -= 1) {
+        if (tokens[parent].kind === SyntaxKind.ClassKeyword) return true;
+        if (
+          [
+            SyntaxKind.SemicolonToken,
+            SyntaxKind.OpenBraceToken,
+            SyntaxKind.CloseBraceToken,
+            SyntaxKind.EqualsToken,
+          ].includes(tokens[parent].kind)
+        )
+          return false;
+      }
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
+
 function isKeywordNamedMethod(tokens, index) {
   if (
     ![
@@ -579,29 +625,16 @@ function isKeywordNamedMethod(tokens, index) {
     ].includes(tokens[index]?.kind)
   )
     return false;
-  if (tokens[index - 1]?.kind === SyntaxKind.OpenBraceToken) {
-    if (
-      [
-        SyntaxKind.CloseParenToken,
-        SyntaxKind.CloseBraceToken,
-        SyntaxKind.ElseKeyword,
-        SyntaxKind.TryKeyword,
-        SyntaxKind.FinallyKeyword,
-        SyntaxKind.DoKeyword,
-        SyntaxKind.EqualsGreaterThanToken,
-      ].includes(tokens[index - 2]?.kind)
-    )
-      return false;
-  }
+  if (!isMemberContext(tokens, index)) return false;
   if (!looksLikeMethodName(tokens, index) || tokens[index + 1]?.kind !== SyntaxKind.OpenParenToken) return false;
   const close = matching(tokens, index + 1, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
   return close !== undefined && tokens[close + 1]?.kind === SyntaxKind.OpenBraceToken;
 }
 
-function isConditionalTypeQuestion(tokens, index) {
+function isConditionalTypeQuestion(tokens, index, start = 0) {
   if (tokens[index]?.kind !== SyntaxKind.QuestionToken) return false;
   let sawExtends = false;
-  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+  for (let cursor = index - 1; cursor >= start; cursor -= 1) {
     const kind = tokens[cursor].kind;
     if (kind === SyntaxKind.ExtendsKeyword) {
       sawExtends = true;
@@ -808,7 +841,7 @@ function collectFunctions(tokens, source, path) {
         if (
           !isOptionalTypeProperty(tokens, index) &&
           !isKeywordNamedMethod(tokens, index) &&
-          !isConditionalTypeQuestion(tokens, index) &&
+          !isConditionalTypeQuestion(tokens, index, start) &&
           (tokens[index].kind !== SyntaxKind.CatchKeyword || isCatchClause(tokens, index)) &&
           (tokens[index].kind !== SyntaxKind.CaseKeyword || isCaseClause(tokens, index)) &&
           (tokens[index].kind !== SyntaxKind.WhileKeyword || !isDoWhileContinuation(tokens, index))
@@ -1059,6 +1092,28 @@ if (process.argv.includes('--self-test')) {
         { name: 'catch', complexity: 2 },
         { name: 'if', complexity: 2 },
       ],
+    },
+    {
+      source: `function postStatementControls(value) {
+        value += 1;
+        if (value) return value;
+        return 0;
+      }
+      function postBlockControl(value) {
+        if (value) { return value; }
+        { for (const item of [value]) value += item; }
+        return value;
+      }`,
+      expected: [
+        { name: 'postStatementControls', complexity: 2 },
+        { name: 'postBlockControl', complexity: 3 },
+      ],
+    },
+    {
+      source: `function conditionalParameter(value: T extends string ? A : B) {
+        return value ? value : undefined;
+      }`,
+      expected: [{ name: 'conditionalParameter', complexity: 2 }],
     },
     {
       source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
