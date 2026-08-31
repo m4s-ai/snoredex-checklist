@@ -180,7 +180,7 @@ function isConditionalExpressionColon(tokens, colonIndex) {
       tokens[colonIndex - 2]?.kind,
     )
   )
-    return true;
+    return !isTypeMemberScope(tokens, colonIndex - 1) && !isTypeDeclarationScope(tokens, colonIndex - 1);
   let parens = 0;
   let brackets = 0;
   let braces = 0;
@@ -2145,6 +2145,10 @@ if (process.argv.includes('--self-test')) {
         { name: 'labeledArray', complexity: 1 },
         { name: '<arrow>', complexity: 2 },
       ],
+    },
+    {
+      source: 'function nestedTuple(callback: { handlers: [() => boolean] }) { return callback; }',
+      expected: [{ name: 'nestedTuple', complexity: 1 }],
     },
     {
       source: `function storage() {
