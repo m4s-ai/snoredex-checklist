@@ -540,7 +540,7 @@ function isCallTypeArgumentOpen(tokens, index) {
   return false;
 }
 
-function genericMethodNameIndex(tokens, closeAngleIndex) {
+function genericMethodNameIndex(tokens, closeAngleIndex, bracePairs) {
   let angles = 0;
   for (let cursor = closeAngleIndex; cursor >= 0; cursor -= 1) {
     const kind = tokens[cursor].kind;
@@ -551,7 +551,10 @@ function genericMethodNameIndex(tokens, closeAngleIndex) {
       angles -= 1;
       if (angles === 0) {
         const nameIndex = cursor - 1;
-        return identifierLike(tokens[nameIndex]) && looksLikeMethodName(tokens, nameIndex) ? nameIndex : undefined;
+        return identifierLike(tokens[nameIndex]) &&
+          (looksLikeMethodName(tokens, nameIndex) || isSemicolonlessClassMethod(tokens, nameIndex, bracePairs))
+          ? nameIndex
+          : undefined;
       }
     }
   }
@@ -1260,7 +1263,7 @@ function collectFunctions(tokens, source, path) {
         SyntaxKind.GreaterThanGreaterThanGreaterThanToken,
       ].includes(tokens[nameIndex]?.kind)
     ) {
-      const genericName = genericMethodNameIndex(tokens, nameIndex);
+      const genericName = genericMethodNameIndex(tokens, nameIndex, braces);
       if (genericName === undefined) continue;
       name = tokens[genericName].text;
     } else continue;
@@ -1505,6 +1508,13 @@ if (process.argv.includes('--self-test')) {
       source: `class SemicolonlessLiteralField {
         field = 1
         check(ready) { if (ready) return true; return false; }
+      }`,
+      expected: [{ name: 'check', complexity: 2 }],
+    },
+    {
+      source: `class SemicolonlessGenericField {
+        field = 1
+        check<T>(ready: T) { if (ready) return true; return false; }
       }`,
       expected: [{ name: 'check', complexity: 2 }],
     },
