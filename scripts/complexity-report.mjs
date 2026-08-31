@@ -662,6 +662,9 @@ function findBodyOpen(tokens, after, braces) {
       if (token.kind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken) angleDepth = Math.max(0, angleDepth - 3);
       if (token.kind === SyntaxKind.OpenBraceToken) {
         const previousKind = tokens[index - 1]?.kind;
+        const operatorKeywordBrace =
+          [SyntaxKind.KeyOfKeyword, SyntaxKind.ReadonlyKeyword].includes(previousKind) &&
+          ![SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[index - 2]?.kind);
         const typeBrace =
           angleDepth > 0 ||
           [
@@ -669,14 +672,13 @@ function findBodyOpen(tokens, after, braces) {
             SyntaxKind.LessThanToken,
             SyntaxKind.BarToken,
             SyntaxKind.AmpersandToken,
-            SyntaxKind.KeyOfKeyword,
-            SyntaxKind.ReadonlyKeyword,
             SyntaxKind.EqualsGreaterThanToken,
             SyntaxKind.CommaToken,
             SyntaxKind.OpenBracketToken,
             SyntaxKind.OpenParenToken,
             SyntaxKind.QuestionToken,
-          ].includes(previousKind);
+          ].includes(previousKind) ||
+          operatorKeywordBrace;
         if (typeBrace) {
           const typeClose = braces.get(index);
           if (typeClose === undefined) return undefined;
@@ -1895,6 +1897,14 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function readonlyReturn(): readonly { ready: boolean }[] { if (ready) return []; }',
       expected: [{ name: 'readonlyReturn', complexity: 2 }],
+    },
+    {
+      source: 'function readonlyMemberReturn(): typeof obj.readonly { if (ready) return true; }',
+      expected: [{ name: 'readonlyMemberReturn', complexity: 2 }],
+    },
+    {
+      source: 'function keyofMemberReturn(): typeof obj.keyof { if (ready) return true; }',
+      expected: [{ name: 'keyofMemberReturn', complexity: 2 }],
     },
     {
       source: `function storage() {
