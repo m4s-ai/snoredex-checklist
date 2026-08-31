@@ -254,6 +254,7 @@ function isSemicolonlessClassMethod(tokens, nameIndex, bracePairs) {
       else return false;
     } else if (parens === 0 && brackets === 0 && braces === 0) {
       if (kind === SyntaxKind.EqualsToken) return true;
+      if ([SyntaxKind.ExclamationToken, SyntaxKind.QuestionToken].includes(tokens[cursor - 1]?.kind)) return true;
       if ([SyntaxKind.SemicolonToken, SyntaxKind.CommaToken, SyntaxKind.OpenBraceToken].includes(kind)) return false;
     }
   }
@@ -672,6 +673,7 @@ function findBodyOpen(tokens, after, braces) {
             SyntaxKind.LessThanToken,
             SyntaxKind.BarToken,
             SyntaxKind.AmpersandToken,
+            SyntaxKind.ExtendsKeyword,
             SyntaxKind.EqualsGreaterThanToken,
             SyntaxKind.CommaToken,
             SyntaxKind.OpenBracketToken,
@@ -1905,6 +1907,17 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function keyofMemberReturn(): typeof obj.keyof { if (ready) return true; }',
       expected: [{ name: 'keyofMemberReturn', complexity: 2 }],
+    },
+    {
+      source: `class DeclarationOnlyField {
+        field!: number
+        check(ready) { if (ready) return true; return false; }
+      }`,
+      expected: [{ name: 'check', complexity: 2 }],
+    },
+    {
+      source: 'function constrained<T>(): T extends { ready: boolean } ? string : number { if (ready) return true; }',
+      expected: [{ name: 'constrained', complexity: 2 }],
     },
     {
       source: `function storage() {
