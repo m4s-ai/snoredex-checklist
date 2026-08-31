@@ -954,7 +954,7 @@ function findArrowBindingName(tokens, equalsIndex) {
     const kind = tokens[cursor].kind;
     if (kind === SyntaxKind.ColonToken) {
       const name = tokens[cursor - 1];
-      return identifierLike(name) ? name.text : undefined;
+      return bindingNameLike(name) ? name.text : undefined;
     }
     const closeOpenPairs = [
       [SyntaxKind.CloseParenToken, SyntaxKind.OpenParenToken],
@@ -996,6 +996,10 @@ function findArrowBindingName(tokens, equalsIndex) {
   return undefined;
 }
 
+function bindingNameLike(token) {
+  return identifierLike(token) || token?.kind === SyntaxKind.PrivateIdentifier;
+}
+
 function arrowName(tokens, arrowIndex) {
   const parameterClose = findArrowParameterClose(tokens, arrowIndex);
   let cursor = parameterClose === undefined ? arrowIndex - 1 : parameterClose;
@@ -1028,12 +1032,12 @@ function arrowName(tokens, arrowIndex) {
   if (tokens[cursor]?.kind === SyntaxKind.EqualsToken) {
     const binding = findArrowBindingName(tokens, cursor);
     if (binding) return binding;
-    if (identifierLike(tokens[cursor - 1])) return tokens[cursor - 1].text;
+    if (bindingNameLike(tokens[cursor - 1])) return tokens[cursor - 1].text;
   }
   if (tokens[cursor - 1]?.kind === SyntaxKind.EqualsToken) {
     const binding = findArrowBindingName(tokens, cursor - 1);
     if (binding) return binding;
-    if (identifierLike(tokens[cursor - 2])) return tokens[cursor - 2].text;
+    if (bindingNameLike(tokens[cursor - 2])) return tokens[cursor - 2].text;
   }
   return '<arrow>';
 }
@@ -1253,6 +1257,8 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
     if (kind === SyntaxKind.TypeKeyword) return sawExtends;
     if (kind === SyntaxKind.ColonToken && sawExtends) return true;
     if (kind === SyntaxKind.LessThanToken && sawExtends && isConditionalTypeAngleStart(tokens, cursor)) {
+      const angleClose = matchingAngleClose(tokens, cursor);
+      if (angleClose === undefined || index >= angleClose) continue;
       let angleDepth = 0;
       for (let boundary = cursor; boundary < tokens.length; boundary += 1) {
         const boundaryKind = tokens[boundary].kind;
@@ -2106,6 +2112,10 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: 'signedConditional', complexity: 2 }],
     },
     {
+      source: 'function runtimeAfterConditionalType(value) { return factory<T extends U ? A : B>() ? yes : no; }',
+      expected: [{ name: 'runtimeAfterConditionalType', complexity: 2 }],
+    },
+    {
       source: 'function parenthesizedConditional(value) { return factory<(T) extends Foo ? A : B>() || value; }',
       expected: [{ name: 'parenthesizedConditional', complexity: 2 }],
     },
@@ -2216,6 +2226,10 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'const cb: Handler = () => ready ? first : second;',
       expected: [{ name: 'cb', complexity: 2 }],
+    },
+    {
+      source: 'class PrivateTypedField { #cb: Handler = () => ready ? first : second; }',
+      expected: [{ name: '#cb', complexity: 2 }],
     },
     {
       source: 'function tupleCallback(callback: [() => boolean]) { return callback; }',
