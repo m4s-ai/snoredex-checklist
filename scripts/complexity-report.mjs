@@ -801,7 +801,23 @@ function isPostfixNonNullAssertion(tokens, index) {
 }
 
 function isTypeAssertionKeyword(tokens, index) {
-  if (tokens[index - 1]?.kind !== SyntaxKind.AsKeyword) return false;
+  if (!isPrimitiveTypeKeyword(tokens[index]?.kind)) return false;
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const kind = tokens[cursor].kind;
+    if (kind === SyntaxKind.AsKeyword) return true;
+    if (
+      kind === SyntaxKind.BarToken ||
+      kind === SyntaxKind.AmpersandToken ||
+      isPrimitiveTypeKeyword(kind) ||
+      identifierLike(tokens[cursor])
+    )
+      continue;
+    return false;
+  }
+  return false;
+}
+
+function isPrimitiveTypeKeyword(kind) {
   return [
     SyntaxKind.AnyKeyword,
     SyntaxKind.BigIntKeyword,
@@ -814,7 +830,7 @@ function isTypeAssertionKeyword(tokens, index) {
     SyntaxKind.UndefinedKeyword,
     SyntaxKind.UnknownKeyword,
     SyntaxKind.VoidKeyword,
-  ].includes(tokens[index]?.kind);
+  ].includes(kind);
 }
 
 function isKeywordNamedProperty(tokens, index) {
@@ -1545,6 +1561,10 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function primitiveAssertionDivision(value) { return value as number / 2 && other / 3; }',
       expected: [{ name: 'primitiveAssertionDivision', complexity: 2 }],
+    },
+    {
+      source: 'function unionAssertionDivision(value) { return value as number | undefined / 2 && other / 3; }',
+      expected: [{ name: 'unionAssertionDivision', complexity: 2 }],
     },
     {
       source:
