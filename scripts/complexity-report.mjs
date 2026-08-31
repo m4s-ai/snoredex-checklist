@@ -185,6 +185,36 @@ function looksLikeMethodName(tokens, nameIndex) {
   ].includes(previous.kind);
 }
 
+function isSemicolonlessClassMethod(tokens, nameIndex) {
+  if (tokens[nameIndex - 1]?.kind !== SyntaxKind.CloseParenToken) return false;
+  if (!isMemberContext(tokens, nameIndex)) return false;
+  const callOpen = matchingOpen(tokens, nameIndex - 1, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+  if (callOpen === undefined) return false;
+  let parens = 0;
+  let brackets = 0;
+  let braces = 0;
+  for (let cursor = callOpen - 1; cursor >= 0; cursor -= 1) {
+    const kind = tokens[cursor].kind;
+    if (kind === SyntaxKind.CloseParenToken) parens += 1;
+    else if (kind === SyntaxKind.OpenParenToken) {
+      if (parens > 0) parens -= 1;
+      else return false;
+    } else if (kind === SyntaxKind.CloseBracketToken) brackets += 1;
+    else if (kind === SyntaxKind.OpenBracketToken) {
+      if (brackets > 0) brackets -= 1;
+      else return false;
+    } else if (kind === SyntaxKind.CloseBraceToken) braces += 1;
+    else if (kind === SyntaxKind.OpenBraceToken) {
+      if (braces > 0) braces -= 1;
+      else return false;
+    } else if (parens === 0 && brackets === 0 && braces === 0) {
+      if (kind === SyntaxKind.EqualsToken) return true;
+      if ([SyntaxKind.SemicolonToken, SyntaxKind.CommaToken].includes(kind)) return false;
+    }
+  }
+  return false;
+}
+
 function isComputedMethodName(tokens, closeBracketIndex) {
   const openBracket = matchingOpen(
     tokens,
@@ -857,6 +887,8 @@ function isGenericTypeAssertionEnd(tokens, index) {
     return false;
   const open = matchingAngleOpen(tokens, index);
   if (open === undefined) return false;
+  const previous = tokens[open - 1];
+  if (!identifierLike(previous) || previous.start + previous.text.length !== tokens[open].start) return false;
   for (let cursor = open - 1; cursor >= 0; cursor -= 1) {
     const kind = tokens[cursor].kind;
     if (kind === SyntaxKind.AsKeyword) return true;
@@ -1189,7 +1221,7 @@ function collectFunctions(tokens, source, path) {
     let name;
     if (
       methodNameLike(tokens[nameIndex]) &&
-      looksLikeMethodName(tokens, nameIndex) &&
+      (looksLikeMethodName(tokens, nameIndex) || isSemicolonlessClassMethod(tokens, nameIndex)) &&
       (!isKeywordToken(tokens[nameIndex]) || isMemberContext(tokens, nameIndex))
     )
       name = tokens[nameIndex].text;
@@ -1438,6 +1470,13 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: 'map', complexity: 2 }],
     },
     {
+      source: `class SemicolonlessField {
+        field = setup()
+        check(ready) { if (ready) return true; return false; }
+      }`,
+      expected: [{ name: 'check', complexity: 2 }],
+    },
+    {
       source: 'function keywordProperty(value, ready) { return { catch: value && ready }; }',
       expected: [{ name: 'keywordProperty', complexity: 2 }],
     },
@@ -1657,6 +1696,11 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function genericAssertionDivision(value) { return value as Numeric<Tag> / 2 && other / 3; }',
       expected: [{ name: 'genericAssertionDivision', complexity: 2 }],
+    },
+    {
+      source:
+        'function relationalGenericAssertion(value, threshold, text, yes, no) { return value as Foo < threshold > /a&&b/.test(text) ? yes : no; }',
+      expected: [{ name: 'relationalGenericAssertion', complexity: 2 }],
     },
     {
       source:
