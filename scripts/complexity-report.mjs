@@ -1419,8 +1419,9 @@ function collectFunctions(tokens, source, path) {
       const named = identifierLike(tokens[nameIndex]);
       const name = named ? tokens[nameIndex].text : '<anonymous>';
       let parameterSearchStart = nameIndex;
-      if (named && tokens[nameIndex + 1]?.kind === SyntaxKind.LessThanToken) {
-        const genericClose = matchingAngleClose(tokens, nameIndex + 1);
+      const genericStart = named ? nameIndex + 1 : nameIndex;
+      if (tokens[genericStart]?.kind === SyntaxKind.LessThanToken) {
+        const genericClose = matchingAngleClose(tokens, genericStart);
         if (genericClose === undefined) continue;
         parameterSearchStart = genericClose + 1;
       }
@@ -2133,6 +2134,11 @@ if (process.argv.includes('--self-test')) {
       source:
         'function callableConstraint<T extends (value: string) => boolean>(ready: boolean) { if (ready) return true; }',
       expected: [{ name: 'callableConstraint', complexity: 2 }],
+    },
+    {
+      source:
+        'export default function <T extends (value: string) => boolean>(ready: boolean) { if (ready) return true; }',
+      expected: [{ name: '<anonymous>', complexity: 2 }],
     },
     {
       source: 'function qualifiedConditional() { return factory<Types.T extends Foo ? A : B>() || value; }',
