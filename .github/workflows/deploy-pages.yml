@@ -71,24 +71,23 @@ jobs:
 
           const activeStatuses = new Set(['queued', 'in_progress', 'waiting', 'pending']);
           const currentRuns = () => readRuns().filter((run) => String(run.id) !== currentRunId && activeStatuses.has(run.status));
+          const isRollbackRun = (run) => run.event === 'workflow_dispatch' && /\/ rollback$/u.test(run.display_title ?? '');
           const runs = currentRuns();
-          const rollbackRuns = runs.filter(
-            (run) => run.event === 'workflow_dispatch' && /\/ rollback$/u.test(run.display_title ?? ''),
-          );
+          const rollbackRuns = runs.filter(isRollbackRun);
           let proceed = true;
 
           if (mode === 'adopt') {
             proceed = rollbackRuns.length === 0;
             if (!proceed) console.log('automatic adoption deferred while a rollback run is queued or active');
           } else if (mode === 'rollback') {
-            const activeRuns = runs.filter((run) => activeStatuses.has(run.status));
+            const activeRuns = runs.filter((run) => !isRollbackRun(run));
             const deadline = Date.now() + 30 * 60 * 1000;
             while (activeRuns.length > 0 && Date.now() < deadline) {
               Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15000);
               activeRuns.splice(
                 0,
                 activeRuns.length,
-                ...currentRuns().filter((run) => activeStatuses.has(run.status)),
+                ...currentRuns().filter((run) => !isRollbackRun(run)),
               );
             }
             if (activeRuns.length > 0) throw new Error('rollback could not acquire the deployment lane');
