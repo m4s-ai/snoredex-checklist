@@ -960,12 +960,12 @@ function isTypeOnlyArrow(tokens, arrowIndex) {
   if (tokens[open - 1]?.kind === SyntaxKind.NewKeyword) return true;
   if (tokens[open - 1]?.kind === SyntaxKind.LessThanToken) return true;
   if (isParenthesizedTypePosition(tokens, open)) return true;
-  if (tokens[open - 1]?.kind === SyntaxKind.ColonToken) return !isConditionalExpressionColon(tokens, open - 1);
   if ([SyntaxKind.AsKeyword, SyntaxKind.SatisfiesKeyword].includes(tokens[open - 1]?.kind)) return true;
   if (isFunctionTypeParameterArrow(tokens, arrowIndex)) return true;
   if (isMethodTypeParameterArrow(tokens, arrowIndex)) return true;
   if (isClassTypeParameterArrow(tokens, arrowIndex)) return true;
   if (isTupleTypeArrow(tokens, arrowIndex)) return true;
+  if (tokens[open - 1]?.kind === SyntaxKind.ColonToken) return !isConditionalExpressionColon(tokens, open - 1);
   for (let index = open - 1; index >= 0; index -= 1) {
     const kind = tokens[index].kind;
     if ([SyntaxKind.SemicolonToken, SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken].includes(kind)) break;
@@ -1445,6 +1445,14 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
         continue;
       }
       let angleDepth = 0;
+      const assertionAngle = [
+        SyntaxKind.EqualsToken,
+        SyntaxKind.ReturnKeyword,
+        SyntaxKind.OpenParenToken,
+        SyntaxKind.OpenBracketToken,
+        SyntaxKind.CommaToken,
+        SyntaxKind.ColonToken,
+      ].includes(tokens[cursor - 1]?.kind);
       for (let boundary = cursor; boundary < tokens.length; boundary += 1) {
         const boundaryKind = tokens[boundary].kind;
         if (boundaryKind === SyntaxKind.LessThanToken) angleDepth += 1;
@@ -1453,6 +1461,7 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
         else if (boundaryKind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken) angleDepth -= 3;
         if (angleDepth === 0) {
           if (
+            assertionAngle ||
             boundary + 1 >= tokens.length ||
             [
               SyntaxKind.OpenParenToken,
@@ -1477,7 +1486,16 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
 }
 
 function isConditionalTypeAngleStart(tokens, index) {
-  if (!identifierLike(tokens[index - 1])) return false;
+  const previousKind = tokens[index - 1]?.kind;
+  const assertionPrefix = [
+    SyntaxKind.EqualsToken,
+    SyntaxKind.ReturnKeyword,
+    SyntaxKind.OpenParenToken,
+    SyntaxKind.OpenBracketToken,
+    SyntaxKind.CommaToken,
+    SyntaxKind.ColonToken,
+  ].includes(previousKind);
+  if (!identifierLike(tokens[index - 1]) && !assertionPrefix) return false;
   const first = tokens[index + 1];
   const afterFirst = tokens[index + 2]?.kind;
   if (identifierLike(first)) {
@@ -2743,6 +2761,17 @@ if (process.argv.includes('--self-test')) {
       source:
         'const genericArrowWithObject = <T extends Foo<Bar>>(first: T, options: { cb?: () => void }, last: T) => last;',
       expected: [{ name: 'genericArrowWithObject', complexity: 1 }],
+    },
+    {
+      source: 'const genericArrowWithObjectConstraint = <T extends keyof { cb: () => void }>(x: T) => x ? 1 : 2;',
+      expected: [{ name: 'genericArrowWithObjectConstraint', complexity: 2 }],
+    },
+    {
+      source: `function conditionalAssertion() {
+        const x = <T extends U ? A : B>value;
+        return x && y;
+      }`,
+      expected: [{ name: 'conditionalAssertion', complexity: 2 }],
     },
   ];
   for (const sample of samples) {
