@@ -174,6 +174,13 @@ function isFunctionTypeParameterArrow(tokens, arrowIndex) {
 
 function isConditionalExpressionColon(tokens, colonIndex) {
   if (tokens[colonIndex - 1]?.kind === SyntaxKind.QuestionToken) return false;
+  if (
+    identifierLike(tokens[colonIndex - 1]) &&
+    [SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken, SyntaxKind.SemicolonToken].includes(
+      tokens[colonIndex - 2]?.kind,
+    )
+  )
+    return true;
   let parens = 0;
   let brackets = 0;
   let braces = 0;
@@ -226,6 +233,7 @@ function isConditionalExpressionColon(tokens, colonIndex) {
     }
     if (parens > 0 || brackets > 0 || braces > 0 || angles > 0) continue;
     if (kind === SyntaxKind.QuestionToken) return !isConditionalTypeQuestion(tokens, cursor);
+    if ([SyntaxKind.CaseKeyword, SyntaxKind.DefaultKeyword].includes(kind)) return true;
     if (
       [
         SyntaxKind.ColonToken,
@@ -2121,6 +2129,20 @@ if (process.argv.includes('--self-test')) {
       source: 'function conditionalArray() { return choose ? existing : [() => ready ? first : second]; }',
       expected: [
         { name: 'conditionalArray', complexity: 2 },
+        { name: '<arrow>', complexity: 2 },
+      ],
+    },
+    {
+      source: 'function switchArray(value) { switch (value) { case 1: return [() => ready ? first : second]; } }',
+      expected: [
+        { name: 'switchArray', complexity: 2 },
+        { name: '<arrow>', complexity: 2 },
+      ],
+    },
+    {
+      source: 'function labeledArray() { label: return [() => ready ? first : second]; }',
+      expected: [
+        { name: 'labeledArray', complexity: 1 },
         { name: '<arrow>', complexity: 2 },
       ],
     },
