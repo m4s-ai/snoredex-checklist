@@ -177,6 +177,8 @@ function isTupleTypeArrow(tokens, arrowIndex) {
   if (tokens[arrowClose]?.kind !== SyntaxKind.CloseParenToken) return false;
   const arrowOpen = matchingOpen(tokens, arrowClose, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
   if (arrowOpen === undefined) return false;
+  const objectOpen = enclosingOpenBrace(tokens, arrowOpen);
+  if (objectOpen !== undefined && isObjectLiteralOpen(tokens, objectOpen)) return false;
   for (let bracket = arrowOpen - 1; bracket >= 0; bracket -= 1) {
     if (tokens[bracket].kind !== SyntaxKind.OpenBracketToken) continue;
     const bracketClose = matching(tokens, bracket, SyntaxKind.OpenBracketToken, SyntaxKind.CloseBracketToken);
@@ -2041,6 +2043,10 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function tupleCallback(callback: [() => boolean]) { return callback; }',
       expected: [{ name: 'tupleCallback', complexity: 1 }],
+    },
+    {
+      source: 'const config = { handlers: [() => ready ? first : second] };',
+      expected: [{ name: '<arrow>', complexity: 2 }],
     },
     {
       source: `function storage() {
