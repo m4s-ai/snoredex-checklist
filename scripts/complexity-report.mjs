@@ -83,7 +83,7 @@ function isControlHeaderClose(tokens, closeIndex) {
   ].includes(tokens[openIndex - 1]?.kind);
 }
 
-function shouldRescanSlash(previous, tokens = [], scanner, source) {
+function shouldRescanSlash(previous, tokens = [], scanner) {
   const memberProperty = isMemberPropertyAccess(tokens, tokens.length - 1);
   const postfixNonNull = isPostfixNonNullAssertion(tokens, tokens.length - 1);
   const typeAssertion = isTypeAssertionKeyword(tokens, tokens.length - 1);
@@ -92,10 +92,23 @@ function shouldRescanSlash(previous, tokens = [], scanner, source) {
     scanner.lookAhead(() => {
       const kind = scanner.reScanSlashToken();
       if (kind !== SyntaxKind.RegularExpressionLiteral || scanner.isUnterminated()) return false;
-      let cursor = scanner.getTokenEnd();
-      while (/[a-z]/u.test(source[cursor] ?? '')) cursor += 1;
-      while (/\s/u.test(source[cursor] ?? '')) cursor += 1;
-      return cursor >= source.length || /[.;,)\]}:?&|+\-*%!?]/u.test(source[cursor] ?? '');
+      const next = scanner.scan();
+      return [
+        SyntaxKind.EndOfFile,
+        SyntaxKind.DotToken,
+        SyntaxKind.QuestionDotToken,
+        SyntaxKind.OpenParenToken,
+        SyntaxKind.OpenBracketToken,
+        SyntaxKind.AmpersandAmpersandToken,
+        SyntaxKind.BarBarToken,
+        SyntaxKind.QuestionToken,
+        SyntaxKind.ColonToken,
+        SyntaxKind.CommaToken,
+        SyntaxKind.SemicolonToken,
+        SyntaxKind.CloseParenToken,
+        SyntaxKind.CloseBracketToken,
+        SyntaxKind.CloseBraceToken,
+      ].includes(next);
     });
   return (
     (!canEndExpression(previous) && !memberProperty && !postfixNonNull && !typeAssertion) ||
@@ -1760,6 +1773,11 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function bothSidedTriviaGenericAssertion(value) { return value as Numeric < Tag > / 2 && other / 3; }',
       expected: [{ name: 'bothSidedTriviaGenericAssertion', complexity: 2 }],
+    },
+    {
+      source:
+        'function chainedDivisionAfterAssertion(value, a, b, ready) { return value as number / (a && b) / -3 && ready; }',
+      expected: [{ name: 'chainedDivisionAfterAssertion', complexity: 3 }],
     },
     {
       source:
