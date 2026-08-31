@@ -447,7 +447,31 @@ function isComputedMemberName(tokens, closeBracketIndex) {
     SyntaxKind.OpenBracketToken,
     SyntaxKind.CloseBracketToken,
   );
-  return openBracket !== undefined && isMemberContext(tokens, openBracket);
+  return openBracket !== undefined && isClassMemberContext(tokens, openBracket);
+}
+
+function isClassMemberContext(tokens, index) {
+  const open = enclosingOpenBrace(tokens, index);
+  if (open === undefined) return false;
+  for (let cursor = open - 1; cursor >= 0; cursor -= 1) {
+    const kind = tokens[cursor].kind;
+    if (kind === SyntaxKind.ClassKeyword) return true;
+    if (
+      [
+        SyntaxKind.OpenBraceToken,
+        SyntaxKind.CloseBraceToken,
+        SyntaxKind.SemicolonToken,
+        SyntaxKind.EqualsToken,
+        SyntaxKind.EqualsGreaterThanToken,
+        SyntaxKind.ConstKeyword,
+        SyntaxKind.LetKeyword,
+        SyntaxKind.VarKeyword,
+        SyntaxKind.ReturnKeyword,
+      ].includes(kind)
+    )
+      return false;
+  }
+  return false;
 }
 
 function matchingOpen(tokens, close, openKind, closeKind) {
@@ -967,7 +991,11 @@ function findArrowBindingName(tokens, equalsIndex) {
       const optionalMarker = tokens[cursor - 1]?.kind === SyntaxKind.QuestionToken;
       const nameIndex = cursor - (optionalMarker ? 2 : 1);
       const name = tokens[nameIndex];
-      if (name?.kind === SyntaxKind.CloseBracketToken && isComputedMemberName(tokens, nameIndex)) return '<computed>';
+      if (name?.kind === SyntaxKind.CloseBracketToken) {
+        if (isComputedMemberName(tokens, nameIndex)) return '<computed>';
+        const binding = tokens[cursor + 1];
+        return bindingNameLike(binding) ? binding.text : undefined;
+      }
       return bindingNameLike(name) ? name.text : undefined;
     }
     const closeOpenPairs = [
@@ -2406,6 +2434,10 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'class ComputedTypedField { ["cb"]: Handler = () => ready ? first : second; }',
       expected: [{ name: '<computed>', complexity: 2 }],
+    },
+    {
+      source: 'const { ["cb"]: cb = () => ready ? first : second } = source;',
+      expected: [{ name: 'cb', complexity: 2 }],
     },
     {
       source: `function doWhile(value) {
