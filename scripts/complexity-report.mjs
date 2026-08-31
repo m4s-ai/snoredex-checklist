@@ -272,6 +272,25 @@ function isGenericOpen(tokens, index) {
   return identifierLike(tokens[index - 1]) && tokens[index - 2]?.kind === SyntaxKind.AsKeyword;
 }
 
+function isCallTypeArgumentOpen(tokens, index) {
+  if (!identifierLike(tokens[index - 1])) return false;
+  let angles = 0;
+  let sawComma = false;
+  for (let cursor = index; cursor < tokens.length; cursor += 1) {
+    const kind = tokens[cursor].kind;
+    if (kind === SyntaxKind.LessThanToken) {
+      angles += 1;
+      continue;
+    }
+    if (kind === SyntaxKind.GreaterThanToken) angles = Math.max(0, angles - 1);
+    else if (kind === SyntaxKind.GreaterThanGreaterThanToken) angles = Math.max(0, angles - 2);
+    else if (kind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken) angles = Math.max(0, angles - 3);
+    else if (angles === 1 && kind === SyntaxKind.CommaToken) sawComma = true;
+    if (angles === 0) return sawComma && tokens[cursor + 1]?.kind === SyntaxKind.OpenParenToken;
+  }
+  return false;
+}
+
 function isObjectLiteralValueArrow(tokens, from) {
   const open = enclosingOpenBrace(tokens, from);
   if (open === undefined) return false;
@@ -384,6 +403,7 @@ function findArrowExpressionEnd(tokens, start) {
   let braces = 0;
   let templateDepth = 0;
   let conditionalDepth = 0;
+  let genericDepth = 0;
   for (let index = start; index < tokens.length; index += 1) {
     const kind = tokens[index].kind;
     if (kind === SyntaxKind.TemplateHead) {
@@ -411,15 +431,33 @@ function findArrowExpressionEnd(tokens, start) {
     else if (kind === SyntaxKind.CloseBraceToken) {
       if (braces === 0 && parens === 0 && brackets === 0) return index;
       braces -= 1;
-    } else if (parens === 0 && brackets === 0 && braces === 0 && kind === SyntaxKind.QuestionToken) {
+    } else if (
+      kind === SyntaxKind.LessThanToken &&
+      (genericDepth > 0 || isGenericOpen(tokens, index) || isCallTypeArgumentOpen(tokens, index))
+    ) {
+      genericDepth += 1;
+    } else if (genericDepth > 0 && kind === SyntaxKind.GreaterThanToken) {
+      genericDepth = Math.max(0, genericDepth - 1);
+    } else if (genericDepth > 0 && kind === SyntaxKind.GreaterThanGreaterThanToken) {
+      genericDepth = Math.max(0, genericDepth - 2);
+    } else if (genericDepth > 0 && kind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken) {
+      genericDepth = Math.max(0, genericDepth - 3);
+    } else if (
+      parens === 0 &&
+      brackets === 0 &&
+      braces === 0 &&
+      genericDepth === 0 &&
+      kind === SyntaxKind.QuestionToken
+    ) {
       conditionalDepth += 1;
-    } else if (parens === 0 && brackets === 0 && braces === 0 && kind === SyntaxKind.ColonToken) {
+    } else if (parens === 0 && brackets === 0 && braces === 0 && genericDepth === 0 && kind === SyntaxKind.ColonToken) {
       if (conditionalDepth === 0) return index;
       conditionalDepth -= 1;
     } else if (
       parens === 0 &&
       brackets === 0 &&
       braces === 0 &&
+      genericDepth === 0 &&
       conditionalDepth === 0 &&
       [SyntaxKind.CommaToken, SyntaxKind.SemicolonToken].includes(kind)
     )
@@ -428,18 +466,22 @@ function findArrowExpressionEnd(tokens, start) {
   return tokens.length;
 }
 
+function findArrowParameterClose(tokens, arrowIndex) {
+  if (tokens[arrowIndex - 1]?.kind === SyntaxKind.CloseParenToken) return arrowIndex - 1;
+  for (let cursor = arrowIndex - 1; cursor >= 0; cursor -= 1) {
+    if (tokens[cursor].kind !== SyntaxKind.CloseParenToken) continue;
+    if (matchingOpen(tokens, cursor, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken) === undefined) continue;
+    if (tokens[cursor + 1]?.kind === SyntaxKind.ColonToken) return cursor;
+  }
+  return undefined;
+}
+
 function arrowName(tokens, arrowIndex) {
-  let cursor = arrowIndex - 1;
-  if (tokens[cursor]?.kind === SyntaxKind.CloseParenToken) {
-    let depth = 0;
-    for (; cursor >= 0; cursor -= 1) {
-      if (tokens[cursor].kind === SyntaxKind.CloseParenToken) depth += 1;
-      if (tokens[cursor].kind === SyntaxKind.OpenParenToken) {
-        depth -= 1;
-        if (depth === 0) break;
-      }
-    }
-    cursor -= 1;
+  const parameterClose = findArrowParameterClose(tokens, arrowIndex);
+  let cursor = parameterClose === undefined ? arrowIndex - 1 : parameterClose;
+  if (parameterClose !== undefined) {
+    const parameterOpen = matchingOpen(tokens, parameterClose, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+    cursor = parameterOpen === undefined ? parameterClose : parameterOpen - 1;
   }
   if (tokens[cursor]?.kind === SyntaxKind.EqualsToken && identifierLike(tokens[cursor - 1]))
     return tokens[cursor - 1].text;
@@ -802,6 +844,14 @@ if (process.argv.includes('--self-test')) {
         { name: 'conditionalArrow', complexity: 3 },
         { name: '<arrow>', complexity: 2 },
       ],
+    },
+    {
+      source: 'const load = () => choose<A, B>(ready && value);',
+      expected: [{ name: 'load', complexity: 2 }],
+    },
+    {
+      source: 'const typedArrow = (value): QueryParse => value ? value : undefined;',
+      expected: [{ name: 'typedArrow', complexity: 2 }],
     },
     {
       source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
