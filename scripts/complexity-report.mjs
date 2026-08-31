@@ -1565,6 +1565,7 @@ function isConditionalTypeAssertionPrefix(tokens, index) {
       SyntaxKind.TypeOfKeyword,
       SyntaxKind.DeleteKeyword,
       SyntaxKind.EqualsGreaterThanToken,
+      SyntaxKind.OpenBraceToken,
       SyntaxKind.OpenParenToken,
       SyntaxKind.OpenBracketToken,
       SyntaxKind.ColonToken,
@@ -2898,6 +2899,12 @@ if (process.argv.includes('--self-test')) {
         throw <T extends U ? A : B>value;
       }`,
       expected: [{ name: 'throwAssertion', complexity: 1 }],
+    },
+    {
+      source: `function expressionAssertion() {
+        <T extends U ? A : B>value;
+      }`,
+      expected: [{ name: 'expressionAssertion', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
