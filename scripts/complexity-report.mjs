@@ -189,12 +189,11 @@ function isMethodTypeParameterArrow(tokens, arrowIndex) {
     const genericClose = matchingAngleClose(tokens, cursor);
     if (genericClose === undefined || arrowIndex >= genericClose) continue;
     const nameIndex = cursor - 1;
-    if (
-      [SyntaxKind.EqualsToken, SyntaxKind.OpenParenToken].includes(tokens[nameIndex]?.kind) &&
-      (tokens[nameIndex]?.kind === SyntaxKind.EqualsToken || tokens[nameIndex - 1]?.kind === SyntaxKind.EqualsToken) &&
-      tokens[genericClose + 1]?.kind === SyntaxKind.OpenParenToken
-    )
-      return true;
+    if (tokens[genericClose + 1]?.kind === SyntaxKind.OpenParenToken) {
+      let expressionStart = nameIndex;
+      while (tokens[expressionStart]?.kind === SyntaxKind.OpenParenToken) expressionStart -= 1;
+      if (tokens[expressionStart]?.kind === SyntaxKind.EqualsToken) return true;
+    }
     if (
       (methodNameLike(tokens[nameIndex]) && looksLikeMethodName(tokens, nameIndex)) ||
       (tokens[nameIndex]?.kind === SyntaxKind.CloseBracketToken && isComputedMethodName(tokens, nameIndex))
@@ -520,6 +519,14 @@ function enclosingDelimiterOpen(tokens, from) {
 }
 
 function isDestructuringParameterList(tokens, braceOpen) {
+  if (tokens[braceOpen]?.kind === SyntaxKind.OpenParenToken) {
+    const parameterClose = matching(tokens, braceOpen, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+    return (
+      parameterClose !== undefined &&
+      isFunctionLikeParameterList(tokens, braceOpen) &&
+      [SyntaxKind.OpenBraceToken, SyntaxKind.ColonToken].includes(tokens[parameterClose + 1]?.kind)
+    );
+  }
   if (tokens[braceOpen - 1]?.kind !== SyntaxKind.OpenParenToken) return false;
   const parameterOpen = braceOpen - 1;
   const parameterClose = matching(tokens, parameterOpen, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
@@ -538,6 +545,7 @@ function isDestructuringBindingContext(tokens, index) {
   while (open !== undefined) {
     const before = tokens[open - 1]?.kind;
     if ([SyntaxKind.ConstKeyword, SyntaxKind.LetKeyword, SyntaxKind.VarKeyword].includes(before)) return true;
+    if (tokens[open]?.kind === SyntaxKind.OpenParenToken && isDestructuringParameterList(tokens, open)) return true;
     if (before === SyntaxKind.OpenParenToken && isDestructuringParameterList(tokens, open)) return true;
     if (![SyntaxKind.ColonToken, SyntaxKind.CommaToken, SyntaxKind.OpenBracketToken].includes(before)) return false;
     open = enclosingDelimiterOpen(tokens, open);
@@ -894,6 +902,23 @@ function isParenthesizedTypePosition(tokens, open) {
   if (tokens[open - 1]?.kind !== SyntaxKind.OpenParenToken) return false;
   let context = open - 2;
   while (tokens[context]?.kind === SyntaxKind.OpenParenToken) context -= 1;
+  if (tokens[context]?.kind === SyntaxKind.OpenBracketToken) {
+    for (let cursor = context - 1; cursor >= 0; cursor -= 1) {
+      const kind = tokens[cursor]?.kind;
+      if (kind === SyntaxKind.ColonToken) return !isConditionalExpressionColon(tokens, cursor);
+      if (
+        [
+          SyntaxKind.EqualsToken,
+          SyntaxKind.CommaToken,
+          SyntaxKind.SemicolonToken,
+          SyntaxKind.OpenBraceToken,
+          SyntaxKind.CloseBraceToken,
+        ].includes(kind)
+      )
+        return false;
+    }
+    return false;
+  }
   return [
     SyntaxKind.ColonToken,
     SyntaxKind.BarToken,
@@ -1150,6 +1175,7 @@ function arrowName(tokens, arrowIndex) {
       }
     }
   }
+  while (tokens[cursor]?.kind === SyntaxKind.OpenParenToken) cursor -= 1;
   if (tokens[cursor]?.kind === SyntaxKind.EqualsToken) {
     const binding = findArrowBindingName(tokens, cursor);
     if (binding) return binding;
@@ -2551,6 +2577,10 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: 'parenthesizedGenericCallable', complexity: 2 }],
     },
     {
+      source: 'const doubleWrappedGenericCallable = ((<T extends () => boolean>(value: T) => value ? first : second));',
+      expected: [{ name: 'doubleWrappedGenericCallable', complexity: 2 }],
+    },
+    {
       source: 'function destructuredParameter({ property: cb = () => ready ? first : second }) { return cb; }',
       expected: [
         { name: 'destructuredParameter', complexity: 1 },
@@ -2560,6 +2590,17 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'const { outer: { property: cb = () => ready ? first : second } } = source;',
       expected: [{ name: 'cb', complexity: 2 }],
+    },
+    {
+      source: 'function destructuredAfterValue(value, { property: cb = () => ready ? first : second }) {}',
+      expected: [
+        { name: 'destructuredAfterValue', complexity: 1 },
+        { name: 'cb', complexity: 2 },
+      ],
+    },
+    {
+      source: 'const handlers = [((() => ready ? first : second))];',
+      expected: [{ name: 'handlers', complexity: 2 }],
     },
     {
       source: `function doWhile(value) {
