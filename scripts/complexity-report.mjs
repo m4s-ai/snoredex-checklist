@@ -806,7 +806,7 @@ function isTypeOnlyArrow(tokens, arrowIndex) {
   if (tokens[open - 1]?.kind === SyntaxKind.NewKeyword) return true;
   if (tokens[open - 1]?.kind === SyntaxKind.LessThanToken) return true;
   if (isParenthesizedTypePosition(tokens, open)) return true;
-  if (tokens[open - 1]?.kind === SyntaxKind.ColonToken) return true;
+  if (tokens[open - 1]?.kind === SyntaxKind.ColonToken) return !isConditionalExpressionColon(tokens, open - 1);
   if (tokens[open - 1]?.kind === SyntaxKind.AsKeyword) return true;
   if (isFunctionTypeParameterArrow(tokens, arrowIndex)) return true;
   if (isTupleTypeArrow(tokens, arrowIndex)) return true;
@@ -949,6 +949,53 @@ function findArrowParameterClose(tokens, arrowIndex) {
   return undefined;
 }
 
+function findArrowBindingName(tokens, equalsIndex) {
+  for (let cursor = equalsIndex - 1; cursor >= 0; cursor -= 1) {
+    const kind = tokens[cursor].kind;
+    if (kind === SyntaxKind.ColonToken) {
+      const name = tokens[cursor - 1];
+      return identifierLike(name) ? name.text : undefined;
+    }
+    const closeOpenPairs = [
+      [SyntaxKind.CloseParenToken, SyntaxKind.OpenParenToken],
+      [SyntaxKind.CloseBracketToken, SyntaxKind.OpenBracketToken],
+      [SyntaxKind.CloseBraceToken, SyntaxKind.OpenBraceToken],
+    ];
+    const pair = closeOpenPairs.find(([close]) => close === kind);
+    if (pair) {
+      const open = matchingOpen(tokens, cursor, pair[1], pair[0]);
+      if (open === undefined) return undefined;
+      cursor = open;
+      continue;
+    }
+    if (
+      [
+        SyntaxKind.GreaterThanToken,
+        SyntaxKind.GreaterThanGreaterThanToken,
+        SyntaxKind.GreaterThanGreaterThanGreaterThanToken,
+      ].includes(kind)
+    ) {
+      const open = matchingAngleOpen(tokens, cursor);
+      if (open === undefined) return undefined;
+      cursor = open;
+      continue;
+    }
+    if (
+      [
+        SyntaxKind.ConstKeyword,
+        SyntaxKind.LetKeyword,
+        SyntaxKind.VarKeyword,
+        SyntaxKind.CommaToken,
+        SyntaxKind.SemicolonToken,
+        SyntaxKind.OpenBraceToken,
+        SyntaxKind.ReturnKeyword,
+      ].includes(kind)
+    )
+      return undefined;
+  }
+  return undefined;
+}
+
 function arrowName(tokens, arrowIndex) {
   const parameterClose = findArrowParameterClose(tokens, arrowIndex);
   let cursor = parameterClose === undefined ? arrowIndex - 1 : parameterClose;
@@ -978,10 +1025,16 @@ function arrowName(tokens, arrowIndex) {
       }
     }
   }
-  if (tokens[cursor]?.kind === SyntaxKind.EqualsToken && identifierLike(tokens[cursor - 1]))
-    return tokens[cursor - 1].text;
-  if (tokens[cursor - 1]?.kind === SyntaxKind.EqualsToken && identifierLike(tokens[cursor - 2]))
-    return tokens[cursor - 2].text;
+  if (tokens[cursor]?.kind === SyntaxKind.EqualsToken) {
+    const binding = findArrowBindingName(tokens, cursor);
+    if (binding) return binding;
+    if (identifierLike(tokens[cursor - 1])) return tokens[cursor - 1].text;
+  }
+  if (tokens[cursor - 1]?.kind === SyntaxKind.EqualsToken) {
+    const binding = findArrowBindingName(tokens, cursor - 1);
+    if (binding) return binding;
+    if (identifierLike(tokens[cursor - 2])) return tokens[cursor - 2].text;
+  }
   return '<arrow>';
 }
 
@@ -1260,6 +1313,11 @@ function isConditionalTypeAngleStart(tokens, index) {
     const close = matching(tokens, index + 1, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
     return close !== undefined && tokens[close + 1]?.kind === SyntaxKind.ExtendsKeyword;
   }
+  if ([SyntaxKind.MinusToken, SyntaxKind.PlusToken].includes(first?.kind))
+    return (
+      [SyntaxKind.NumericLiteral, SyntaxKind.BigIntLiteral].includes(tokens[index + 2]?.kind) &&
+      tokens[index + 3]?.kind === SyntaxKind.ExtendsKeyword
+    );
   if (
     [
       SyntaxKind.AnyKeyword,
@@ -1652,7 +1710,7 @@ if (process.argv.includes('--self-test')) {
       source: `type Handler = (value: string) => boolean;
         interface Handlers { callback?: (value: string) => boolean; }
         const typed: (value: string) => boolean = (value) => value.length > 0;`,
-      expected: [{ name: '<arrow>', complexity: 1 }],
+      expected: [{ name: 'typed', complexity: 1 }],
     },
     {
       source: `const invoke = (request) => (request as (name: string) => Promise<string>)(name);`,
@@ -2044,6 +2102,10 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: 'literalConditional', complexity: 4 }],
     },
     {
+      source: 'function signedConditional(value) { return factory<-1 extends number ? A : B>() || value; }',
+      expected: [{ name: 'signedConditional', complexity: 2 }],
+    },
+    {
       source: 'function parenthesizedConditional(value) { return factory<(T) extends Foo ? A : B>() || value; }',
       expected: [{ name: 'parenthesizedConditional', complexity: 2 }],
     },
@@ -2152,6 +2214,10 @@ if (process.argv.includes('--self-test')) {
       ],
     },
     {
+      source: 'const cb: Handler = () => ready ? first : second;',
+      expected: [{ name: 'cb', complexity: 2 }],
+    },
+    {
       source: 'function tupleCallback(callback: [() => boolean]) { return callback; }',
       expected: [{ name: 'tupleCallback', complexity: 1 }],
     },
@@ -2163,6 +2229,13 @@ if (process.argv.includes('--self-test')) {
       source: 'function conditionalArray() { return choose ? existing : [() => ready ? first : second]; }',
       expected: [
         { name: 'conditionalArray', complexity: 2 },
+        { name: '<arrow>', complexity: 2 },
+      ],
+    },
+    {
+      source: 'function conditionalDirectArrow() { return choose ? existing : () => ready ? first : second; }',
+      expected: [
+        { name: 'conditionalDirectArrow', complexity: 2 },
         { name: '<arrow>', complexity: 2 },
       ],
     },
