@@ -865,6 +865,7 @@ function isPrimitiveTypeKeyword(kind) {
     SyntaxKind.BigIntKeyword,
     SyntaxKind.BooleanKeyword,
     SyntaxKind.NeverKeyword,
+    SyntaxKind.NullKeyword,
     SyntaxKind.NumberKeyword,
     SyntaxKind.ObjectKeyword,
     SyntaxKind.StringKeyword,
@@ -1621,6 +1622,11 @@ if (process.argv.includes('--self-test')) {
       source:
         'function genericUnionAssertionDivision(value) { return value as number | Numeric<Tag> / 2 && other / 3; }',
       expected: [{ name: 'genericUnionAssertionDivision', complexity: 2 }],
+    },
+    {
+      source:
+        'function genericNullableUnionAssertionDivision(value) { return value as null | Numeric<Tag> / 2 && other / 3; }',
+      expected: [{ name: 'genericNullableUnionAssertionDivision', complexity: 2 }],
     },
     {
       source:
