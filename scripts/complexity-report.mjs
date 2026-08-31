@@ -1556,6 +1556,8 @@ function isConditionalTypeAssertionPrefix(tokens, index) {
     isBinaryOperator(previousKind) ||
     [
       SyntaxKind.ReturnKeyword,
+      SyntaxKind.AwaitKeyword,
+      SyntaxKind.YieldKeyword,
       SyntaxKind.OpenParenToken,
       SyntaxKind.OpenBracketToken,
       SyntaxKind.ColonToken,
@@ -2837,6 +2839,18 @@ if (process.argv.includes('--self-test')) {
         return ready & <T extends U ? A : B>value;
       }`,
       expected: [{ name: 'bitwiseAssertion', complexity: 1 }],
+    },
+    {
+      source: `async function awaitAssertion() {
+        return await <T extends U ? A : B>value;
+      }`,
+      expected: [{ name: 'awaitAssertion', complexity: 1 }],
+    },
+    {
+      source: `function* yieldAssertion() {
+        return yield <T extends U ? A : B>value;
+      }`,
+      expected: [{ name: 'yieldAssertion', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
