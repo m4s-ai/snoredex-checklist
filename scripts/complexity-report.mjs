@@ -34,7 +34,8 @@ function scan(source) {
         }
       }
     }
-    if (kind === SyntaxKind.SlashToken && shouldRescanSlash(previous, tokens)) kind = scanner.reScanSlashToken();
+    if (kind === SyntaxKind.SlashToken && shouldRescanSlash(previous, tokens, scanner, source))
+      kind = scanner.reScanSlashToken();
     if (kind !== SyntaxKind.EndOfFile) {
       previous = { kind, text: scanner.getTokenText() };
       tokens.push({ ...previous, start: scanner.getTokenStart() });
@@ -82,12 +83,23 @@ function isControlHeaderClose(tokens, closeIndex) {
   ].includes(tokens[openIndex - 1]?.kind);
 }
 
-function shouldRescanSlash(previous, tokens = []) {
+function shouldRescanSlash(previous, tokens = [], scanner, source) {
   const memberProperty = isMemberPropertyAccess(tokens, tokens.length - 1);
   const postfixNonNull = isPostfixNonNullAssertion(tokens, tokens.length - 1);
   const typeAssertion = isTypeAssertionKeyword(tokens, tokens.length - 1);
+  const regexAfterTypeAssertion =
+    typeAssertion &&
+    scanner.lookAhead(() => {
+      const kind = scanner.reScanSlashToken();
+      if (kind !== SyntaxKind.RegularExpressionLiteral || scanner.isUnterminated()) return false;
+      let cursor = scanner.getTokenEnd();
+      while (/[a-z]/u.test(source[cursor] ?? '')) cursor += 1;
+      while (/\s/u.test(source[cursor] ?? '')) cursor += 1;
+      return cursor >= source.length || /[.;,)\]}:?&|+\-*%!?]/u.test(source[cursor] ?? '');
+    });
   return (
     (!canEndExpression(previous) && !memberProperty && !postfixNonNull && !typeAssertion) ||
+    regexAfterTypeAssertion ||
     isControlHeaderClose(tokens, tokens.length - 1)
   );
 }
@@ -914,9 +926,6 @@ function isGenericTypeAssertionEnd(tokens, index) {
   const firstArgument = tokens[open + 1];
   const lastArgument = tokens[index - 1];
   if (!identifierLike(previous) || !firstArgument || !lastArgument) return false;
-  const openGap = tokens[open].start - (previous.start + previous.text.length);
-  const closeGap = tokens[index].start - (lastArgument.start + lastArgument.text.length);
-  if (openGap > 0 && closeGap > 0) return false;
   for (let cursor = open - 1; cursor >= 0; cursor -= 1) {
     const kind = tokens[cursor].kind;
     if (kind === SyntaxKind.AsKeyword) return true;
@@ -1747,6 +1756,10 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function spacedGenericAssertion(value) { return value as Numeric <Tag> / 2 && other / 3; }',
       expected: [{ name: 'spacedGenericAssertion', complexity: 2 }],
+    },
+    {
+      source: 'function bothSidedTriviaGenericAssertion(value) { return value as Numeric < Tag > / 2 && other / 3; }',
+      expected: [{ name: 'bothSidedTriviaGenericAssertion', complexity: 2 }],
     },
     {
       source:
