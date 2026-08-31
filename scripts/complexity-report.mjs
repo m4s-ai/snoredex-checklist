@@ -190,6 +190,12 @@ function isMethodTypeParameterArrow(tokens, arrowIndex) {
     if (genericClose === undefined || arrowIndex >= genericClose) continue;
     const nameIndex = cursor - 1;
     if (
+      [SyntaxKind.EqualsToken, SyntaxKind.OpenParenToken].includes(tokens[nameIndex]?.kind) &&
+      (tokens[nameIndex]?.kind === SyntaxKind.EqualsToken || tokens[nameIndex - 1]?.kind === SyntaxKind.EqualsToken) &&
+      tokens[genericClose + 1]?.kind === SyntaxKind.OpenParenToken
+    )
+      return true;
+    if (
       (methodNameLike(tokens[nameIndex]) && looksLikeMethodName(tokens, nameIndex)) ||
       (tokens[nameIndex]?.kind === SyntaxKind.CloseBracketToken && isComputedMethodName(tokens, nameIndex))
     )
@@ -491,12 +497,52 @@ function isClassMemberContext(tokens, index) {
   return false;
 }
 
-function isDestructuringBindingContext(tokens, index) {
-  const open = enclosingOpenBrace(tokens, index);
+function enclosingDelimiterOpen(tokens, from) {
+  const pairs = new Map([
+    [SyntaxKind.CloseParenToken, SyntaxKind.OpenParenToken],
+    [SyntaxKind.CloseBracketToken, SyntaxKind.OpenBracketToken],
+    [SyntaxKind.CloseBraceToken, SyntaxKind.OpenBraceToken],
+  ]);
+  const depth = new Map();
+  for (let cursor = from - 1; cursor >= 0; cursor -= 1) {
+    const kind = tokens[cursor]?.kind;
+    const open = pairs.get(kind);
+    if (open !== undefined) {
+      depth.set(open, (depth.get(open) ?? 0) + 1);
+      continue;
+    }
+    if (![...pairs.values()].includes(kind)) continue;
+    const count = depth.get(kind) ?? 0;
+    if (count > 0) depth.set(kind, count - 1);
+    else return cursor;
+  }
+  return undefined;
+}
+
+function isDestructuringParameterList(tokens, braceOpen) {
+  if (tokens[braceOpen - 1]?.kind !== SyntaxKind.OpenParenToken) return false;
+  const parameterOpen = braceOpen - 1;
+  const parameterClose = matching(tokens, parameterOpen, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+  if (parameterClose === undefined) return false;
+  if (tokens[parameterClose + 1]?.kind === SyntaxKind.EqualsGreaterThanToken) return true;
+  if (tokens[parameterOpen - 1]?.kind === SyntaxKind.CatchKeyword)
+    return tokens[parameterClose + 1]?.kind === SyntaxKind.OpenBraceToken;
   return (
-    open !== undefined &&
-    [SyntaxKind.ConstKeyword, SyntaxKind.LetKeyword, SyntaxKind.VarKeyword].includes(tokens[open - 1]?.kind)
+    isFunctionLikeParameterList(tokens, parameterOpen) &&
+    [SyntaxKind.OpenBraceToken, SyntaxKind.ColonToken].includes(tokens[parameterClose + 1]?.kind)
   );
+}
+
+function isDestructuringBindingContext(tokens, index) {
+  let open = enclosingOpenBrace(tokens, index);
+  while (open !== undefined) {
+    const before = tokens[open - 1]?.kind;
+    if ([SyntaxKind.ConstKeyword, SyntaxKind.LetKeyword, SyntaxKind.VarKeyword].includes(before)) return true;
+    if (before === SyntaxKind.OpenParenToken && isDestructuringParameterList(tokens, open)) return true;
+    if (![SyntaxKind.ColonToken, SyntaxKind.CommaToken, SyntaxKind.OpenBracketToken].includes(before)) return false;
+    open = enclosingDelimiterOpen(tokens, open);
+  }
+  return false;
 }
 
 function matchingOpen(tokens, close, openKind, closeKind) {
@@ -846,6 +892,8 @@ function isObjectLiteralValueArrow(tokens, from) {
 
 function isParenthesizedTypePosition(tokens, open) {
   if (tokens[open - 1]?.kind !== SyntaxKind.OpenParenToken) return false;
+  let context = open - 2;
+  while (tokens[context]?.kind === SyntaxKind.OpenParenToken) context -= 1;
   return [
     SyntaxKind.ColonToken,
     SyntaxKind.BarToken,
@@ -853,7 +901,8 @@ function isParenthesizedTypePosition(tokens, open) {
     SyntaxKind.LessThanToken,
     SyntaxKind.CommaToken,
     SyntaxKind.OpenBracketToken,
-  ].includes(tokens[open - 2]?.kind);
+    SyntaxKind.SatisfiesKeyword,
+  ].includes(tokens[context]?.kind);
 }
 
 function isTypeOnlyArrow(tokens, arrowIndex) {
@@ -2482,6 +2531,35 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'const satisfied = (() => true) satisfies () => boolean;',
       expected: [{ name: 'satisfied', complexity: 1 }],
+    },
+    {
+      source: 'const satisfiedWrapped = (() => true) satisfies (() => boolean);',
+      expected: [{ name: 'satisfiedWrapped', complexity: 1 }],
+    },
+    {
+      source: 'const satisfiedDoubleWrapped = (() => true) satisfies ((() => boolean));',
+      expected: [{ name: 'satisfiedDoubleWrapped', complexity: 1 }],
+    },
+    {
+      source:
+        'const genericCallable = <T extends (value: string) => boolean>(value: T) => value("x") ? first : second;',
+      expected: [{ name: 'genericCallable', complexity: 2 }],
+    },
+    {
+      source:
+        'const parenthesizedGenericCallable = (<T extends (value: string) => boolean>(value: T) => value("x") ? first : second);',
+      expected: [{ name: 'parenthesizedGenericCallable', complexity: 2 }],
+    },
+    {
+      source: 'function destructuredParameter({ property: cb = () => ready ? first : second }) { return cb; }',
+      expected: [
+        { name: 'destructuredParameter', complexity: 1 },
+        { name: 'cb', complexity: 2 },
+      ],
+    },
+    {
+      source: 'const { outer: { property: cb = () => ready ? first : second } } = source;',
+      expected: [{ name: 'cb', complexity: 2 }],
     },
     {
       source: `function doWhile(value) {
