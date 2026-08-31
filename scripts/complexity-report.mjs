@@ -1452,6 +1452,7 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
         SyntaxKind.OpenBracketToken,
         SyntaxKind.CommaToken,
         SyntaxKind.ColonToken,
+        SyntaxKind.QuestionToken,
       ].includes(tokens[cursor - 1]?.kind);
       for (let boundary = cursor; boundary < tokens.length; boundary += 1) {
         const boundaryKind = tokens[boundary].kind;
@@ -1494,6 +1495,7 @@ function isConditionalTypeAngleStart(tokens, index) {
     SyntaxKind.OpenBracketToken,
     SyntaxKind.CommaToken,
     SyntaxKind.ColonToken,
+    SyntaxKind.QuestionToken,
   ].includes(previousKind);
   if (!identifierLike(tokens[index - 1]) && !assertionPrefix) return false;
   const first = tokens[index + 1];
@@ -2772,6 +2774,12 @@ if (process.argv.includes('--self-test')) {
         return x && y;
       }`,
       expected: [{ name: 'conditionalAssertion', complexity: 2 }],
+    },
+    {
+      source: `function conditionalBranchAssertion() {
+        return ready ? <T extends U ? A : B>value : fallback;
+      }`,
+      expected: [{ name: 'conditionalBranchAssertion', complexity: 2 }],
     },
   ];
   for (const sample of samples) {
