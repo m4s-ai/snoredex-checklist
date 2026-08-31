@@ -59,6 +59,7 @@ function canEndExpression(token) {
     SyntaxKind.FalseKeyword,
     SyntaxKind.NullKeyword,
     SyntaxKind.NumericLiteral,
+    SyntaxKind.BigIntLiteral,
     SyntaxKind.StringLiteral,
     SyntaxKind.NoSubstitutionTemplateLiteral,
     SyntaxKind.RegularExpressionLiteral,
@@ -142,6 +143,32 @@ function looksLikeMethodName(tokens, nameIndex) {
   if (!previous) return true;
   if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken, SyntaxKind.CloseParenToken].includes(previous.kind))
     return false;
+  let parens = 0;
+  let brackets = 0;
+  let braces = 0;
+  for (let cursor = nameIndex - 1; cursor >= 0; cursor -= 1) {
+    const kind = tokens[cursor].kind;
+    if (kind === SyntaxKind.CloseParenToken) parens += 1;
+    else if (kind === SyntaxKind.OpenParenToken) {
+      if (parens > 0) parens -= 1;
+      else break;
+    } else if (kind === SyntaxKind.CloseBracketToken) brackets += 1;
+    else if (kind === SyntaxKind.OpenBracketToken) {
+      if (brackets > 0) brackets -= 1;
+      else break;
+    } else if (kind === SyntaxKind.CloseBraceToken) braces += 1;
+    else if (kind === SyntaxKind.OpenBraceToken) {
+      if (braces > 0) braces -= 1;
+      else break;
+    } else if (parens === 0 && brackets === 0 && braces === 0 && kind === SyntaxKind.AtToken) return true;
+    else if (
+      parens === 0 &&
+      brackets === 0 &&
+      braces === 0 &&
+      [SyntaxKind.SemicolonToken, SyntaxKind.CommaToken].includes(kind)
+    )
+      break;
+  }
   return [
     SyntaxKind.OpenBraceToken,
     SyntaxKind.CloseBraceToken,
@@ -834,7 +861,19 @@ function isGenericTypeAssertionEnd(tokens, index) {
   for (let cursor = open - 1; cursor >= 0; cursor -= 1) {
     const kind = tokens[cursor].kind;
     if (kind === SyntaxKind.AsKeyword) return true;
-    if (isPrimitiveTypeKeyword(kind) || identifierLike(tokens[cursor])) continue;
+    if (
+      isPrimitiveTypeKeyword(kind) ||
+      identifierLike(tokens[cursor]) ||
+      [
+        SyntaxKind.TrueKeyword,
+        SyntaxKind.FalseKeyword,
+        SyntaxKind.NumericLiteral,
+        SyntaxKind.StringLiteral,
+        SyntaxKind.BigIntLiteral,
+        SyntaxKind.NoSubstitutionTemplateLiteral,
+      ].includes(kind)
+    )
+      continue;
     if (
       [SyntaxKind.BarToken, SyntaxKind.AmpersandToken, SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(kind)
     )
@@ -895,6 +934,7 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
   for (let cursor = index - 1; cursor >= start; cursor -= 1) {
     const kind = tokens[cursor].kind;
     if (kind === SyntaxKind.ExtendsKeyword) {
+      if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[cursor - 1]?.kind)) return false;
       sawExtends = true;
       continue;
     }
@@ -1627,6 +1667,23 @@ if (process.argv.includes('--self-test')) {
       source:
         'function genericNullableUnionAssertionDivision(value) { return value as null | Numeric<Tag> / 2 && other / 3; }',
       expected: [{ name: 'genericNullableUnionAssertionDivision', complexity: 2 }],
+    },
+    {
+      source: 'function literalUnionAssertionDivision(value) { return value as true | Numeric<Tag> / 2 && other / 3; }',
+      expected: [{ name: 'literalUnionAssertionDivision', complexity: 2 }],
+    },
+    {
+      source: 'function bigintDivision() { return 1n / 2n && other / 3n; }',
+      expected: [{ name: 'bigintDivision', complexity: 2 }],
+    },
+    {
+      source:
+        'function runtimeExtendsProperty(flags, first, second) { return { choice: flags.extends ? first : second }; }',
+      expected: [{ name: 'runtimeExtendsProperty', complexity: 2 }],
+    },
+    {
+      source: 'class DecoratedMethods { @logged check(ready) { if (ready) return true; } }',
+      expected: [{ name: 'check', complexity: 2 }],
     },
     {
       source:
