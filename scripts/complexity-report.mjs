@@ -172,6 +172,75 @@ function isFunctionTypeParameterArrow(tokens, arrowIndex) {
   return false;
 }
 
+function isConditionalExpressionColon(tokens, colonIndex) {
+  if (tokens[colonIndex - 1]?.kind === SyntaxKind.QuestionToken) return false;
+  let parens = 0;
+  let brackets = 0;
+  let braces = 0;
+  let angles = 0;
+  for (let cursor = colonIndex - 1; cursor >= 0; cursor -= 1) {
+    const kind = tokens[cursor].kind;
+    if (kind === SyntaxKind.CloseParenToken) {
+      parens += 1;
+      continue;
+    }
+    if (kind === SyntaxKind.CloseBracketToken) {
+      brackets += 1;
+      continue;
+    }
+    if (kind === SyntaxKind.CloseBraceToken) {
+      braces += 1;
+      continue;
+    }
+    if (kind === SyntaxKind.GreaterThanToken) {
+      angles += 1;
+      continue;
+    }
+    if (kind === SyntaxKind.GreaterThanGreaterThanToken) {
+      angles += 2;
+      continue;
+    }
+    if (kind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken) {
+      angles += 3;
+      continue;
+    }
+    if (kind === SyntaxKind.OpenParenToken) {
+      if (parens > 0) parens -= 1;
+      else return false;
+      continue;
+    }
+    if (kind === SyntaxKind.OpenBracketToken) {
+      if (brackets > 0) brackets -= 1;
+      else return false;
+      continue;
+    }
+    if (kind === SyntaxKind.OpenBraceToken) {
+      if (braces > 0) braces -= 1;
+      else return false;
+      continue;
+    }
+    if (kind === SyntaxKind.LessThanToken) {
+      if (angles > 0) angles -= 1;
+      else return false;
+      continue;
+    }
+    if (parens > 0 || brackets > 0 || braces > 0 || angles > 0) continue;
+    if (kind === SyntaxKind.QuestionToken) return !isConditionalTypeQuestion(tokens, cursor);
+    if (
+      [
+        SyntaxKind.ColonToken,
+        SyntaxKind.CommaToken,
+        SyntaxKind.SemicolonToken,
+        SyntaxKind.EqualsToken,
+        SyntaxKind.OpenBraceToken,
+        SyntaxKind.CloseBraceToken,
+      ].includes(kind)
+    )
+      return false;
+  }
+  return false;
+}
+
 function isTupleTypeArrow(tokens, arrowIndex) {
   const arrowClose = arrowIndex - 1;
   if (tokens[arrowClose]?.kind !== SyntaxKind.CloseParenToken) return false;
@@ -185,7 +254,7 @@ function isTupleTypeArrow(tokens, arrowIndex) {
     if (bracketClose === undefined || arrowIndex >= bracketClose) continue;
     for (let cursor = bracket - 1; cursor >= 0; cursor -= 1) {
       const kind = tokens[cursor].kind;
-      if (kind === SyntaxKind.ColonToken) return true;
+      if (kind === SyntaxKind.ColonToken) return !isConditionalExpressionColon(tokens, cursor);
       if (
         [
           SyntaxKind.EqualsToken,
@@ -2047,6 +2116,13 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'const config = { handlers: [() => ready ? first : second] };',
       expected: [{ name: '<arrow>', complexity: 2 }],
+    },
+    {
+      source: 'function conditionalArray() { return choose ? existing : [() => ready ? first : second]; }',
+      expected: [
+        { name: 'conditionalArray', complexity: 2 },
+        { name: '<arrow>', complexity: 2 },
+      ],
     },
     {
       source: `function storage() {
