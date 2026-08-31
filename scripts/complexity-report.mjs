@@ -34,7 +34,7 @@ function scan(source) {
         }
       }
     }
-    if (kind === SyntaxKind.SlashToken && shouldRescanSlash(previous)) kind = scanner.reScanSlashToken();
+    if (kind === SyntaxKind.SlashToken && shouldRescanSlash(previous, tokens)) kind = scanner.reScanSlashToken();
     if (kind !== SyntaxKind.EndOfFile) {
       previous = { kind, text: scanner.getTokenText() };
       tokens.push({ ...previous, start: scanner.getTokenStart() });
@@ -66,8 +66,22 @@ function canEndExpression(token) {
   ].includes(token.kind);
 }
 
-function shouldRescanSlash(previous) {
-  return !canEndExpression(previous);
+function isControlHeaderClose(tokens, closeIndex) {
+  if (tokens[closeIndex]?.kind !== SyntaxKind.CloseParenToken) return false;
+  const openIndex = matchingOpen(tokens, closeIndex, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+  if (openIndex === undefined) return false;
+  return [
+    SyntaxKind.IfKeyword,
+    SyntaxKind.WhileKeyword,
+    SyntaxKind.ForKeyword,
+    SyntaxKind.WithKeyword,
+    SyntaxKind.SwitchKeyword,
+    SyntaxKind.CatchKeyword,
+  ].includes(tokens[openIndex - 1]?.kind);
+}
+
+function shouldRescanSlash(previous, tokens = []) {
+  return !canEndExpression(previous) || isControlHeaderClose(tokens, tokens.length - 1);
 }
 
 function pairBraces(tokens) {
@@ -389,7 +403,10 @@ function isGenericOpen(tokens, index) {
     ].includes(previous)
   )
     return true;
-  return identifierLike(tokens[index - 1]) && tokens[index - 2]?.kind === SyntaxKind.AsKeyword;
+  return (
+    (identifierLike(tokens[index - 1]) && tokens[index - 2]?.kind === SyntaxKind.AsKeyword) ||
+    (identifierLike(tokens[index - 1]) && tokens[index - 2]?.kind === SyntaxKind.SatisfiesKeyword)
+  );
 }
 
 function isCallTypeArgumentOpen(tokens, index) {
@@ -748,7 +765,7 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
     }
     if (kind === SyntaxKind.TypeKeyword) return sawExtends;
     if (kind === SyntaxKind.ColonToken && sawExtends) return true;
-    if (kind === SyntaxKind.LessThanToken && sawExtends) {
+    if (kind === SyntaxKind.LessThanToken && sawExtends && isConditionalTypeAngleStart(tokens, cursor)) {
       let angleDepth = 0;
       for (let boundary = cursor; boundary < tokens.length; boundary += 1) {
         const boundaryKind = tokens[boundary].kind;
@@ -779,6 +796,15 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
     if (kind === SyntaxKind.SemicolonToken) return false;
   }
   return false;
+}
+
+function isConditionalTypeAngleStart(tokens, index) {
+  if (!identifierLike(tokens[index - 1])) return false;
+  const first = tokens[index + 1];
+  const afterFirst = tokens[index + 2]?.kind;
+  if (!identifierLike(first)) return false;
+  if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken, SyntaxKind.OpenParenToken].includes(afterFirst)) return false;
+  return true;
 }
 
 function countSourceLines(source) {
@@ -1317,6 +1343,19 @@ if (process.argv.includes('--self-test')) {
         return undefined;
       }`,
       expected: [{ name: 'instantiationConditional', complexity: 2 }],
+    },
+    {
+      source: 'const satisfiesConditional = () => value satisfies Pair<A, B> && ready;',
+      expected: [{ name: 'satisfiesConditional', complexity: 2 }],
+    },
+    {
+      source: 'function controlRegex(value) { if (value) /a&&b/u.test(value); return value; }',
+      expected: [{ name: 'controlRegex', complexity: 2 }],
+    },
+    {
+      source:
+        'function pairedComparison(value, flags, first, second, minimum) { return value < flags.extends ? first : second > (minimum); }',
+      expected: [{ name: 'pairedComparison', complexity: 2 }],
     },
     {
       source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
