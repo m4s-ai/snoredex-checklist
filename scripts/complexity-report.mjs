@@ -374,6 +374,7 @@ function findArrowExpressionEnd(tokens, start) {
   let braces = 0;
   for (let index = start; index < tokens.length; index += 1) {
     const kind = tokens[index].kind;
+    if ([SyntaxKind.TemplateMiddle, SyntaxKind.TemplateTail].includes(kind)) return index;
     if (kind === SyntaxKind.OpenParenToken) parens += 1;
     else if (kind === SyntaxKind.CloseParenToken) {
       if (parens === 0 && brackets === 0) return index;
@@ -751,6 +752,13 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function nestedTemplate(localization) { return `${{ localization }.localization ?? "unknown"}`; }',
       expected: [{ name: 'nestedTemplate', complexity: 2 }],
+    },
+    {
+      source: 'function host(x, y, z) { return `${x => x && y}` && (z ? 1 : 2); }',
+      expected: [
+        { name: 'host', complexity: 3 },
+        { name: '<arrow>', complexity: 2 },
+      ],
     },
     {
       source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
