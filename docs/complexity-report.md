@@ -3,32 +3,32 @@
 > Advisory lexical estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (32 production code files).
-Lines: 12,802.
-Function-like nodes: 757.
-McCabe estimate: sum 3,891; mean 5.1; median 2; P90 13; P95 22.
-Hotspots: 91 functions exceed 10; 42 exceed 20.
+Lines: 12,846.
+Function-like nodes: 1,550.
+McCabe estimate: sum 4,027; mean 2.6; median 1; P90 5; P95 8.
+Hotspots: 53 functions exceed 10; 11 exceed 20.
 
 The estimate counts if/for/while/do/catch/case statements, conditional `?` tokens and `&&`/`||`/`??` operators inside function-like bodies. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
 
-| Location                            | Function                       | Complexity |
-| ----------------------------------- | ------------------------------ | ---------: |
-| `src/site/catalogue.ts:223`         | `validateSnapshot`             |         90 |
-| `src/state/storage.ts:705`          | `persistPendingNoteDraft`      |         75 |
-| `src/site/app.ts:1319`              | `renderResults`                |         68 |
-| `src/catalogue/validate.ts:235`     | `validateSemantics`            |         56 |
-| `src/state/reconciliation.ts:513`   | `reconcilePrivateState`        |         55 |
-| `src/catalogue/validate.ts:416`     | `validateCatalogueFixture`     |         54 |
-| `scripts/complexity-report.mjs:442` | `findArrowExpressionEnd`       |         47 |
-| `scripts/check-artifact.mjs:1311`   | `extractHead`                  |         45 |
-| `src/site/query.ts:31`              | `parseQuery`                   |         39 |
-| `scripts/complexity-report.mjs:597` | `findStatementEnd`             |         36 |
-| `scripts/complexity-report.mjs:681` | `collectFunctions`             |         36 |
-| `src/state/storage.ts:1142`         | `setDraftOwnerState`           |         36 |
-| `src/catalogue/sync.ts:517`         | `parseJournal`                 |         34 |
-| `scripts/check-artifact.mjs:239`    | `stripHtmlComments`            |         32 |
-| `src/state/domain.ts:211`           | `parseState`                   |         32 |
-| `src/site/deployment.ts:24`         | `validatePagesDeployment`      |         31 |
-| `src/state/backup.ts:289`           | `writeAuthority`               |         30 |
-| `src/catalogue/sync.ts:763`         | `syncCataloguePair`            |         29 |
-| `src/site/catalogue.ts:93`          | `validateProvenance`           |         29 |
-| `src/state/reconciliation.ts:167`   | `migrationIsStructurallyValid` |         28 |
+| Location                            | Function                           | Complexity |
+| ----------------------------------- | ---------------------------------- | ---------: |
+| `scripts/complexity-report.mjs:449` | `for`                              |         41 |
+| `src/catalogue/validate.ts:435`     | `for`                              |         37 |
+| `src/site/catalogue.ts:337`         | `for`                              |         37 |
+| `src/site/query.ts:31`              | `parseQuery`                       |         32 |
+| `src/catalogue/sync.ts:517`         | `parseJournal`                     |         31 |
+| `src/site/catalogue.ts:223`         | `validateSnapshot`                 |         30 |
+| `src/site/deployment.ts:24`         | `validatePagesDeployment`          |         30 |
+| `src/site/catalogue.ts:93`          | `validateProvenance`               |         25 |
+| `scripts/check-artifact.mjs:758`    | `isJavaScriptRegexStart`           |         23 |
+| `src/state/reconciliation.ts:513`   | `reconcilePrivateState`            |         21 |
+| `src/state/storage.ts:1931`         | `parseDraftReference`              |         21 |
+| `src/catalogue/sync.ts:385`         | `lockIsValid`                      |         20 |
+| `src/catalogue/sync.ts:690`         | `readCommittedCataloguePairUnsafe` |         20 |
+| `src/catalogue/sync.ts:763`         | `syncCataloguePair`                |         20 |
+| `src/state/domain.ts:148`           | `normalizeRecordForImport`         |         20 |
+| `scripts/check-artifact.mjs:106`    | `while`                            |         19 |
+| `src/catalogue/validate.ts:307`     | `for`                              |         18 |
+| `src/site/collection-state.ts:430`  | `createCollectionStateController`  |         18 |
+| `scripts/check-artifact.mjs:877`    | `isJavaScriptForOfKeyword`         |         17 |
+| `scripts/check-artifact.mjs:1050`   | `for`                              |         17 |

@@ -568,7 +568,31 @@ function isCaseClause(tokens, index) {
 }
 
 function isKeywordNamedMethod(tokens, index) {
-  if (tokens[index]?.kind !== SyntaxKind.CaseKeyword) return false;
+  if (
+    ![
+      SyntaxKind.IfKeyword,
+      SyntaxKind.ForKeyword,
+      SyntaxKind.WhileKeyword,
+      SyntaxKind.DoKeyword,
+      SyntaxKind.CatchKeyword,
+      SyntaxKind.CaseKeyword,
+    ].includes(tokens[index]?.kind)
+  )
+    return false;
+  if (tokens[index - 1]?.kind === SyntaxKind.OpenBraceToken) {
+    if (
+      [
+        SyntaxKind.CloseParenToken,
+        SyntaxKind.CloseBraceToken,
+        SyntaxKind.ElseKeyword,
+        SyntaxKind.TryKeyword,
+        SyntaxKind.FinallyKeyword,
+        SyntaxKind.DoKeyword,
+        SyntaxKind.EqualsGreaterThanToken,
+      ].includes(tokens[index - 2]?.kind)
+    )
+      return false;
+  }
   if (!looksLikeMethodName(tokens, index) || tokens[index + 1]?.kind !== SyntaxKind.OpenParenToken) return false;
   const close = matching(tokens, index + 1, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
   return close !== undefined && tokens[close + 1]?.kind === SyntaxKind.OpenBraceToken;
@@ -584,6 +608,7 @@ function isConditionalTypeQuestion(tokens, index) {
       continue;
     }
     if (kind === SyntaxKind.TypeKeyword) return sawExtends;
+    if (kind === SyntaxKind.ColonToken && sawExtends) return true;
     if (kind === SyntaxKind.SemicolonToken) return false;
   }
   return false;
@@ -782,6 +807,7 @@ function collectFunctions(tokens, source, path) {
       ) {
         if (
           !isOptionalTypeProperty(tokens, index) &&
+          !isKeywordNamedMethod(tokens, index) &&
           !isConditionalTypeQuestion(tokens, index) &&
           (tokens[index].kind !== SyntaxKind.CatchKeyword || isCatchClause(tokens, index)) &&
           (tokens[index].kind !== SyntaxKind.CaseKeyword || isCaseClause(tokens, index)) &&
@@ -1015,6 +1041,24 @@ if (process.argv.includes('--self-test')) {
         return undefined;
       }`,
       expected: [{ name: 'conditionalObjectType', complexity: 2 }],
+    },
+    {
+      source: `function conditionalAnnotation(value) {
+        const result: T extends string ? string : number = value as never;
+        if (value) return result;
+        return undefined;
+      }`,
+      expected: [{ name: 'conditionalAnnotation', complexity: 2 }],
+    },
+    {
+      source: `function keywordMethods(ready) {
+        return { catch() { if (ready) return 1; }, if() { while (ready) return 2; } };
+      }`,
+      expected: [
+        { name: 'keywordMethods', complexity: 1 },
+        { name: 'catch', complexity: 2 },
+        { name: 'if', complexity: 2 },
+      ],
     },
     {
       source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
