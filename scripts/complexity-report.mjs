@@ -372,9 +372,22 @@ function findArrowExpressionEnd(tokens, start) {
   let parens = 0;
   let brackets = 0;
   let braces = 0;
+  let templateDepth = 0;
   for (let index = start; index < tokens.length; index += 1) {
     const kind = tokens[index].kind;
-    if ([SyntaxKind.TemplateMiddle, SyntaxKind.TemplateTail].includes(kind)) return index;
+    if (kind === SyntaxKind.TemplateHead) {
+      templateDepth += 1;
+      continue;
+    }
+    if (kind === SyntaxKind.TemplateMiddle) {
+      if (templateDepth === 0) return index;
+      continue;
+    }
+    if (kind === SyntaxKind.TemplateTail) {
+      if (templateDepth === 0) return index;
+      templateDepth -= 1;
+      continue;
+    }
     if (kind === SyntaxKind.OpenParenToken) parens += 1;
     else if (kind === SyntaxKind.CloseParenToken) {
       if (parens === 0 && brackets === 0) return index;
@@ -759,6 +772,10 @@ if (process.argv.includes('--self-test')) {
         { name: 'host', complexity: 3 },
         { name: '<arrow>', complexity: 2 },
       ],
+    },
+    {
+      source: 'const templateArrow = (x, y, z) => `${x ? y : z}-${y && z}`;',
+      expected: [{ name: 'templateArrow', complexity: 3 }],
     },
     {
       source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
