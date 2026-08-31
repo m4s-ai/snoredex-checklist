@@ -392,7 +392,7 @@ function isSemicolonlessClassMethod(tokens, nameIndex, bracePairs) {
     } else if (parens === 0 && brackets === 0 && braces === 0) {
       if (kind === SyntaxKind.EqualsToken) return true;
       if ([SyntaxKind.ExclamationToken, SyntaxKind.QuestionToken].includes(tokens[cursor - 1]?.kind)) return true;
-      if (kind === SyntaxKind.ColonToken && identifierLike(tokens[cursor - 1])) {
+      if (kind === SyntaxKind.ColonToken && methodNameLike(tokens[cursor - 1])) {
         for (let parent = cursor - 2; parent >= 0; parent -= 1) {
           const parentKind = tokens[parent].kind;
           if (parentKind === SyntaxKind.DeclareKeyword) return true;
@@ -2093,6 +2093,13 @@ if (process.argv.includes('--self-test')) {
     {
       source: `class DeclaredField {
         declare field: number
+        check(ready) { if (ready) return true; return false; }
+      }`,
+      expected: [{ name: 'check', complexity: 2 }],
+    },
+    {
+      source: `class DeclaredLiteralField {
+        declare "field": number
         check(ready) { if (ready) return true; return false; }
       }`,
       expected: [{ name: 'check', complexity: 2 }],

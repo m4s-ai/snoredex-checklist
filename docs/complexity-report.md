@@ -3,7 +3,7 @@
 > Advisory lexical estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (32 production code files).
-Lines: 13,928.
+Lines: 13,935.
 Function-like nodes: 777.
 McCabe estimate: sum 4,151; mean 5.3; median 2; P90 13; P95 23.
 Hotspots: 101 functions exceed 10; 46 exceed 20.
