@@ -1,13 +1,10 @@
 name: Deploy Pages
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       consumer_revision:
-        description: Optional full consumer commit SHA (rollback only; adopt uses the workflow revision)
+        description: Optional full consumer commit SHA (adopt defaults to this workflow revision)
         required: false
         default: ''
         type: string
