@@ -81,7 +81,7 @@ jobs:
             proceed = rollbackRuns.length === 0;
             if (!proceed) console.log('automatic adoption deferred while a rollback run is queued or active');
           } else if (mode === 'rollback') {
-            const activeRuns = runs.filter((run) => run.status === 'in_progress' || run.status === 'waiting');
+            const activeRuns = runs.filter((run) => activeStatuses.has(run.status));
             const deadline = Date.now() + 30 * 60 * 1000;
             while (activeRuns.length > 0 && Date.now() < deadline) {
               Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15000);

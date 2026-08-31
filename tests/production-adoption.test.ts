@@ -35,6 +35,7 @@ test('production adoption validates the reviewed target migration without requir
   assert.match(workflow, /deployment-lane:/u);
   assert.match(workflow, /actions: read/u);
   assert.match(workflow, /automatic adoption deferred while a rollback run is queued or active/u);
+  assert.match(workflow, /const activeRuns = runs\.filter\(\(run\) => activeStatuses\.has\(run\.status\)\)/u);
   assert.match(workflow, /needs: deployment-lane/u);
   assert.match(workflow, /if: needs\.deployment-lane\.outputs\.proceed == 'true'/u);
   assert.match(
