@@ -84,8 +84,9 @@ function isControlHeaderClose(tokens, closeIndex) {
 function shouldRescanSlash(previous, tokens = []) {
   const memberProperty = isMemberPropertyAccess(tokens, tokens.length - 1);
   const postfixNonNull = isPostfixNonNullAssertion(tokens, tokens.length - 1);
+  const typeAssertion = isTypeAssertionKeyword(tokens, tokens.length - 1);
   return (
-    (!canEndExpression(previous) && !memberProperty && !postfixNonNull) ||
+    (!canEndExpression(previous) && !memberProperty && !postfixNonNull && !typeAssertion) ||
     isControlHeaderClose(tokens, tokens.length - 1)
   );
 }
@@ -799,6 +800,23 @@ function isPostfixNonNullAssertion(tokens, index) {
   return canEndExpression(tokens[index - 1]) || isMemberPropertyAccess(tokens, index - 1);
 }
 
+function isTypeAssertionKeyword(tokens, index) {
+  if (tokens[index - 1]?.kind !== SyntaxKind.AsKeyword) return false;
+  return [
+    SyntaxKind.AnyKeyword,
+    SyntaxKind.BigIntKeyword,
+    SyntaxKind.BooleanKeyword,
+    SyntaxKind.NeverKeyword,
+    SyntaxKind.NumberKeyword,
+    SyntaxKind.ObjectKeyword,
+    SyntaxKind.StringKeyword,
+    SyntaxKind.SymbolKeyword,
+    SyntaxKind.UndefinedKeyword,
+    SyntaxKind.UnknownKeyword,
+    SyntaxKind.VoidKeyword,
+  ].includes(tokens[index]?.kind);
+}
+
 function isKeywordNamedProperty(tokens, index) {
   return (
     [
@@ -871,6 +889,10 @@ function isConditionalTypeAngleStart(tokens, index) {
   }
   if (first?.kind === SyntaxKind.OpenBracketToken) {
     const close = matching(tokens, index + 1, SyntaxKind.OpenBracketToken, SyntaxKind.CloseBracketToken);
+    return close !== undefined && tokens[close + 1]?.kind === SyntaxKind.ExtendsKeyword;
+  }
+  if (first?.kind === SyntaxKind.OpenParenToken) {
+    const close = matching(tokens, index + 1, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
     return close !== undefined && tokens[close + 1]?.kind === SyntaxKind.ExtendsKeyword;
   }
   if (
@@ -1014,6 +1036,7 @@ function collectFunctions(tokens, source, path) {
     functions.push({
       path: relative(root, path).split('\\').join('/'),
       name,
+      signatureStart: start,
       line,
       bodyOpen,
       bodyClose,
@@ -1044,11 +1067,21 @@ function collectFunctions(tokens, source, path) {
     if (token.kind === SyntaxKind.EqualsGreaterThanToken) {
       if (isTypeOnlyArrow(tokens, index)) continue;
       const name = arrowName(tokens, index);
+      const parameterClose = findArrowParameterClose(tokens, index);
+      const parameterOpen =
+        parameterClose === undefined
+          ? undefined
+          : matchingOpen(tokens, parameterClose, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+      const signatureStart = parameterOpen ?? index - 1;
       if (tokens[index + 1]?.kind === SyntaxKind.OpenBraceToken) {
         const bodyOpen = index + 1;
-        add(index - 1, { bodyOpen, bodyClose: braces.get(bodyOpen) }, name);
+        add(signatureStart, { bodyOpen, bodyClose: braces.get(bodyOpen) }, name);
       } else {
-        add(index - 1, { expressionStart: index + 1, expressionEnd: findArrowExpressionEnd(tokens, index + 1) }, name);
+        add(
+          signatureStart,
+          { expressionStart: index + 1, expressionEnd: findArrowExpressionEnd(tokens, index + 1) },
+          name,
+        );
       }
       continue;
     }
@@ -1086,7 +1119,7 @@ function collectFunctions(tokens, source, path) {
     for (let index = start; index < end; index += 1) {
       const nested = functions.find(
         (candidate) =>
-          (candidate.bodyOpen === index || candidate.expressionStart === index) &&
+          (candidate.signatureStart === index || candidate.bodyOpen === index || candidate.expressionStart === index) &&
           candidate !== entry &&
           (candidate.bodyClose ?? candidate.expressionEnd) <= end,
       );
@@ -1124,6 +1157,7 @@ function collectFunctions(tokens, source, path) {
     }
     delete entry.bodyOpen;
     delete entry.bodyClose;
+    delete entry.signatureStart;
     delete entry.expressionStart;
     delete entry.expressionEnd;
   }
@@ -1509,6 +1543,10 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: 'nonNullDivision', complexity: 2 }],
     },
     {
+      source: 'function primitiveAssertionDivision(value) { return value as number / 2 && other / 3; }',
+      expected: [{ name: 'primitiveAssertionDivision', complexity: 2 }],
+    },
+    {
       source:
         'function pairedComparison(value, flags, first, second, minimum) { return value < flags.extends ? first : second > (minimum); }',
       expected: [{ name: 'pairedComparison', complexity: 2 }],
@@ -1539,9 +1577,22 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: 'literalConditional', complexity: 4 }],
     },
     {
+      source: 'function parenthesizedConditional(value) { return factory<(T) extends Foo ? A : B>() || value; }',
+      expected: [{ name: 'parenthesizedConditional', complexity: 2 }],
+    },
+    {
       source:
         'function conditionalReturnType<T>(): T extends string ? { ok: true } : { ok: false } { if (ready) return 1; }',
       expected: [{ name: 'conditionalReturnType', complexity: 2 }],
+    },
+    {
+      source: `function nestedParameterHost() {
+        return function nestedParameter(value = ready && fallback) { return value; };
+      }`,
+      expected: [
+        { name: 'nestedParameterHost', complexity: 1 },
+        { name: 'nestedParameter', complexity: 1 },
+      ],
     },
     {
       source: 'function primitiveConditional(value) { return factory<string extends Foo ? A : B>() || value; }',

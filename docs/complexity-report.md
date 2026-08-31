@@ -3,10 +3,10 @@
 > Advisory lexical estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (32 production code files).
-Lines: 13,338.
-Function-like nodes: 767.
-McCabe estimate: sum 3,991; mean 5.2; median 2; P90 13; P95 22.
-Hotspots: 94 functions exceed 10; 43 exceed 20.
+Lines: 13,389.
+Function-like nodes: 768.
+McCabe estimate: sum 3,997; mean 5.2; median 2; P90 13; P95 22.
+Hotspots: 95 functions exceed 10; 43 exceed 20.
 
 The estimate counts if/for/while/do/catch/case statements, conditional `?` tokens and `&&`/`||`/`??` operators inside function-like bodies. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
 
@@ -18,11 +18,11 @@ The estimate counts if/for/while/do/catch/case statements, conditional `?` token
 | `src/catalogue/validate.ts:235`      | `validateSemantics`        |         56 |
 | `src/state/reconciliation.ts:513`    | `reconcilePrivateState`    |         55 |
 | `src/catalogue/validate.ts:416`      | `validateCatalogueFixture` |         54 |
-| `scripts/complexity-report.mjs:591`  | `findArrowExpressionEnd`   |         47 |
+| `scripts/complexity-report.mjs:592`  | `findArrowExpressionEnd`   |         47 |
 | `scripts/check-artifact.mjs:1311`    | `extractHead`              |         45 |
-| `scripts/complexity-report.mjs:1003` | `collectFunctions`         |         42 |
+| `scripts/complexity-report.mjs:1025` | `collectFunctions`         |         44 |
 | `src/site/query.ts:31`               | `parseQuery`               |         39 |
-| `scripts/complexity-report.mjs:919`  | `findStatementEnd`         |         36 |
+| `scripts/complexity-report.mjs:941`  | `findStatementEnd`         |         36 |
 | `src/state/storage.ts:1142`          | `setDraftOwnerState`       |         36 |
 | `src/catalogue/sync.ts:517`          | `parseJournal`             |         34 |
 | `scripts/check-artifact.mjs:239`     | `stripHtmlComments`        |         32 |
@@ -31,4 +31,4 @@ The estimate counts if/for/while/do/catch/case statements, conditional `?` token
 | `src/state/backup.ts:289`            | `writeAuthority`           |         30 |
 | `src/catalogue/sync.ts:763`          | `syncCataloguePair`        |         29 |
 | `src/site/catalogue.ts:93`           | `validateProvenance`       |         29 |
-| `scripts/complexity-report.mjs:255`  | `isTypedFunctionBody`      |         28 |
+| `scripts/complexity-report.mjs:256`  | `isTypedFunctionBody`      |         28 |
