@@ -770,6 +770,19 @@ function isMemberPropertyAccess(tokens, index) {
   return [SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[index - 1]?.kind);
 }
 
+function isKeywordNamedProperty(tokens, index) {
+  return (
+    [
+      SyntaxKind.IfKeyword,
+      SyntaxKind.ForKeyword,
+      SyntaxKind.WhileKeyword,
+      SyntaxKind.DoKeyword,
+      SyntaxKind.CatchKeyword,
+      SyntaxKind.CaseKeyword,
+    ].includes(tokens[index]?.kind) && tokens[index + 1]?.kind === SyntaxKind.ColonToken
+  );
+}
+
 function isConditionalTypeQuestion(tokens, index, start = 0) {
   if (tokens[index]?.kind !== SyntaxKind.QuestionToken) return false;
   let sawExtends = false;
@@ -822,6 +835,14 @@ function isConditionalTypeAngleStart(tokens, index) {
     if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken, SyntaxKind.OpenParenToken].includes(afterFirst))
       return false;
     return true;
+  }
+  if (first?.kind === SyntaxKind.OpenBraceToken) {
+    const close = matching(tokens, index + 1, SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken);
+    return close !== undefined && tokens[close + 1]?.kind === SyntaxKind.ExtendsKeyword;
+  }
+  if (first?.kind === SyntaxKind.OpenBracketToken) {
+    const close = matching(tokens, index + 1, SyntaxKind.OpenBracketToken, SyntaxKind.CloseBracketToken);
+    return close !== undefined && tokens[close + 1]?.kind === SyntaxKind.ExtendsKeyword;
   }
   return [
     SyntaxKind.KeyOfKeyword,
@@ -1003,7 +1024,8 @@ function collectFunctions(tokens, source, path) {
       const nested = functions.find(
         (candidate) =>
           (candidate.bodyOpen === index || candidate.expressionStart === index) &&
-          (candidate.bodyClose ?? candidate.expressionEnd) < end,
+          candidate !== entry &&
+          (candidate.bodyClose ?? candidate.expressionEnd) <= end,
       );
       if (nested) {
         index = nested.bodyClose ?? nested.expressionEnd;
@@ -1027,6 +1049,7 @@ function collectFunctions(tokens, source, path) {
           !isOptionalTypeProperty(tokens, index) &&
           !isOptionalTypeMethod(tokens, index, start) &&
           !isMemberPropertyAccess(tokens, index) &&
+          !isKeywordNamedProperty(tokens, index) &&
           !isKeywordNamedMethod(tokens, index) &&
           !isConditionalTypeQuestion(tokens, index, start) &&
           (tokens[index].kind !== SyntaxKind.CatchKeyword || isCatchClause(tokens, index)) &&
@@ -1394,6 +1417,22 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function keyofConditional(value) { return factory<keyof T extends string ? A : B>() || value; }',
       expected: [{ name: 'keyofConditional', complexity: 2 }],
+    },
+    {
+      source: 'const curry = (x) => (y) => x && y;',
+      expected: [
+        { name: 'curry', complexity: 1 },
+        { name: '<arrow>', complexity: 2 },
+      ],
+    },
+    {
+      source: 'function keywordProperties(value, ready) { return { if: value && ready, while: value || ready }; }',
+      expected: [{ name: 'keywordProperties', complexity: 3 }],
+    },
+    {
+      source:
+        'function structuredConditional(value) { return factory<{ value: T } extends Foo ? A : B>() || factory<[T] extends Foo ? C : D>() || value; }',
+      expected: [{ name: 'structuredConditional', complexity: 3 }],
     },
     {
       source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
