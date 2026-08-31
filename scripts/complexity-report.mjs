@@ -141,8 +141,7 @@ function methodNameLike(token) {
 function looksLikeMethodName(tokens, nameIndex) {
   const previous = tokens[nameIndex - 1];
   if (!previous) return true;
-  if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken, SyntaxKind.CloseParenToken].includes(previous.kind))
-    return false;
+  if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken, SyntaxKind.AtToken].includes(previous.kind)) return false;
   let parens = 0;
   let brackets = 0;
   let braces = 0;
@@ -874,6 +873,7 @@ function isGenericTypeAssertionEnd(tokens, index) {
       ].includes(kind)
     )
       continue;
+    if ([SyntaxKind.MinusToken, SyntaxKind.PlusToken].includes(kind)) continue;
     if (
       [SyntaxKind.BarToken, SyntaxKind.AmpersandToken, SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(kind)
     )
@@ -1684,6 +1684,15 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'class DecoratedMethods { @logged check(ready) { if (ready) return true; } }',
       expected: [{ name: 'check', complexity: 2 }],
+    },
+    {
+      source: 'class InvokedDecoratedMethods { @logged() check(ready) { if (ready) return true; } }',
+      expected: [{ name: 'check', complexity: 2 }],
+    },
+    {
+      source:
+        'function signedLiteralUnionAssertionDivision(value) { return value as -1 | Numeric<Tag> / 2 && other / 3; }',
+      expected: [{ name: 'signedLiteralUnionAssertionDivision', complexity: 2 }],
     },
     {
       source:
