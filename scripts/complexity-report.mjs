@@ -545,6 +545,7 @@ function findBodyOpen(tokens, after, braces) {
             SyntaxKind.CommaToken,
             SyntaxKind.OpenBracketToken,
             SyntaxKind.OpenParenToken,
+            SyntaxKind.QuestionToken,
           ].includes(previousKind);
         if (typeBrace) {
           const typeClose = braces.get(index);
@@ -999,7 +1000,11 @@ function collectFunctions(tokens, source, path) {
     if (token.kind !== SyntaxKind.OpenParenToken) continue;
     const nameIndex = index - 1;
     let name;
-    if (identifierLike(tokens[nameIndex]) && looksLikeMethodName(tokens, nameIndex)) name = tokens[nameIndex].text;
+    if (
+      (identifierLike(tokens[nameIndex]) || tokens[nameIndex]?.kind === SyntaxKind.PrivateIdentifier) &&
+      looksLikeMethodName(tokens, nameIndex)
+    )
+      name = tokens[nameIndex].text;
     else if (isKeywordNamedMethod(tokens, nameIndex)) name = tokens[nameIndex].text;
     else if (tokens[nameIndex]?.kind === SyntaxKind.CloseBracketToken && isComputedMethodName(tokens, nameIndex))
       name = '<computed>';
@@ -1380,6 +1385,12 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: 'load', complexity: 3 }],
     },
     {
+      source: `class PrivateMethod {
+        #check(ready) { if (ready) return true; return false; }
+      }`,
+      expected: [{ name: '#check', complexity: 2 }],
+    },
+    {
       source: `function inlineOptionalType(value) {
         const hooks: { ready?(): boolean } = value;
         if (value) return hooks;
@@ -1435,6 +1446,11 @@ if (process.argv.includes('--self-test')) {
       source:
         'function structuredConditional(value) { return factory<{ value: T } extends Foo ? A : B>() || factory<[T] extends Foo ? C : D>() || value; }',
       expected: [{ name: 'structuredConditional', complexity: 3 }],
+    },
+    {
+      source:
+        'function conditionalReturnType<T>(): T extends string ? { ok: true } : { ok: false } { if (ready) return 1; }',
+      expected: [{ name: 'conditionalReturnType', complexity: 2 }],
     },
     {
       source: 'function primitiveConditional(value) { return factory<string extends Foo ? A : B>() || value; }',
