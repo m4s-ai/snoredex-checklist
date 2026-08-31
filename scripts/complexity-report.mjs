@@ -155,6 +155,23 @@ function matchingAngleClose(tokens, start) {
   return undefined;
 }
 
+function isFunctionTypeParameterArrow(tokens, arrowIndex) {
+  const close = arrowIndex - 1;
+  if (tokens[close]?.kind !== SyntaxKind.CloseParenToken) return false;
+  for (let cursor = close; cursor >= 0; cursor -= 1) {
+    const kind = tokens[cursor].kind;
+    if ([SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken, SyntaxKind.SemicolonToken].includes(kind)) return false;
+    if (kind !== SyntaxKind.FunctionKeyword) continue;
+    let nameIndex = cursor + 1;
+    if (tokens[nameIndex]?.kind === SyntaxKind.AsteriskToken) nameIndex += 1;
+    const genericStart = identifierLike(tokens[nameIndex]) ? nameIndex + 1 : nameIndex;
+    if (tokens[genericStart]?.kind !== SyntaxKind.LessThanToken) return false;
+    const genericClose = matchingAngleClose(tokens, genericStart);
+    return genericClose !== undefined && arrowIndex < genericClose;
+  }
+  return false;
+}
+
 function identifierLike(token) {
   return token && (token.kind === SyntaxKind.Identifier || token.kind === SyntaxKind.ConstructorKeyword);
 }
@@ -670,19 +687,12 @@ function isTypeOnlyArrow(tokens, arrowIndex) {
   if (isParenthesizedTypePosition(tokens, open)) return true;
   if (tokens[open - 1]?.kind === SyntaxKind.ColonToken) return true;
   if (tokens[open - 1]?.kind === SyntaxKind.AsKeyword) return true;
+  if (isFunctionTypeParameterArrow(tokens, arrowIndex)) return true;
   for (let index = open - 1; index >= 0; index -= 1) {
     const kind = tokens[index].kind;
     if ([SyntaxKind.SemicolonToken, SyntaxKind.OpenBraceToken, SyntaxKind.CloseBraceToken].includes(kind)) break;
     if ([SyntaxKind.ConstKeyword, SyntaxKind.LetKeyword, SyntaxKind.VarKeyword].includes(kind)) return false;
-    if (
-      [
-        SyntaxKind.TypeKeyword,
-        SyntaxKind.InterfaceKeyword,
-        SyntaxKind.DeclareKeyword,
-        SyntaxKind.FunctionKeyword,
-      ].includes(kind)
-    )
-      return true;
+    if ([SyntaxKind.TypeKeyword, SyntaxKind.InterfaceKeyword, SyntaxKind.DeclareKeyword].includes(kind)) return true;
   }
   return false;
 }
@@ -1991,6 +2001,13 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function qualifiedConditional() { return factory<Types.T extends Foo ? A : B>() || value; }',
       expected: [{ name: 'qualifiedConditional', complexity: 2 }],
+    },
+    {
+      source: 'function defaultArrow(callback = () => ready ? first : second) { return callback; }',
+      expected: [
+        { name: 'defaultArrow', complexity: 1 },
+        { name: 'callback', complexity: 2 },
+      ],
     },
     {
       source: `function storage() {
