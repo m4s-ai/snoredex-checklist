@@ -835,7 +835,10 @@ function isGenericTypeAssertionEnd(tokens, index) {
     const kind = tokens[cursor].kind;
     if (kind === SyntaxKind.AsKeyword) return true;
     if (isPrimitiveTypeKeyword(kind) || identifierLike(tokens[cursor])) continue;
-    if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(kind)) continue;
+    if (
+      [SyntaxKind.BarToken, SyntaxKind.AmpersandToken, SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(kind)
+    )
+      continue;
     return false;
   }
   return false;
@@ -1613,6 +1616,11 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function genericAssertionDivision(value) { return value as Numeric<Tag> / 2 && other / 3; }',
       expected: [{ name: 'genericAssertionDivision', complexity: 2 }],
+    },
+    {
+      source:
+        'function genericUnionAssertionDivision(value) { return value as number | Numeric<Tag> / 2 && other / 3; }',
+      expected: [{ name: 'genericUnionAssertionDivision', complexity: 2 }],
     },
     {
       source:
