@@ -1556,6 +1556,7 @@ function isConditionalTypeAssertionPrefix(tokens, index) {
     isBinaryOperator(previousKind) ||
     [
       SyntaxKind.ReturnKeyword,
+      SyntaxKind.ThrowKeyword,
       SyntaxKind.AwaitKeyword,
       SyntaxKind.YieldKeyword,
       SyntaxKind.ExclamationToken,
@@ -2891,6 +2892,12 @@ if (process.argv.includes('--self-test')) {
     {
       source: `const conciseAssertion = () => <T extends U ? A : B>value;`,
       expected: [{ name: 'conciseAssertion', complexity: 1 }],
+    },
+    {
+      source: `function throwAssertion() {
+        throw <T extends U ? A : B>value;
+      }`,
+      expected: [{ name: 'throwAssertion', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
