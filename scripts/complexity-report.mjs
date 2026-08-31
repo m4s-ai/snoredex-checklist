@@ -190,6 +190,9 @@ function isMethodTypeParameterArrow(tokens, arrowIndex) {
     if (genericClose === undefined || arrowIndex >= genericClose) continue;
     const nameIndex = cursor - 1;
     if (tokens[genericClose + 1]?.kind === SyntaxKind.OpenParenToken) {
+      const parameterClose = matching(tokens, genericClose + 1, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+      if (parameterClose !== undefined && tokens[parameterClose + 1]?.kind === SyntaxKind.EqualsGreaterThanToken)
+        return true;
       let expressionStart = nameIndex;
       while (tokens[expressionStart]?.kind === SyntaxKind.OpenParenToken) expressionStart -= 1;
       if (tokens[expressionStart]?.kind === SyntaxKind.EqualsToken) return true;
@@ -2720,6 +2723,15 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'const genericArrow = <T extends Element>(selector: string): T => selector ? selector : undefined;',
       expected: [{ name: 'genericArrow', complexity: 2 }],
+    },
+    {
+      source: `function genericArrowReturn() {
+        return <T extends () => boolean>(value: T) => value() ? first : second;
+      }`,
+      expected: [
+        { name: 'genericArrowReturn', complexity: 1 },
+        { name: '<arrow>', complexity: 2 },
+      ],
     },
     {
       source: `function genericFunctionWithObject<T extends Foo<Bar>>(first: T, options: { cb?: () => void }, last: T) {
