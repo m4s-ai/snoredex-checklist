@@ -576,7 +576,7 @@ function genericMethodNameIndex(tokens, closeAngleIndex, bracePairs) {
       angles -= 1;
       if (angles === 0) {
         const nameIndex = cursor - 1;
-        return identifierLike(tokens[nameIndex]) &&
+        return methodNameLike(tokens[nameIndex]) &&
           (looksLikeMethodName(tokens, nameIndex) || isSemicolonlessClassMethod(tokens, nameIndex, bracePairs))
           ? nameIndex
           : undefined;
@@ -669,6 +669,8 @@ function findBodyOpen(tokens, after, braces) {
             SyntaxKind.LessThanToken,
             SyntaxKind.BarToken,
             SyntaxKind.AmpersandToken,
+            SyntaxKind.KeyOfKeyword,
+            SyntaxKind.ReadonlyKeyword,
             SyntaxKind.EqualsGreaterThanToken,
             SyntaxKind.CommaToken,
             SyntaxKind.OpenBracketToken,
@@ -1683,6 +1685,12 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: '#check', complexity: 2 }],
     },
     {
+      source: `class GenericPrivateMethod {
+        #check<T>(ready: T) { if (ready) return true; return false; }
+      }`,
+      expected: [{ name: '#check', complexity: 2 }],
+    },
+    {
       source: `class PropertyNameMethods {
         "check"() { if (ready) return true; }
         42() { if (ready) return true; }
@@ -1879,6 +1887,14 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function union(): { ok: boolean } | null { return null; }',
       expected: [{ name: 'union', complexity: 1 }],
+    },
+    {
+      source: 'function keyofReturn(): keyof { ready: boolean } { if (ready) return true; }',
+      expected: [{ name: 'keyofReturn', complexity: 2 }],
+    },
+    {
+      source: 'function readonlyReturn(): readonly { ready: boolean }[] { if (ready) return []; }',
+      expected: [{ name: 'readonlyReturn', complexity: 2 }],
     },
     {
       source: `function storage() {
