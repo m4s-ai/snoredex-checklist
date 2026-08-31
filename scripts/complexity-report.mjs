@@ -1558,6 +1558,11 @@ function isConditionalTypeAssertionPrefix(tokens, index) {
       SyntaxKind.ReturnKeyword,
       SyntaxKind.AwaitKeyword,
       SyntaxKind.YieldKeyword,
+      SyntaxKind.ExclamationToken,
+      SyntaxKind.TildeToken,
+      SyntaxKind.VoidKeyword,
+      SyntaxKind.TypeOfKeyword,
+      SyntaxKind.DeleteKeyword,
       SyntaxKind.OpenParenToken,
       SyntaxKind.OpenBracketToken,
       SyntaxKind.ColonToken,
@@ -2851,6 +2856,36 @@ if (process.argv.includes('--self-test')) {
         return yield <T extends U ? A : B>value;
       }`,
       expected: [{ name: 'yieldAssertion', complexity: 1 }],
+    },
+    {
+      source: `function unaryAssertion() {
+        return !<T extends U ? A : B>value;
+      }`,
+      expected: [{ name: 'unaryAssertion', complexity: 1 }],
+    },
+    {
+      source: `function tildeAssertion() {
+        return ~<T extends U ? A : B>value;
+      }`,
+      expected: [{ name: 'tildeAssertion', complexity: 1 }],
+    },
+    {
+      source: `function typeofAssertion() {
+        return typeof <T extends U ? A : B>value;
+      }`,
+      expected: [{ name: 'typeofAssertion', complexity: 1 }],
+    },
+    {
+      source: `function voidAssertion() {
+        return void <T extends U ? A : B>value;
+      }`,
+      expected: [{ name: 'voidAssertion', complexity: 1 }],
+    },
+    {
+      source: `function deleteAssertion() {
+        return delete <T extends U ? A : B>value;
+      }`,
+      expected: [{ name: 'deleteAssertion', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
