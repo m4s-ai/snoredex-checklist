@@ -285,10 +285,28 @@ function isCallTypeArgumentOpen(tokens, index) {
     if (kind === SyntaxKind.GreaterThanToken) angles = Math.max(0, angles - 1);
     else if (kind === SyntaxKind.GreaterThanGreaterThanToken) angles = Math.max(0, angles - 2);
     else if (kind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken) angles = Math.max(0, angles - 3);
-    else if (angles === 1 && kind === SyntaxKind.CommaToken) sawComma = true;
+    else if (angles > 0 && kind === SyntaxKind.CommaToken) sawComma = true;
     if (angles === 0) return sawComma && tokens[cursor + 1]?.kind === SyntaxKind.OpenParenToken;
   }
   return false;
+}
+
+function genericMethodNameIndex(tokens, closeAngleIndex) {
+  let angles = 0;
+  for (let cursor = closeAngleIndex; cursor >= 0; cursor -= 1) {
+    const kind = tokens[cursor].kind;
+    if (kind === SyntaxKind.GreaterThanToken) angles += 1;
+    else if (kind === SyntaxKind.GreaterThanGreaterThanToken) angles += 2;
+    else if (kind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken) angles += 3;
+    else if (kind === SyntaxKind.LessThanToken) {
+      angles -= 1;
+      if (angles === 0) {
+        const nameIndex = cursor - 1;
+        return identifierLike(tokens[nameIndex]) && looksLikeMethodName(tokens, nameIndex) ? nameIndex : undefined;
+      }
+    }
+  }
+  return undefined;
 }
 
 function isObjectLiteralValueArrow(tokens, from) {
@@ -495,7 +513,8 @@ function isOptionalTypeProperty(tokens, index) {
 }
 
 function isCatchClause(tokens, index) {
-  return ![SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[index - 1]?.kind);
+  if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[index - 1]?.kind)) return false;
+  return [SyntaxKind.OpenParenToken, SyntaxKind.OpenBraceToken].includes(tokens[index + 1]?.kind);
 }
 
 function findStatementEnd(tokens, start) {
@@ -640,7 +659,10 @@ function collectFunctions(tokens, source, path) {
     if (identifierLike(tokens[nameIndex]) && looksLikeMethodName(tokens, nameIndex)) name = tokens[nameIndex].text;
     else if (tokens[nameIndex]?.kind === SyntaxKind.CloseBracketToken && isComputedMethodName(tokens, nameIndex))
       name = '<computed>';
-    else continue;
+    else if (tokens[nameIndex]?.kind === SyntaxKind.GreaterThanToken) {
+      const genericName = genericMethodNameIndex(tokens, nameIndex);
+      if (genericName !== undefined) name = tokens[genericName].text;
+    } else continue;
     const close = matching(tokens, index, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
     const bodyOpen = close === undefined ? undefined : findBodyOpen(tokens, close, braces);
     if (bodyOpen !== undefined) add(nameIndex, { bodyOpen, bodyClose: braces.get(bodyOpen) }, name);
@@ -852,6 +874,20 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'const typedArrow = (value): QueryParse => value ? value : undefined;',
       expected: [{ name: 'typedArrow', complexity: 2 }],
+    },
+    {
+      source: 'const nestedGeneric = () => choose<Result<A, B>>(ready && value);',
+      expected: [{ name: 'nestedGeneric', complexity: 2 }],
+    },
+    {
+      source: `class GenericMethod {
+        map<T>(value: T) { if (value) return value; return undefined; }
+      }`,
+      expected: [{ name: 'map', complexity: 2 }],
+    },
+    {
+      source: 'function keywordProperty(value, ready) { return { catch: value && ready }; }',
+      expected: [{ name: 'keywordProperty', complexity: 2 }],
     },
     {
       source: 'function wrapped(): Promise<{ ok: boolean }> { if (true) return { ok: true }; return { ok: false }; }',
