@@ -1,10 +1,15 @@
 name: Deploy Pages
 
+run-name: Deploy Pages / ${{ (github.event_name == 'workflow_dispatch' && inputs.deployment_mode) || 'adopt' }}
+
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       consumer_revision:
-        description: Optional full consumer commit SHA (adopt defaults to this workflow revision)
+        description: Optional full consumer commit SHA (rollback only; adopt uses the workflow revision)
         required: false
         default: ''
         type: string
@@ -21,12 +26,82 @@ permissions:
   contents: read
 
 concurrency:
-  group: pages
+  group: pages-${{ (github.event_name == 'workflow_dispatch' && inputs.deployment_mode == 'rollback' && 'rollback') || 'adopt' }}
   cancel-in-progress: false
 
 jobs:
+  deployment-lane:
+    name: reserve deployment lane
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+    outputs:
+      proceed: ${{ steps.lane.outputs.proceed }}
+    steps:
+      - name: Protect rollback priority
+        id: lane
+        env:
+          DEPLOYMENT_MODE: ${{ inputs.deployment_mode || 'adopt' }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          export DEPLOYMENT_MODE CURRENT_RUN_ID REPOSITORY
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+
+          const mode = process.env.DEPLOYMENT_MODE;
+          const currentRunId = String(process.env.CURRENT_RUN_ID);
+          const repository = process.env.REPOSITORY;
+          const readRuns = () => {
+            const response = execFileSync(
+              'gh',
+              [
+                'api',
+                '--paginate',
+                '--slurp',
+                `repos/${repository}/actions/workflows/deploy-pages.yml/runs?per_page=100`,
+              ],
+              { encoding: 'utf8' },
+            );
+            return JSON.parse(response).flatMap((page) => page.workflow_runs ?? []);
+          };
+
+          const activeStatuses = new Set(['queued', 'in_progress', 'waiting', 'pending']);
+          const currentRuns = () => readRuns().filter((run) => String(run.id) !== currentRunId && activeStatuses.has(run.status));
+          const isRollbackRun = (run) => run.event === 'workflow_dispatch' && /\/ rollback$/u.test(run.display_title ?? '');
+          const runs = currentRuns();
+          const rollbackRuns = runs.filter(isRollbackRun);
+          let proceed = true;
+
+          if (mode === 'adopt') {
+            proceed = rollbackRuns.length === 0;
+            if (!proceed) console.log('automatic adoption deferred while a rollback run is queued or active');
+          } else if (mode === 'rollback') {
+            const activeRuns = runs.filter((run) => !isRollbackRun(run));
+            const deadline = Date.now() + 30 * 60 * 1000;
+            while (activeRuns.length > 0 && Date.now() < deadline) {
+              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15000);
+              activeRuns.splice(
+                0,
+                activeRuns.length,
+                ...currentRuns().filter((run) => !isRollbackRun(run)),
+              );
+            }
+            if (activeRuns.length > 0) throw new Error('rollback could not acquire the deployment lane');
+          } else {
+            throw new Error('invalid deployment mode');
+          }
+
+          appendFileSync(process.env.GITHUB_OUTPUT, `proceed=${proceed}\n`);
+          NODE
+
   deploy:
     name: deploy
+    needs: deployment-lane
+    if: needs.deployment-lane.outputs.proceed == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: read

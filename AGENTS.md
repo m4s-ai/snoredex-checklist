@@ -104,9 +104,10 @@ regression check; trust-boundary and migration checks are never optional.
 
 - Use one feature branch per issue and a pull request; do not push directly to main. Partial work
   references rather than closes the master issue.
-- A merge is not publication. Deployment is explicit and records app revision, producer revision,
-  contract version and fingerprint. Roll back with the previous app revision and lock without
-  rewriting private browser state.
+- A merge is not catalogue or release approval. Deployment runs only through the protected workflow
+  and records app revision, producer revision, contract version and fingerprint; automatic Pages
+  adoption is allowed only when the owning issue records an explicit owner decision. Roll back with
+  the previous app revision and lock without rewriting private browser state.
 - Follow LICENSE.md and third-party notices. Project grants do not automatically license card
   images; publish them only with recorded approval and attribution, otherwise use a placeholder.
 - AGENTS.md is canonical and CLAUDE.md is only its pointer. Keep LF without UTF-8 BOM. Backlog and

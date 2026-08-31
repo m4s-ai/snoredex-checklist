@@ -63,9 +63,9 @@ npm run check
 ```
 
 `npm run build:site` assembles the static Pages artifact in `dist/site/` from the reviewed,
-digest-pinned vendor snapshot and lock. Publication remains an explicit, protected
-`workflow_dispatch` operation so merge and deployment stay separate. For adoption, `consumer_revision`
-may be left blank and the workflow automatically uses the selected workflow revision (`github.sha`);
+digest-pinned vendor snapshot and lock. Publication uses automatic `main`-push adoption so every merged revision is deployed through the protected Pages
+workflow. A manual `workflow_dispatch` remains available for rollback. For adoption,
+`consumer_revision` may be left blank and the workflow automatically uses the selected workflow revision (`github.sha`);
 an explicit full lowercase SHA is still required for rollback. The workflow validates and checks out
 the exact resolved consumer revision before building, and the smoke test verifies the same SHA.
 Deployment also fails closed until the pinned producer migration
@@ -144,8 +144,10 @@ rollback identity.
 
 ### Manual Pages deployment and rollback
 
-Use the **Deploy Pages** workflow from the Actions tab with the consumer commit to publish. Select
-`adopt` for a forward catalogue adoption or `rollback` for a previous known-good consumer commit.
+Every push to `main` automatically runs the protected **Deploy Pages** workflow in `adopt` mode
+using that push's full commit SHA; no SHA input is needed for normal publication. Use the
+**Deploy Pages** workflow manually only when selecting `rollback` for a previous known-good
+consumer commit. Select `adopt` for a manual forward catalogue adoption when required.
 The workflow builds and checks that exact revision, writes `deployment.json`, and performs a bounded
 HTTPS smoke test against the resulting Pages URL. A rollback requires an existing published
 manifest whose exact recovery tuple names the selected consumer revision and its pinned catalogue;
