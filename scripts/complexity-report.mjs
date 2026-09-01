@@ -241,6 +241,11 @@ async function selfTest() {
       expected: [{ name: 'generic', complexity: 2 }],
     },
     {
+      name: 'jsx-namespace.tsx',
+      source: 'function namespaced() { return <ns:Comp<(<T,>() => T)> />; }',
+      expected: [{ name: 'namespaced', complexity: 1 }],
+    },
+    {
       name: 'methods.ts',
       source:
         'class Example { get value() { if (ready) return 1; return 0; } async check(value) { try { return value; } catch { return undefined; } } }',
