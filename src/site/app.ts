@@ -739,7 +739,6 @@ function renderCollectionControls(
     } else if (result.error === 'EDIT_INVALID_QUANTITY') {
       feedback.textContent =
         'Quantity is invalid. Enter a whole number from 0 through 9999. This draft was not saved, and the previous collection value remains unchanged. Error code: EDIT_INVALID_QUANTITY';
-      retryAction = undefined;
       retry.hidden = true;
     } else if (result.error === 'STORAGE_COMMIT_UNCERTAIN') {
       feedback.textContent = 'Save conflict detected. Reload to reconcile your collection.';
@@ -836,7 +835,8 @@ function renderCollectionControls(
   const stopSaveListener = controller.onSave((itemId, result) => {
     if (itemId !== item.itemId || pendingSaveCount !== 0) return;
     if (!quantitiesAreValid()) {
-      pendingSaveFailure = !result.ok && !result.deferred ? { result, retry: () => controller.flushNote() } : undefined;
+      pendingSaveFailure =
+        !result.ok && !result.deferred ? { result, retry: retryAction ?? (() => controller.flushNote()) } : undefined;
       return;
     }
     pendingSaveFailure = undefined;

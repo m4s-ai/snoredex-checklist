@@ -409,6 +409,58 @@ try {
           beforeInvalidQuantity,
           `${name}: corrected quantity saves`,
         );
+        const secondOwnedQuantity = page.getByRole('spinbutton', { name: 'Owned' }).nth(1);
+        assert.equal(await secondOwnedQuantity.count(), 1, `${name}: second trackable card for overlapping saves`);
+        const secondCollectionControls = secondOwnedQuantity.locator(
+          'xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " collection-controls ")]',
+        );
+        const secondQuantityFeedback = secondCollectionControls.locator('.state-feedback');
+        await page.evaluate(async (lockName) => {
+          let lockAcquired;
+          const acquired = new Promise((resolve) => {
+            lockAcquired = resolve;
+          });
+          void navigator.locks.request(lockName, async () => {
+            await new Promise((resolve) => {
+              globalThis.__snoredexReleaseOverlappingLock = resolve;
+              lockAcquired();
+            });
+          });
+          await acquired;
+        }, PRIVATE_STATE_LOCK_NAME);
+        await page.evaluate(() => {
+          const setItem = Storage.prototype.setItem;
+          Storage.prototype.setItem = function failOverlappingStateWrite(key, value) {
+            if (key === 'snoredex-checklist.private-state') {
+              Storage.prototype.setItem = setItem;
+              globalThis.__snoredexFailedOverlappingWrite = true;
+              throw new Error('synthetic overlapping state write failure');
+            }
+            return setItem.call(this, key, value);
+          };
+        });
+        await ownedQuantity.fill('4');
+        await ownedQuantity.blur();
+        await quantityFeedback.filter({ hasText: 'Saving…' }).waitFor();
+        await secondOwnedQuantity.fill('2');
+        await secondOwnedQuantity.blur();
+        await secondQuantityFeedback.filter({ hasText: 'Saving…' }).waitFor();
+        await ownedQuantity.fill('10000');
+        await ownedQuantity.blur();
+        await quantityFeedback.filter({ hasText: invalidQuantityMessage }).waitFor();
+        await page.evaluate(() => globalThis.__snoredexReleaseOverlappingLock?.());
+        await page.waitForFunction(() => globalThis.__snoredexFailedOverlappingWrite === true);
+        await ownedQuantity.fill('4');
+        await quantityFeedback.filter({ hasText: saveFailedMessage }).waitFor();
+        const overlappingRetry = collectionControls.getByRole('button', { name: 'Retry save' });
+        assert.equal(await overlappingRetry.isVisible(), true, `${name}: overlapping failure exposes retry`);
+        await overlappingRetry.evaluate((button) => button.click());
+        await quantityFeedback.filter({ hasText: 'Saved' }).waitFor();
+        assert.equal(
+          await ownedQuantity.evaluate((input) => document.activeElement === input),
+          true,
+          `${name}: overlapping immediate retry succeeds without quantity change`,
+        );
         assert.notEqual(synthetic.research, undefined, `${name}: synthetic research item`);
         if (synthetic.research?.setEditionId) {
           await page.goto(
