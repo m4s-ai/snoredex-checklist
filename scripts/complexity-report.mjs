@@ -102,6 +102,16 @@ function countDecisions(functionEntry) {
   let decisions = 0;
   function visit(node) {
     if (node !== functionEntry.body && isFunctionNode(node)) return;
+    // Instance field initializers run during construction, after the enclosing
+    // function has returned. Keep computed names (which run at class evaluation)
+    // in the enclosing metric, but do not descend into deferred initializers.
+    if (
+      node.kind === SyntaxKind.PropertyDeclaration &&
+      !node.modifiers?.some((modifier) => modifier.kind === SyntaxKind.StaticKeyword)
+    ) {
+      if (node.name?.kind === SyntaxKind.ComputedPropertyName) visit(node.name);
+      return;
+    }
     if (
       decisionKinds.has(node.kind) ||
       (node.kind === SyntaxKind.BinaryExpression && logicalOperators.has(node.operatorToken?.kind))
@@ -268,6 +278,16 @@ async function selfTest() {
       name: 'short-circuit-assignment.ts',
       source: 'function assignments(value, fallback) { value &&= fallback; value ||= fallback; value ??= fallback; }',
       expected: [{ name: 'assignments', complexity: 4 }],
+    },
+    {
+      name: 'class-field-initializer.ts',
+      source: 'function make() { return class { value = ready ? yes : no }; }',
+      expected: [{ name: 'make', complexity: 1 }],
+    },
+    {
+      name: 'class-field-name.ts',
+      source: 'function make() { return class { [ready ? yes : no] = value }; }',
+      expected: [{ name: 'make', complexity: 2 }],
     },
     {
       name: 'jsx.tsx',
