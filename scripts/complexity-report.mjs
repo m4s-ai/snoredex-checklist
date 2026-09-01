@@ -96,6 +96,7 @@ function collectFunctions(sourceFile, filePath) {
 }
 
 function countDecisions(functionEntry) {
+  if (isFunctionNode(functionEntry.body)) return 0;
   let decisions = 0;
   function visit(node) {
     if (node !== functionEntry.body && isFunctionNode(node)) return;
@@ -110,6 +111,7 @@ function countDecisions(functionEntry) {
   visit(functionEntry.body);
   for (const parameter of functionEntry.parameters) {
     if (parameter.initializer) visit(parameter.initializer);
+    if (parameter.name) visit(parameter.name);
   }
   return decisions;
 }
@@ -212,6 +214,11 @@ async function selfTest() {
       expected: [{ name: 'select', complexity: 2 }],
     },
     {
+      name: 'destructured-default.ts',
+      source: 'function pick({ value = ready ? yes : no }) { return value; }',
+      expected: [{ name: 'pick', complexity: 2 }],
+    },
+    {
       name: 'logical.ts',
       source: 'const expression = (value) => value && value > 0 ? value : 0;',
       expected: [{ name: 'expression', complexity: 3 }],
@@ -221,6 +228,14 @@ async function selfTest() {
       source: 'function outer(values) { return values.map((value) => value ? value : 0); }',
       expected: [
         { name: 'outer', complexity: 1 },
+        { name: '<arrow>', complexity: 2 },
+      ],
+    },
+    {
+      name: 'concise-return.ts',
+      source: 'const make = () => value => value ? yes : no;',
+      expected: [
+        { name: 'make', complexity: 1 },
         { name: '<arrow>', complexity: 2 },
       ],
     },
