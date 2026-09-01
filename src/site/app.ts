@@ -715,6 +715,8 @@ function renderCollectionControls(
   feedback.id = `state-feedback-${item.itemId}`;
   feedback.setAttribute('role', 'status');
   feedback.setAttribute('aria-live', 'polite');
+  const invalidQuantityFeedback =
+    'Quantity is invalid. Enter a whole number from 0 through 9999. This draft was not saved, and the previous collection value remains unchanged. Error code: EDIT_INVALID_QUANTITY';
   const retry = text('button', 'Retry save', 'state-retry') as HTMLButtonElement;
   retry.type = 'button';
   retry.hidden = true;
@@ -727,20 +729,41 @@ function renderCollectionControls(
         retry: () => Promise<CollectionEditResult>;
       }>
     | undefined;
+  let retryHiddenByInvalidQuantity:
+    | Readonly<{
+        feedback: string;
+        label: string;
+      }>
+    | undefined;
+  const hideRetryForInvalidQuantity = (): void => {
+    if (!retry.hidden && retryHiddenByInvalidQuantity === undefined) {
+      retryHiddenByInvalidQuantity = { feedback: feedback.textContent ?? '', label: retry.textContent ?? 'Retry save' };
+    }
+    retry.hidden = true;
+  };
+  const restoreRetryAfterQuantityValidation = (): boolean => {
+    if (retryHiddenByInvalidQuantity === undefined) return false;
+    feedback.textContent = retryHiddenByInvalidQuantity.feedback;
+    retry.textContent = retryHiddenByInvalidQuantity.label;
+    retryHiddenByInvalidQuantity = undefined;
+    retry.hidden = false;
+    return true;
+  };
   const showResult = (result: CollectionEditResult, generation = ++feedbackGeneration): void => {
     if (generation !== feedbackGeneration || result.deferred) return;
-    retry.textContent = 'Retry save';
     if (result.ok && !result.skipped) {
+      retryHiddenByInvalidQuantity = undefined;
       feedback.textContent = 'Saved';
       retry.hidden = true;
     } else if (result.ok) {
+      retryHiddenByInvalidQuantity = undefined;
       feedback.textContent = 'Saving…';
       retry.hidden = true;
     } else if (result.error === 'EDIT_INVALID_QUANTITY') {
-      feedback.textContent =
-        'Quantity is invalid. Enter a whole number from 0 through 9999. This draft was not saved, and the previous collection value remains unchanged. Error code: EDIT_INVALID_QUANTITY';
-      retry.hidden = true;
+      hideRetryForInvalidQuantity();
+      feedback.textContent = invalidQuantityFeedback;
     } else if (result.error === 'STORAGE_COMMIT_UNCERTAIN') {
+      retryHiddenByInvalidQuantity = undefined;
       feedback.textContent = 'Save conflict detected. Reload to reconcile your collection.';
       retry.textContent = 'Reload to recover';
       retryAction = () => {
@@ -749,12 +772,15 @@ function renderCollectionControls(
       };
       retry.hidden = false;
     } else {
+      retryHiddenByInvalidQuantity = undefined;
       feedback.textContent = 'Save failed. Your draft is still visible; retry when ready.';
+      retry.textContent = 'Retry save';
       retry.hidden = false;
     }
   };
   const runSave = (action: () => Promise<CollectionEditResult>): void => {
     pendingSaveFailure = undefined;
+    retryHiddenByInvalidQuantity = undefined;
     const generation = ++feedbackGeneration;
     pendingSaveCount += 1;
     retryAction = action;
@@ -766,7 +792,7 @@ function renderCollectionControls(
     });
   };
   retry.addEventListener('click', () => {
-    if (retryAction !== undefined) runSave(retryAction);
+    if (!retry.hidden && retryAction !== undefined) runSave(retryAction);
   });
   const fieldset = text('fieldset', undefined, 'status-controls') as HTMLFieldSetElement;
   fieldset.append(text('legend', 'Collection status'));
@@ -834,7 +860,7 @@ function renderCollectionControls(
     }
     if (resetInvalidQuantity && owned.checkValidity() && ordered.checkValidity()) {
       ++feedbackGeneration;
-      if (!showPendingSaveFailure()) {
+      if (!showPendingSaveFailure() && !restoreRetryAfterQuantityValidation()) {
         feedback.textContent = '';
         retry.hidden = true;
       }
@@ -869,7 +895,17 @@ function renderCollectionControls(
     runSave(() => controller.setQuantities(item.itemId, Number(owned.value), Number(ordered.value)));
   };
   const revalidateQuantities = (): void => {
-    if (quantitiesAreValid()) showPendingSaveFailure();
+    if (!quantitiesAreValid()) {
+      showResult({ ok: false, error: 'EDIT_INVALID_QUANTITY' });
+      return;
+    }
+    if (
+      !showPendingSaveFailure() &&
+      !restoreRetryAfterQuantityValidation() &&
+      feedback.textContent === invalidQuantityFeedback
+    ) {
+      feedback.textContent = '';
+    }
   };
   owned.addEventListener('input', revalidateQuantities);
   ordered.addEventListener('input', revalidateQuantities);
@@ -895,6 +931,7 @@ function renderCollectionControls(
   noteButton.addEventListener('click', openNote);
   textarea.addEventListener('input', () => {
     pendingSaveFailure = undefined;
+    retryHiddenByInvalidQuantity = undefined;
     const generation = ++feedbackGeneration;
     const codePoints = [...textarea.value];
     if (codePoints.length > MAX_NOTE_CODE_POINTS) textarea.value = codePoints.slice(0, MAX_NOTE_CODE_POINTS).join('');

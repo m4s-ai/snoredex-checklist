@@ -367,7 +367,7 @@ try {
         );
         await ownedQuantity.fill('1');
         await page.getByText(saveFailedMessage, { exact: true }).waitFor();
-        const retrySave = collectionControls.getByRole('button', { name: 'Retry save' });
+        const retrySave = collectionControls.locator('.state-retry');
         assert.equal(
           await retrySave.isVisible(),
           true,
@@ -378,6 +378,19 @@ try {
           true,
           `${name}: quantity remains focused before programmatic retry`,
         );
+        await ownedQuantity.fill('10000');
+        await quantityFeedback.filter({ hasText: invalidQuantityMessage }).waitFor();
+        assert.equal(await retrySave.isVisible(), false, `${name}: invalid input hides the pending save retry`);
+        await retrySave.evaluate((button) => button.click());
+        await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))));
+        assert.equal(
+          await quantityFeedback.textContent(),
+          invalidQuantityMessage,
+          `${name}: hidden retry is inert while the quantity is invalid`,
+        );
+        await ownedQuantity.fill('1');
+        await quantityFeedback.filter({ hasText: saveFailedMessage }).waitFor();
+        assert.equal(await retrySave.isVisible(), true, `${name}: valid input restores the pending save retry`);
         await retrySave.evaluate((button) => button.click());
         await page.getByText('Saved', { exact: true }).first().waitFor();
         assert.equal(
