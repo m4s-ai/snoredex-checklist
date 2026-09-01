@@ -30,6 +30,10 @@ test('production adoption validates the reviewed target migration without requir
   assert.match(workflow, /new Set\(sources\)\.size !== sources\.length \|\|\s+!sameCatalogueDeployment/u);
   assert.match(workflow, /!digest\.test\(current\.catalogueFingerprint \?\? ''\)/u);
   assert.match(workflow, /push:\s+branches:\s+- main/u);
+  assert.match(workflow, /catalogue-update:/u);
+  assert.match(workflow, /uses: \.\/\.github\/workflows\/catalogue-release\.yml/u);
+  assert.match(workflow, /contents: write/u);
+  assert.match(workflow, /pull-requests: write/u);
   assert.match(workflow, /run-name: Deploy Pages \/ \$\{\{/u);
   assert.match(workflow, /group: pages-\$\{\{/u);
   assert.match(workflow, /deployment-lane:/u);

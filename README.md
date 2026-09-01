@@ -115,11 +115,27 @@ declarations plus structural decision nodes. It is a refactoring aid, not a rele
 claim of semantic complexity. Review any proposed seam split and its regression coverage in the
 owning issue before changing the baseline or introducing a CI threshold.
 
-### Issue-backed catalogue sync
+### Catalogue release and issue-backed sync
 
-Catalogue ingestion is an operator-invoked transaction; normal checks and runtime never fetch
-the producer. After a published producer artifact and its paired issues are accepted, run the
-sync with every identity value from the deployment manifest:
+The **Release catalogue update** workflow resolves the current merged `snoredex-data/main` to a
+full commit, requires its exact successful producer push gate, downloads and validates the four
+collector-contract files, and compares their fingerprints and byte digests with the latest
+Checklist catalogue release. Identical bytes are a no-op. Changed bytes become a deterministic
+`catalogue-<producer-commit>` release in this repository.
+Release immutability is enabled for the repository, so published catalogue tags and assets cannot
+be replaced; the manifest also records the SHA-256 and byte length of every asset.
+
+The protected Pages workflow invokes the same intake before forward deployments. A compatible
+candidate atomically stages the vendor pair and lock on a `codex/catalogue-*` branch and creates or
+reuses an issue-backed PR. If repository policy denies bot-created PRs, the workflow leaves the
+ready branch and compare URL instead. The current deployment still uses its committed snapshot; the
+following deployment adopts the update only after that PR is reviewed and merged. A consumer-contract
+failure or missing complete producer migration route creates an explicit blocked prerelease and
+warning, while preserving the current vendor pair and deployment. No catalogue or migration truth
+is inferred here.
+
+The underlying operator transaction remains available for recovery. Run it only with identity
+values already sealed by the catalogue release:
 
 ```sh
 npm run sync:catalogue -- \
@@ -139,9 +155,8 @@ digest or semantic-fingerprint mismatches, skewed existing pairs and interrupted
 It stages and validates both catalogue and migration bytes before replacing
 `vendor/snoredex-data/collector_catalogue.json`, `vendor/snoredex-data/collector_migrations.json`
 and `catalogue.lock.json` together. The migration artifact must declare the target catalogue
-fingerprint and is never inferred by the consumer. Do not run it against mutable branches or a producer issue that
-has not recorded the exact immutable URL, commit, contract version, fingerprint, digest and
-rollback identity.
+fingerprint and is never inferred by the consumer. Do not run it against mutable branches or bytes
+that were not sealed by the Checklist catalogue-release workflow and its linked issues.
 
 ### Manual Pages deployment and rollback
 
