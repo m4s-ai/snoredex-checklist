@@ -101,7 +101,10 @@ function collectFunctions(sourceFile, filePath) {
 function countDecisions(functionEntry) {
   let decisions = 0;
   function visit(node) {
-    if (node !== functionEntry.body && isFunctionNode(node)) return;
+    if (node !== functionEntry.body && isFunctionNode(node)) {
+      visitEagerMetadata(node);
+      return;
+    }
     // Instance field initializers run during construction, after the enclosing
     // function has returned. Keep computed names (which run at class evaluation)
     // in the enclosing metric, but do not descend into deferred initializers.
@@ -109,7 +112,7 @@ function countDecisions(functionEntry) {
       node.kind === SyntaxKind.PropertyDeclaration &&
       !node.modifiers?.some((modifier) => modifier.kind === SyntaxKind.StaticKeyword)
     ) {
-      if (node.name?.kind === SyntaxKind.ComputedPropertyName) visit(node.name);
+      visitEagerMetadata(node);
       return;
     }
     if (
@@ -119,6 +122,12 @@ function countDecisions(functionEntry) {
       decisions += 1;
     }
     node.forEachChild(visit);
+  }
+  function visitEagerMetadata(node) {
+    if (node.name?.kind === SyntaxKind.ComputedPropertyName) visit(node.name);
+    for (const modifier of node.modifiers ?? []) {
+      if (modifier.kind === SyntaxKind.Decorator) visit(modifier);
+    }
   }
   for (const parameter of functionEntry.parameters) {
     if (parameter.initializer) visit(parameter.initializer);
@@ -287,6 +296,19 @@ async function selfTest() {
     {
       name: 'class-field-name.ts',
       source: 'function make() { return class { [ready ? yes : no] = value }; }',
+      expected: [{ name: 'make', complexity: 2 }],
+    },
+    {
+      name: 'class-computed-method.ts',
+      source: 'function make() { return class { [ready ? yes : no]() {} }; }',
+      expected: [
+        { name: 'make', complexity: 2 },
+        { name: '<computed>', complexity: 1 },
+      ],
+    },
+    {
+      name: 'class-field-decorator.ts',
+      source: 'function make() { return class { @(ready ? yes : no) value = deferred; }; }',
       expected: [{ name: 'make', complexity: 2 }],
     },
     {
