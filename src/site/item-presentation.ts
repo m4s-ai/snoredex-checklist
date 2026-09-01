@@ -32,10 +32,7 @@ export function itemKindLabel(item: SnapshotItem): string {
 }
 
 export function itemCueLabel(item: SnapshotItem): string {
-  if (item.progressClass === 'research') {
-    return `Research · ${itemKindLabel(item)} · read-only`;
-  }
-  return item.itemKind === 'verified-printing' ? 'Current-known · verified printing' : 'Current-known';
+  return item.progressClass === 'research' ? 'Research · read-only' : 'Trackable';
 }
 
 export function evidenceCueLabel(item: SnapshotItem): string | undefined {
