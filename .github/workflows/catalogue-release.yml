@@ -73,7 +73,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          previous_tag="$(gh release list --exclude-drafts --limit 100 --json tagName,createdAt --jq 'map(select(.tagName | test("^catalogue-[0-9a-f]{40}-[0-9a-f]{40}$"))) | sort_by(.createdAt) | reverse | .[0].tagName // ""')"
+          previous_tag="$(gh release list --exclude-drafts --limit 100 --json tagName,createdAt --jq 'map(select(.tagName | test("^catalogue-[0-9a-f]{40}-[0-9a-f]{40}-CATALOGUE_[A-Z_]+$"))) | sort_by(.createdAt) | reverse | .[0].tagName // ""')"
           if [[ -n "$previous_tag" ]]; then
             mkdir -p "$RUNNER_TEMP/previous-catalogue-release"
             gh release download "$previous_tag" --pattern catalogue-release.json --dir "$RUNNER_TEMP/previous-catalogue-release"
@@ -241,7 +241,7 @@ jobs:
           PRODUCER_REVISION: ${{ steps.producer.outputs.revision }}
         run: |
           set -euo pipefail
-          tag="catalogue-${PRODUCER_REVISION}-${GITHUB_SHA}"
+          tag="catalogue-${PRODUCER_REVISION}-${GITHUB_SHA}-${COMPATIBILITY_CODE}"
           release_args=(create "$tag" --target "${GITHUB_SHA}" --title "Catalogue ${PRODUCER_REVISION:0:12} / Checklist ${GITHUB_SHA:0:12}" --notes "Producer ${PRODUCER_REVISION}; Checklist ${GITHUB_SHA}; ${COMPATIBILITY_CODE}. See ${CHECKLIST_ISSUE}.")
           if [[ "$COMPATIBILITY_STATUS" == "blocked" ]]; then
             release_args+=(--prerelease)

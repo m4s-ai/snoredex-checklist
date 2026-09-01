@@ -122,9 +122,10 @@ full commit, requires its exact successful producer push gate, downloads and val
 collector-contract files, and compares their fingerprints and byte digests with the latest
 Checklist catalogue release. Identical bytes with unchanged compatibility evidence are a no-op.
 Changed bytes or compatibility evidence become a deterministic
-`catalogue-<producer-commit>-<consumer-commit>` release in this repository. If unchanged producer
-bytes later become compatible with a newer Checklist revision, the new evidence gets its own
-immutable producer/consumer release instead of rewriting the earlier blocked record.
+`catalogue-<producer-commit>-<consumer-commit>-<result>` release in this repository. If unchanged
+producer bytes later become compatible with a newer Checklist revision or after a temporary
+blocker, the new evidence gets its own immutable release instead of rewriting the earlier blocked
+record.
 Release immutability is enabled for the repository, so published catalogue tags and assets cannot
 be replaced; the manifest also records the SHA-256 and byte length of every asset.
 

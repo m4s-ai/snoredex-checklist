@@ -146,6 +146,7 @@ test('workflow gates exact producer bytes, skips duplicate releases and preserve
   assert.match(workflow, /SNOREDEX_CURRENT_DEPLOYMENT_PATH="\$CURRENT_DEPLOYMENT_PATH"/u);
   assert.match(workflow, /CATALOGUE_UPDATE_BLOCKED_CURRENT_DEPLOYMENT/u);
   assert.match(workflow, /gh release list --exclude-drafts/u);
+  assert.match(workflow, /tag="catalogue-\$\{PRODUCER_REVISION\}-\$\{GITHUB_SHA\}-\$\{COMPATIBILITY_CODE\}"/u);
   assert.match(workflow, /gh workflow run ci\.yml --ref "\$branch"/u);
   assert.match(workflow, /event=workflow_dispatch/u);
   assert.match(workflow, /existing_pr=.*\n          if git ls-remote/u);
