@@ -48,7 +48,7 @@ function scan(source, languageVariant) {
   };
   const enterJsxTag = (parentMode, closing = false) => {
     jsxMode = 'tag';
-    jsxTagStack.push({ closing, parentMode, selfClosing: false });
+    jsxTagStack.push({ closing, parentMode, selfClosing: false, typeArgumentDepth: 0 });
   };
   let kind;
   do {
@@ -90,16 +90,24 @@ function scan(source, languageVariant) {
         } else if (kind === SyntaxKind.SlashToken) {
           const tag = jsxTagStack.at(-1);
           if (tag) tag.selfClosing = true;
+        } else if (kind === SyntaxKind.LessThanToken) {
+          const tag = jsxTagStack.at(-1);
+          if (tag && !tag.closing) tag.typeArgumentDepth += 1;
         } else if (kind === SyntaxKind.GreaterThanToken) {
-          const tag = jsxTagStack.pop();
-          if (tag?.closing) {
-            const opening = jsxElementStack.pop();
-            jsxMode = opening?.parentMode ?? tag.parentMode;
-          } else if (tag?.selfClosing) {
-            jsxMode = tag.parentMode;
+          const activeTag = jsxTagStack.at(-1);
+          if (activeTag?.typeArgumentDepth > 0) {
+            activeTag.typeArgumentDepth -= 1;
           } else {
-            jsxElementStack.push({ parentMode: tag?.parentMode ?? 'standard' });
-            jsxMode = 'children';
+            const tag = jsxTagStack.pop();
+            if (tag?.closing) {
+              const opening = jsxElementStack.pop();
+              jsxMode = opening?.parentMode ?? tag.parentMode;
+            } else if (tag?.selfClosing) {
+              jsxMode = tag.parentMode;
+            } else {
+              jsxElementStack.push({ parentMode: tag?.parentMode ?? 'standard' });
+              jsxMode = 'children';
+            }
           }
         }
       } else if (
@@ -3357,6 +3365,11 @@ if (process.argv.includes('--self-test')) {
       path: 'fixture.tsx',
       source: 'function jsxAttributeExpression() { return <Comp child={<span />} />; }',
       expected: [{ name: 'jsxAttributeExpression', complexity: 1 }],
+    },
+    {
+      path: 'fixture.tsx',
+      source: 'function jsxGenericComponent() { return <Comp<boolean> value={ready ? true : false} />; }',
+      expected: [{ name: 'jsxGenericComponent', complexity: 2 }],
     },
     {
       source:
