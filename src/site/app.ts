@@ -721,7 +721,12 @@ function renderCollectionControls(
   let retryAction: (() => Promise<CollectionEditResult>) | undefined;
   let feedbackGeneration = 0;
   let pendingSaveCount = 0;
-  let pendingSaveFailure: CollectionEditResult | undefined;
+  let pendingSaveFailure:
+    | Readonly<{
+        result: CollectionEditResult;
+        retry: () => Promise<CollectionEditResult>;
+      }>
+    | undefined;
   const showResult = (result: CollectionEditResult, generation = ++feedbackGeneration): void => {
     if (generation !== feedbackGeneration || result.deferred) return;
     retry.textContent = 'Retry save';
@@ -831,7 +836,7 @@ function renderCollectionControls(
   const stopSaveListener = controller.onSave((itemId, result) => {
     if (itemId !== item.itemId || pendingSaveCount !== 0) return;
     if (!quantitiesAreValid()) {
-      pendingSaveFailure = !result.ok && !result.deferred ? result : undefined;
+      pendingSaveFailure = !result.ok && !result.deferred ? { result, retry: () => controller.flushNote() } : undefined;
       return;
     }
     pendingSaveFailure = undefined;
@@ -847,9 +852,10 @@ function renderCollectionControls(
   };
   const revalidateQuantities = (): void => {
     if (!quantitiesAreValid() || pendingSaveFailure === undefined) return;
-    const result = pendingSaveFailure;
+    const pending = pendingSaveFailure;
     pendingSaveFailure = undefined;
-    showResult(result);
+    retryAction = pending.retry;
+    showResult(pending.result);
   };
   owned.addEventListener('input', revalidateQuantities);
   ordered.addEventListener('input', revalidateQuantities);

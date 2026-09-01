@@ -353,13 +353,24 @@ try {
         );
         await ownedQuantity.fill('1');
         await page.getByText(saveFailedMessage, { exact: true }).waitFor();
+        const retrySave = collectionControls.getByRole('button', { name: 'Retry save' });
         assert.equal(
-          await collectionControls.getByRole('button', { name: 'Retry save' }).isVisible(),
+          await retrySave.isVisible(),
           true,
           `${name}: failed note save becomes recoverable after quantity correction`,
         );
-        await ownedQuantity.blur();
+        assert.equal(
+          await ownedQuantity.evaluate((input) => document.activeElement === input),
+          true,
+          `${name}: quantity remains focused before programmatic retry`,
+        );
+        await retrySave.evaluate((button) => button.click());
         await page.getByText('Saved', { exact: true }).first().waitFor();
+        assert.equal(
+          await ownedQuantity.evaluate((input) => document.activeElement === input),
+          true,
+          `${name}: retry succeeds without quantity blur or change`,
+        );
         await page.evaluate(async (lockName) => {
           let lockAcquired;
           const acquired = new Promise((resolve) => {
