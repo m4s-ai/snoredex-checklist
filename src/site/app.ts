@@ -466,9 +466,15 @@ function renderProgress(
   editionId: string | undefined,
   state: PrivateStateRead,
 ): HTMLElement {
+  const effectiveLocalizationId =
+    localizationId ??
+    (editionId
+      ? catalogue.setEditions.find((edition) => edition.setEditionId === editionId)?.localizationId
+      : undefined);
   const scope = catalogue.items.filter(
     (item) =>
-      (!localizationId || item.localizationId === localizationId) && (!editionId || item.setEditionId === editionId),
+      (!effectiveLocalizationId || item.localizationId === effectiveLocalizationId) &&
+      (!editionId || item.setEditionId === editionId),
   );
   const progress = buildProgressViewModel(scope, state.readable ? state.statuses : undefined);
   const section = text('section', undefined, 'progress-panel');
@@ -515,12 +521,12 @@ function renderProgress(
         (item) =>
           item.active &&
           item.progressClass === 'current-known' &&
-          (!localizationId || item.localizationId === localizationId),
+          (!effectiveLocalizationId || item.localizationId === effectiveLocalizationId),
       );
       const action = text('p');
       action.append(
         link(
-          `./${serializeQuery({ localization: localTrackable ? localizationId : undefined, research: 'false' })}`,
+          `./${serializeQuery({ localization: localTrackable ? effectiveLocalizationId : undefined, research: 'false' })}`,
           localTrackable ? 'Show trackable items in this localization' : 'Show all trackable items',
         ),
       );

@@ -277,6 +277,21 @@ try {
           const visibleText = await page.locator('main').innerText();
           assert.doesNotMatch(visibleText, /(?:LOCALSET|EDITION):/u, `${name}: opaque IDs stay out of visible UI`);
           assert.match(visibleText, /Unidentified set/u, `${name}: neutral unresolved label`);
+
+          await page.goto(`${baseUrl}/collection/?edition=${encodeURIComponent(synthetic.research.setEditionId)}`, {
+            waitUntil: 'networkidle',
+          });
+          const recoveryLink = page.getByRole('link', { name: 'Show trackable items in this localization' });
+          assert.equal(await recoveryLink.count(), 1, `${name}: edition-only recovery stays in localization`);
+          const recoveryHref = await recoveryLink.getAttribute('href');
+          assert.notEqual(recoveryHref, null, `${name}: edition-only recovery link target`);
+          const recoveryUrl = new URL(recoveryHref, page.url());
+          assert.equal(
+            recoveryUrl.searchParams.get('localization'),
+            synthetic.research.localizationId,
+            `${name}: edition-only recovery preserves localization`,
+          );
+          assert.equal(recoveryUrl.searchParams.get('research'), 'false', `${name}: recovery excludes research`);
         }
       }
       assert.equal(unexpectedRequests.length, 0, `${name}: unexpected network requests`);
