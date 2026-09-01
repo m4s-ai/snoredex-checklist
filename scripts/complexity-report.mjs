@@ -1436,7 +1436,15 @@ function hasTopLevelCommaBetween(tokens, start, end) {
             [SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[context]?.kind)
           )
             context -= 1;
-          return [SyntaxKind.AsKeyword, SyntaxKind.SatisfiesKeyword].includes(tokens[context]?.kind);
+          return [
+            SyntaxKind.AsKeyword,
+            SyntaxKind.SatisfiesKeyword,
+            SyntaxKind.KeyOfKeyword,
+            SyntaxKind.TypeOfKeyword,
+            SyntaxKind.InferKeyword,
+            SyntaxKind.ReadonlyKeyword,
+            SyntaxKind.UniqueKeyword,
+          ].includes(tokens[context]?.kind);
         })();
       if (
         close !== undefined &&
@@ -3181,6 +3189,10 @@ if (process.argv.includes('--self-test')) {
       source:
         'function comparisonBeforeExtendsInReturn() { return (value as any < other, class X extends Base {}, true) ? yes : no; }',
       expected: [{ name: 'comparisonBeforeExtendsInReturn', complexity: 2 }],
+    },
+    {
+      source: 'function typeOperatorGenericAssertion() { return value as keyof Wrapper<A, B> extends U ? A : B; }',
+      expected: [{ name: 'typeOperatorGenericAssertion', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
