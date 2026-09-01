@@ -120,17 +120,22 @@ owning issue before changing the baseline or introducing a CI threshold.
 The **Release catalogue update** workflow resolves the current merged `snoredex-data/main` to a
 full commit, requires its exact successful producer push gate, downloads and validates the four
 collector-contract files, and compares their fingerprints and byte digests with the latest
-Checklist catalogue release. Identical bytes are a no-op. Changed bytes become a deterministic
-`catalogue-<producer-commit>` release in this repository.
+Checklist catalogue release. Identical bytes with unchanged compatibility evidence are a no-op.
+Changed bytes or compatibility evidence become a deterministic
+`catalogue-<producer-commit>-<consumer-commit>` release in this repository. If unchanged producer
+bytes later become compatible with a newer Checklist revision, the new evidence gets its own
+immutable producer/consumer release instead of rewriting the earlier blocked record.
 Release immutability is enabled for the repository, so published catalogue tags and assets cannot
 be replaced; the manifest also records the SHA-256 and byte length of every asset.
 
-The protected Pages workflow invokes the same intake before forward deployments. A compatible
-candidate atomically stages the vendor pair and lock on a `codex/catalogue-*` branch and creates or
-reuses an issue-backed PR. If repository policy denies bot-created PRs, the workflow leaves the
-ready branch and compare URL instead. The current deployment still uses its committed snapshot; the
-following deployment adopts the update only after that PR is reviewed and merged. A consumer-contract
-failure or missing complete producer migration route creates an explicit blocked prerelease and
+The protected Pages workflow dispatches this intake independently after reserving the deployment
+lane. Mutable producer availability or a pending producer gate therefore cannot block deployment of
+the committed known-good Checklist snapshot. A compatible candidate atomically stages the vendor
+pair and lock on a `codex/catalogue-*` branch, explicitly dispatches CI for that exact bot commit,
+and creates or reuses an issue-backed PR. If repository policy denies bot-created PRs, the workflow
+leaves the ready branch and compare URL instead. The following deployment adopts the update only
+after that PR is reviewed and merged. A consumer-contract failure, unavailable current deployment
+manifest or missing complete producer migration route creates an explicit blocked prerelease and
 warning, while preserving the current vendor pair and deployment. No catalogue or migration truth
 is inferred here.
 

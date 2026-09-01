@@ -16,7 +16,9 @@ const schemaBytes = Buffer.from(
   }),
 );
 const currentLock = JSON.parse(await readFile('catalogue.lock.json', 'utf8'));
+const consumerRevision = '1111111111111111111111111111111111111111';
 const workflow = await readFile('.github/workflows/catalogue-release.yml', 'utf8');
+const ciWorkflow = await readFile('.github/workflows/ci.yml', 'utf8');
 const issueUrls = [
   'https://github.com/m4s-ai/snoredex-checklist/issues/29',
   'https://github.com/m4s-ai/snoredex-data/issues/332',
@@ -25,6 +27,7 @@ const issueUrls = [
 function input() {
   return {
     producerRevision: currentLock.producerRevision,
+    consumerRevision,
     candidateBytes: {
       'collector_catalogue.json': catalogueBytes,
       'collector_catalogue.schema.json': schemaBytes,
@@ -37,14 +40,51 @@ function input() {
 }
 
 test('detects release changes independently from adoption changes', () => {
-  const first = createCatalogueReleaseManifest(input());
+  const first = createCatalogueReleaseManifest({
+    ...input(),
+    compatibilityStatus: 'ready',
+    compatibilityCode: 'CATALOGUE_UPDATE_CURRENT',
+  });
   assert.equal(first.changeStatus, 'changed');
+  assert.equal(first.publicationStatus, 'changed');
   assert.equal(first.adoptionStatus, 'current');
-  assert.equal(first.compatibility.status, 'unchecked');
+  assert.equal(first.compatibility.status, 'ready');
 
-  const repeated = createCatalogueReleaseManifest({ ...input(), previousRelease: first });
+  const repeated = createCatalogueReleaseManifest({
+    ...input(),
+    previousRelease: first,
+    compatibilityStatus: 'ready',
+    compatibilityCode: 'CATALOGUE_UPDATE_CURRENT',
+  });
   assert.equal(repeated.changeStatus, 'unchanged');
+  assert.equal(repeated.publicationStatus, 'unchanged');
   assert.equal(repeated.adoptionStatus, 'current');
+});
+
+test('publishes changed compatibility evidence for unchanged producer assets', () => {
+  const blocked = createCatalogueReleaseManifest({
+    ...input(),
+    compatibilityStatus: 'blocked',
+    compatibilityCode: 'CATALOGUE_UPDATE_BLOCKED_MIGRATION',
+  });
+  const ready = createCatalogueReleaseManifest({
+    ...input(),
+    consumerRevision: '2222222222222222222222222222222222222222',
+    previousRelease: blocked,
+    compatibilityStatus: 'ready',
+    compatibilityCode: 'CATALOGUE_UPDATE_READY',
+  });
+  assert.equal(ready.changeStatus, 'unchanged');
+  assert.equal(ready.publicationStatus, 'changed');
+
+  const repeated = createCatalogueReleaseManifest({
+    ...input(),
+    consumerRevision: '3333333333333333333333333333333333333333',
+    previousRelease: ready,
+    compatibilityStatus: 'ready',
+    compatibilityCode: 'CATALOGUE_UPDATE_READY',
+  });
+  assert.equal(repeated.publicationStatus, 'unchanged');
 });
 
 test('rejects catalogue bytes whose semantic fingerprint is not sealed', () => {
@@ -99,8 +139,13 @@ test('packages consumer-incompatible producer bytes only as blocked', () => {
 test('workflow gates exact producer bytes, skips duplicate releases and preserves blocked adoption', () => {
   assert.ok(workflow.includes('select(.head_sha == \\"${producer_revision}\\")'));
   assert.match(workflow, /raw\.githubusercontent\.com\/\$\{PRODUCER_REPOSITORY\}\/\$\{PRODUCER_REVISION\}/u);
-  assert.match(workflow, /if: steps\.candidate\.outputs\.change_status == 'changed'/u);
+  assert.match(workflow, /if: steps\.sealed\.outputs\.publication_status == 'changed'/u);
   assert.match(workflow, /git restore -- catalogue\.lock\.json vendor\/snoredex-data\/collector_catalogue\.json/u);
   assert.match(workflow, /release_args\+=\(--prerelease\)/u);
   assert.match(workflow, /steps\.sealed\.outputs\.status == 'ready'/u);
+  assert.match(workflow, /SNOREDEX_CURRENT_DEPLOYMENT_PATH="\$CURRENT_DEPLOYMENT_PATH"/u);
+  assert.match(workflow, /CATALOGUE_UPDATE_BLOCKED_CURRENT_DEPLOYMENT/u);
+  assert.match(workflow, /gh workflow run ci\.yml --ref "\$branch"/u);
+  assert.match(workflow, /event=workflow_dispatch/u);
+  assert.match(ciWorkflow, /workflow_dispatch:/u);
 });

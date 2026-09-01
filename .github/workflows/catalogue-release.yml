@@ -1,15 +1,10 @@
 name: Release catalogue update
 
 on:
-  workflow_call:
-    outputs:
-      result:
-        description: Catalogue intake outcome
-        value: ${{ jobs.release.outputs.result }}
   workflow_dispatch:
 
 permissions:
-  actions: read
+  actions: write
   contents: write
   pull-requests: write
 
@@ -22,8 +17,6 @@ jobs:
     name: release current producer catalogue
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    outputs:
-      result: ${{ steps.outcome.outputs.result }}
     env:
       CHECKLIST_ISSUE: https://github.com/m4s-ai/snoredex-checklist/issues/29
       PRODUCER_ISSUE: https://github.com/m4s-ai/snoredex-data/issues/332
@@ -80,7 +73,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          previous_tag="$(gh release list --limit 100 --json tagName,createdAt --jq 'map(select(.tagName | startswith("catalogue-"))) | sort_by(.createdAt) | reverse | .[0].tagName // ""')"
+          previous_tag="$(gh release list --limit 100 --json tagName,createdAt --jq 'map(select(.tagName | test("^catalogue-[0-9a-f]{40}-[0-9a-f]{40}$"))) | sort_by(.createdAt) | reverse | .[0].tagName // ""')"
           if [[ -n "$previous_tag" ]]; then
             mkdir -p "$RUNNER_TEMP/previous-catalogue-release"
             gh release download "$previous_tag" --pattern catalogue-release.json --dir "$RUNNER_TEMP/previous-catalogue-release"
@@ -103,6 +96,7 @@ jobs:
           npm run release:catalogue -- \
             --candidate-dir "$RUNNER_TEMP/catalogue-release" \
             --producer-revision "$PRODUCER_REVISION" \
+            --consumer-revision "$GITHUB_SHA" \
             --issue-url "$CHECKLIST_ISSUE" \
             --issue-url "$PRODUCER_ISSUE" \
             "${previous_args[@]}"
@@ -119,6 +113,36 @@ jobs:
           })) appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${value}\n`);
           NODE
 
+      - name: Read current production deployment
+        id: current-production
+        if: steps.candidate.outputs.adoption_status == 'needed'
+        env:
+          SNOREDEX_PAGE_URL: https://m4s-ai.github.io/snoredex-checklist/
+        run: |
+          set -euo pipefail
+          manifest="$RUNNER_TEMP/current-deployment.json"
+          rm -f "$manifest"
+          set +e
+          http_status="$(curl --silent --show-error --location --output "$manifest" --write-out '%{http_code}' "$SNOREDEX_PAGE_URL/deployment.json")"
+          curl_status=$?
+          set -e
+          if [[ "$curl_status" -ne 0 ]]; then
+            rm -f "$manifest"
+            echo "state=unavailable" >> "$GITHUB_OUTPUT"
+            echo "manifest=" >> "$GITHUB_OUTPUT"
+          elif [[ "$http_status" == "200" ]]; then
+            echo "state=available" >> "$GITHUB_OUTPUT"
+            echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
+          elif [[ "$http_status" == "404" ]]; then
+            rm -f "$manifest"
+            echo "state=missing" >> "$GITHUB_OUTPUT"
+            echo "manifest=" >> "$GITHUB_OUTPUT"
+          else
+            rm -f "$manifest"
+            echo "state=unavailable" >> "$GITHUB_OUTPUT"
+            echo "manifest=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Validate adoption and stage committed pair
         id: adoption
         if: steps.candidate.outputs.adoption_status == 'needed'
@@ -128,28 +152,38 @@ jobs:
           FINGERPRINT: ${{ steps.candidate.outputs.fingerprint }}
           MIGRATION_SHA: ${{ steps.candidate.outputs.migration_sha }}
           PRODUCER_REVISION: ${{ steps.producer.outputs.revision }}
+          CURRENT_DEPLOYMENT_STATE: ${{ steps.current-production.outputs.state }}
+          CURRENT_DEPLOYMENT_PATH: ${{ steps.current-production.outputs.manifest }}
         run: |
           set -euo pipefail
-          old_fingerprint="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).catalogueFingerprint)")"
           set +e
-          npm run sync:catalogue -- \
-            --artifact-url "https://raw.githubusercontent.com/${PRODUCER_REPOSITORY}/${PRODUCER_REVISION}/collector_catalogue.json" \
-            --artifact-commit "$PRODUCER_REVISION" \
-            --contract-version "$CONTRACT_VERSION" \
-            --fingerprint "$FINGERPRINT" \
-            --byte-sha256 "$CATALOGUE_SHA" \
-            --migration-artifact-url "https://raw.githubusercontent.com/${PRODUCER_REPOSITORY}/${PRODUCER_REVISION}/collector_migrations.json" \
-            --migration-byte-sha256 "$MIGRATION_SHA" \
-            --issue-url "$CHECKLIST_ISSUE" \
-            --issue-url "$PRODUCER_ISSUE"
-          sync_status=$?
-          if [[ "$sync_status" -eq 0 ]]; then
-            SNOREDEX_CURRENT_CATALOGUE_FINGERPRINT="$old_fingerprint" node scripts/check-production-adoption.mjs
-            adoption_status=$?
-            block_code="CATALOGUE_UPDATE_BLOCKED_MIGRATION"
+          if [[ "$CURRENT_DEPLOYMENT_STATE" == "unavailable" ]]; then
+            adoption_status=1
+            block_code="CATALOGUE_UPDATE_BLOCKED_CURRENT_DEPLOYMENT"
           else
-            adoption_status=$sync_status
-            block_code="CATALOGUE_UPDATE_BLOCKED_CONSUMER_CONTRACT"
+            npm run sync:catalogue -- \
+              --artifact-url "https://raw.githubusercontent.com/${PRODUCER_REPOSITORY}/${PRODUCER_REVISION}/collector_catalogue.json" \
+              --artifact-commit "$PRODUCER_REVISION" \
+              --contract-version "$CONTRACT_VERSION" \
+              --fingerprint "$FINGERPRINT" \
+              --byte-sha256 "$CATALOGUE_SHA" \
+              --migration-artifact-url "https://raw.githubusercontent.com/${PRODUCER_REPOSITORY}/${PRODUCER_REVISION}/collector_migrations.json" \
+              --migration-byte-sha256 "$MIGRATION_SHA" \
+              --issue-url "$CHECKLIST_ISSUE" \
+              --issue-url "$PRODUCER_ISSUE"
+            sync_status=$?
+            if [[ "$sync_status" -eq 0 ]]; then
+              if [[ -n "$CURRENT_DEPLOYMENT_PATH" ]]; then
+                SNOREDEX_CURRENT_DEPLOYMENT_PATH="$CURRENT_DEPLOYMENT_PATH" node scripts/check-production-adoption.mjs
+              else
+                node scripts/check-production-adoption.mjs
+              fi
+              adoption_status=$?
+              block_code="CATALOGUE_UPDATE_BLOCKED_MIGRATION"
+            else
+              adoption_status=$sync_status
+              block_code="CATALOGUE_UPDATE_BLOCKED_CONSUMER_CONTRACT"
+            fi
           fi
           if [[ "$adoption_status" -eq 0 ]]; then
             npm run check
@@ -184,6 +218,7 @@ jobs:
           npm run release:catalogue -- \
             --candidate-dir "$RUNNER_TEMP/catalogue-release" \
             --producer-revision "$PRODUCER_REVISION" \
+            --consumer-revision "$GITHUB_SHA" \
             --compatibility-status "$compatibility_status" \
             --compatibility-code "$compatibility_code" \
             --issue-url "$CHECKLIST_ISSUE" \
@@ -191,9 +226,14 @@ jobs:
             "${previous_args[@]}"
           echo "status=$compatibility_status" >> "$GITHUB_OUTPUT"
           echo "code=$compatibility_code" >> "$GITHUB_OUTPUT"
+          node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const manifest = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/catalogue-release/catalogue-release.json`, 'utf8'));
+          appendFileSync(process.env.GITHUB_OUTPUT, `publication_status=${manifest.publicationStatus}\n`);
+          NODE
 
-      - name: Publish changed catalogue release
-        if: steps.candidate.outputs.change_status == 'changed'
+      - name: Publish changed catalogue evidence
+        if: steps.sealed.outputs.publication_status == 'changed'
         env:
           COMPATIBILITY_CODE: ${{ steps.sealed.outputs.code }}
           COMPATIBILITY_STATUS: ${{ steps.sealed.outputs.status }}
@@ -201,8 +241,8 @@ jobs:
           PRODUCER_REVISION: ${{ steps.producer.outputs.revision }}
         run: |
           set -euo pipefail
-          tag="catalogue-${PRODUCER_REVISION}"
-          release_args=(create "$tag" --target "${GITHUB_SHA}" --title "Catalogue ${PRODUCER_REVISION:0:12}" --notes "Producer ${PRODUCER_REVISION}; ${COMPATIBILITY_CODE}. See ${CHECKLIST_ISSUE}.")
+          tag="catalogue-${PRODUCER_REVISION}-${GITHUB_SHA}"
+          release_args=(create "$tag" --target "${GITHUB_SHA}" --title "Catalogue ${PRODUCER_REVISION:0:12} / Checklist ${GITHUB_SHA:0:12}" --notes "Producer ${PRODUCER_REVISION}; Checklist ${GITHUB_SHA}; ${COMPATIBILITY_CODE}. See ${CHECKLIST_ISSUE}.")
           if [[ "$COMPATIBILITY_STATUS" == "blocked" ]]; then
             release_args+=(--prerelease)
           fi
@@ -239,6 +279,11 @@ jobs:
               git diff --cached --check
               git commit -m "data: adopt producer catalogue ${PRODUCER_REVISION:0:12}"
               git push origin "$branch"
+            fi
+            branch_head="$(git ls-remote origin "refs/heads/${branch}" | cut -f1)"
+            ci_state="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=${branch}&event=workflow_dispatch&per_page=100" --jq "[.workflow_runs[] | select(.head_sha == \"${branch_head}\")][0] | if .status == \"completed\" then .conclusion else .status end // \"\"")"
+            if [[ ! "$ci_state" =~ ^(success|queued|in_progress|waiting|pending)$ ]]; then
+              gh workflow run ci.yml --ref "$branch"
             fi
             set +e
             existing_pr="$(gh pr create --base main --head "$branch" --title "[P4] Adopt catalogue ${PRODUCER_REVISION:0:12}" --body "Issue-backed catalogue update for #29 from m4s-ai/snoredex-data@${PRODUCER_REVISION}. Source bytes and compatibility evidence are published in the catalogue release; this PR does not close #29 before deploy and rollback verification." 2>/dev/null)"

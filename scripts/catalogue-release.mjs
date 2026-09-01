@@ -52,8 +52,14 @@ function validRelease(value) {
     isRecord(value) &&
     value.schema === RELEASE_SCHEMA &&
     value.schemaVersion === RELEASE_VERSION &&
+    value.sourceRepository === PRODUCER_REPOSITORY &&
     isCommit(value.producerRevision) &&
+    isCommit(value.consumerRevision) &&
     isDigest(value.catalogueFingerprint) &&
+    isRecord(value.compatibility) &&
+    ['ready', 'blocked'].includes(value.compatibility.status) &&
+    typeof value.compatibility.code === 'string' &&
+    /^CATALOGUE_[A-Z_]+$/u.test(value.compatibility.code) &&
     isRecord(value.assets) &&
     FILES.every((filename) => {
       const entry = value.assets[filename];
@@ -80,6 +86,7 @@ function isIssueUrl(value) {
 
 export function createCatalogueReleaseManifest({
   producerRevision,
+  consumerRevision,
   candidateBytes,
   currentLock,
   previousRelease,
@@ -87,7 +94,12 @@ export function createCatalogueReleaseManifest({
   compatibilityStatus = 'unchecked',
   compatibilityCode = 'CATALOGUE_UPDATE_NOT_CHECKED',
 }) {
-  if (!isCommit(producerRevision) || !isRecord(candidateBytes) || !isRecord(currentLock)) {
+  if (
+    !isCommit(producerRevision) ||
+    !isCommit(consumerRevision) ||
+    !isRecord(candidateBytes) ||
+    !isRecord(currentLock)
+  ) {
     throw new Error('CATALOGUE_RELEASE_INPUT_INVALID');
   }
   if (
@@ -167,6 +179,10 @@ export function createCatalogueReleaseManifest({
     }),
   );
   const changed = previousRelease === undefined || !sameAssets(assets, previousRelease.assets);
+  const compatibilityChanged =
+    previousRelease === undefined ||
+    previousRelease.compatibility.status !== compatibilityStatus ||
+    previousRelease.compatibility.code !== compatibilityCode;
   const adoptionNeeded =
     catalogue.meta.catalogueFingerprint !== currentLock.catalogueFingerprint ||
     assets['collector_catalogue.json'].sha256 !== currentLock.catalogueByteSha256 ||
@@ -177,6 +193,7 @@ export function createCatalogueReleaseManifest({
     schemaVersion: RELEASE_VERSION,
     sourceRepository: PRODUCER_REPOSITORY,
     producerRevision,
+    consumerRevision,
     contractVersion: catalogue.meta.schemaVersion,
     catalogueFingerprint: catalogue.meta.catalogueFingerprint,
     consumerValidation: {
@@ -187,6 +204,7 @@ export function createCatalogueReleaseManifest({
     comparedTo: previousRelease
       ? {
           producerRevision: previousRelease.producerRevision,
+          consumerRevision: previousRelease.consumerRevision,
           catalogueFingerprint: previousRelease.catalogueFingerprint,
         }
       : {
@@ -194,6 +212,7 @@ export function createCatalogueReleaseManifest({
           catalogueFingerprint: currentLock.catalogueFingerprint,
         },
     changeStatus: changed ? 'changed' : 'unchanged',
+    publicationStatus: changed || compatibilityChanged ? 'changed' : 'unchanged',
     adoptionStatus: adoptionNeeded ? 'needed' : 'current',
     compatibility: {
       status: compatibilityStatus,
@@ -235,6 +254,7 @@ async function main() {
   );
   const manifest = createCatalogueReleaseManifest({
     producerRevision: required('--producer-revision'),
+    consumerRevision: required('--consumer-revision'),
     candidateBytes,
     currentLock,
     previousRelease,
