@@ -170,6 +170,48 @@ test('canonicalizes equivalent quantity drafts on no-op and persisted commits', 
   assert.equal(changed.controller.item(ITEM_A).save.phase, 'saved');
 });
 
+test('persists quantity reverts that supersede running or failed saves', async () => {
+  const running = makeHarness();
+  running.controller.setQuantityDraft(ITEM_A, '5', '0');
+  const obsolete = running.controller.commitQuantities(ITEM_A);
+  running.controller.setQuantityDraft(ITEM_A, '0', '0');
+  const compensation = running.controller.commitQuantities(ITEM_A);
+
+  assert.equal(running.immediateSaves.length, 2);
+  assert.equal(
+    running.submittedStates[1].find((record) => record.itemId === ITEM_A),
+    undefined,
+  );
+  assert.equal(running.controller.item(ITEM_A).save.phase, 'saving');
+  running.immediateSaves[0].resolve(saved);
+  await obsolete;
+  assert.equal(running.controller.item(ITEM_A).save.phase, 'saving');
+  running.immediateSaves[1].resolve(saved);
+  await compensation;
+  assert.equal(running.controller.item(ITEM_A).status, 'need');
+  assert.equal(running.controller.item(ITEM_A).confirmed, undefined);
+  assert.equal(running.controller.item(ITEM_A).save.phase, 'saved');
+
+  const failed = makeHarness({
+    active: [{ itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],
+  });
+  failed.controller.setQuantityDraft(ITEM_A, '2', '0');
+  const rejected = failed.controller.commitQuantities(ITEM_A);
+  failed.immediateSaves[0].resolve({ ok: false, error: 'STORAGE_WRITE_FAILED' });
+  await rejected;
+  assert.equal(failed.controller.item(ITEM_A).save.phase, 'failed');
+
+  failed.controller.setQuantityDraft(ITEM_A, '1', '0');
+  const recovery = failed.controller.commitQuantities(ITEM_A);
+  assert.equal(failed.immediateSaves.length, 2);
+  assert.equal(failed.submittedStates[1].find((record) => record.itemId === ITEM_A)?.quantityOwned, 1);
+  failed.immediateSaves[1].resolve(saved);
+  await recovery;
+  assert.equal(failed.controller.item(ITEM_A).confirmed?.quantityOwned, 1);
+  assert.equal(failed.controller.item(ITEM_A).save.phase, 'saved');
+  assert.equal(failed.controller.item(ITEM_A).save.error, undefined);
+});
+
 test('keeps an invalid quantity visible while an independent status save succeeds', async () => {
   const { controller, immediateSaves } = makeHarness();
   controller.setQuantityDraft(ITEM_A, '1123123123', '0');

@@ -383,7 +383,8 @@ export class BrowserCollectionStateController implements CollectionStateControll
     meta.quantityOrdered = String(next.quantityOrdered);
     meta.invalidQuantityFields = [];
     if (!sameCollection(previous, next)) meta.versions.collection = ++this.nextRevision;
-    if (sameCollection(next, expandedRecord(itemId, this.confirmedRecords.get(itemId)))) {
+    const confirmed = expandedRecord(itemId, this.confirmedRecords.get(itemId));
+    if (!this.collectionNeedsPersistence(itemId, next, confirmed, meta)) {
       this.clearFailureAfterEdit(meta, 'collection');
       this.notify(itemId);
       return { ok: true, skipped: true };
@@ -596,13 +597,26 @@ export class BrowserCollectionStateController implements CollectionStateControll
       const desired = expandedRecord(itemId, records.get(itemId));
       const confirmed = expandedRecord(itemId, this.confirmedRecords.get(itemId));
       const meta = this.editMeta(itemId);
-      if (!sameCollection(desired, confirmed) || meta.failures.collection !== undefined) fields.add('collection');
+      if (this.collectionNeedsPersistence(itemId, desired, confirmed, meta)) fields.add('collection');
       if (desired.note !== confirmed.note || meta.noteDraft !== desired.note || meta.failures.note !== undefined) {
         fields.add('note');
       }
       if (fields.size > 0) affected.set(itemId, fields);
     }
     return affected;
+  }
+
+  private collectionNeedsPersistence(
+    itemId: string,
+    desired: PrivateItemState,
+    confirmed: PrivateItemState,
+    meta: ItemEditMeta,
+  ): boolean {
+    if (!sameCollection(desired, confirmed) || meta.failures.collection !== undefined) return true;
+    for (const operation of this.activeOperations.values()) {
+      if (!sameCollection(desired, expandedRecord(itemId, operation.records.get(itemId)))) return true;
+    }
+    return false;
   }
 
   private beginOperation(snapshot: Omit<PendingNoteSave, 'scheduled'>): SaveOperation {
