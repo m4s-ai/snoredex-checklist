@@ -712,6 +712,7 @@ function renderCollectionControls(
   const record = controller.record(item.itemId);
   const wrapper = text('div', undefined, 'collection-controls');
   const feedback = text('span', undefined, 'state-feedback');
+  feedback.id = `state-feedback-${item.itemId}`;
   feedback.setAttribute('role', 'status');
   feedback.setAttribute('aria-live', 'polite');
   const retry = text('button', 'Retry save', 'state-retry') as HTMLButtonElement;
@@ -726,6 +727,11 @@ function renderCollectionControls(
       retry.hidden = true;
     } else if (result.ok) {
       feedback.textContent = 'Saving…';
+      retry.hidden = true;
+    } else if (result.error === 'EDIT_INVALID_QUANTITY') {
+      feedback.textContent =
+        'Quantity is invalid. Enter a whole number from 0 through 9999. This draft was not saved, and the previous collection value remains unchanged. Error code: EDIT_INVALID_QUANTITY';
+      retryAction = undefined;
       retry.hidden = true;
     } else if (result.error === 'STORAGE_COMMIT_UNCERTAIN') {
       feedback.textContent = 'Save conflict detected. Reload to reconcile your collection.';
@@ -783,6 +789,7 @@ function renderCollectionControls(
   owned.step = '1';
   owned.value = String(record?.quantityOwned ?? 0);
   owned.setAttribute('inputmode', 'numeric');
+  owned.setAttribute('aria-describedby', feedback.id);
   ownedLabel.append(owned);
   const orderedLabel = text('label', 'Ordered');
   const ordered = document.createElement('input');
@@ -792,6 +799,7 @@ function renderCollectionControls(
   ordered.step = '1';
   ordered.value = String(record?.quantityOrdered ?? 0);
   ordered.setAttribute('inputmode', 'numeric');
+  ordered.setAttribute('aria-describedby', feedback.id);
   orderedLabel.append(ordered);
   const stopChangeListener = controller.onChange(() => {
     const latest = controller.record(item.itemId);
@@ -801,9 +809,24 @@ function renderCollectionControls(
     if (document.activeElement !== ordered) ordered.value = String(latest?.quantityOrdered ?? 0);
   });
   registerCleanup?.(stopChangeListener);
+  const quantitiesAreValid = (): boolean => {
+    const ownedIsValid = owned.checkValidity();
+    const orderedIsValid = ordered.checkValidity();
+    if (ownedIsValid) owned.removeAttribute('aria-invalid');
+    else owned.setAttribute('aria-invalid', 'true');
+    if (orderedIsValid) ordered.removeAttribute('aria-invalid');
+    else ordered.setAttribute('aria-invalid', 'true');
+    return ownedIsValid && orderedIsValid;
+  };
   const saveQuantities = (): void => {
+    if (!quantitiesAreValid()) {
+      showResult({ ok: false, error: 'EDIT_INVALID_QUANTITY' });
+      return;
+    }
     runSave(() => controller.setQuantities(item.itemId, Number(owned.value), Number(ordered.value)));
   };
+  owned.addEventListener('input', quantitiesAreValid);
+  ordered.addEventListener('input', quantitiesAreValid);
   owned.addEventListener('change', saveQuantities);
   ordered.addEventListener('change', saveQuantities);
   quantity.append(quantityHeading, ownedLabel, orderedLabel);

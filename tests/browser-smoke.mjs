@@ -166,6 +166,7 @@ try {
         return {
           fingerprint: catalogue.meta.catalogueFingerprint,
           itemId: item.itemId,
+          localizationId: item.localizationId,
           research: catalogue.items.find(
             (candidate) =>
               candidate.active &&
@@ -255,6 +256,37 @@ try {
           `${name}: confirmation name`,
         );
         await confirmation.getByRole('button', { name: 'Cancel' }).click();
+        await page.goto(`${baseUrl}/collection/?localization=${encodeURIComponent(synthetic.localizationId)}`, {
+          waitUntil: 'networkidle',
+        });
+        const ownedQuantity = page.getByRole('spinbutton', { name: 'Owned' }).first();
+        const beforeInvalidQuantity = await page.evaluate(() =>
+          localStorage.getItem('snoredex-checklist.private-state'),
+        );
+        await ownedQuantity.fill('10000');
+        await ownedQuantity.blur();
+        await page
+          .getByText(
+            'Quantity is invalid. Enter a whole number from 0 through 9999. This draft was not saved, and the previous collection value remains unchanged. Error code: EDIT_INVALID_QUANTITY',
+            { exact: true },
+          )
+          .waitFor();
+        assert.equal(await ownedQuantity.getAttribute('aria-invalid'), 'true', `${name}: invalid quantity marked`);
+        assert.equal(await page.locator('.state-retry:visible').count(), 0, `${name}: invalid input has no retry`);
+        assert.equal(
+          await page.evaluate(() => localStorage.getItem('snoredex-checklist.private-state')),
+          beforeInvalidQuantity,
+          `${name}: invalid quantity leaves storage unchanged`,
+        );
+        await ownedQuantity.fill('2');
+        await ownedQuantity.blur();
+        await page.getByText('Saved', { exact: true }).first().waitFor();
+        assert.equal(await ownedQuantity.getAttribute('aria-invalid'), null, `${name}: corrected quantity is valid`);
+        assert.notEqual(
+          await page.evaluate(() => localStorage.getItem('snoredex-checklist.private-state')),
+          beforeInvalidQuantity,
+          `${name}: corrected quantity saves`,
+        );
         assert.notEqual(synthetic.research, undefined, `${name}: synthetic research item`);
         if (synthetic.research?.setEditionId) {
           await page.goto(
