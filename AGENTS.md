@@ -76,9 +76,10 @@ and collector-facing finish family remain distinct.
    and private state.
 5. Every shared schema, semantic, ID, rekey, locality, fingerprint, publication or rollout change
    is recorded before merge in reciprocally linked issues. PRs, reviews, chat and CI are not the
-   cross-project record. Use closing keywords only for the local implementation issue. The loop
-   closes only after the published producer artifact and deployed consumer are end-to-end VERIFIED
-   in both issues for the same version and fingerprint.
+   cross-project record. Use closing keywords only when the local implementation issue's
+   acceptance criteria are complete or explicitly superseded there; otherwise reference it without
+   closing. The loop closes only after the published producer artifact and deployed consumer are
+   end-to-end VERIFIED in both issues for the same version and fingerprint.
 6. Validate untrusted data, render it as text, and preserve privacy, recovery, keyboard,
    screen-reader and small-screen usability.
 7. Vendor data, locks and build artifacts change only through their documented sync/build path.
@@ -99,6 +100,12 @@ and collector-facing finish family remain distinct.
 
 Commands belong in the README and workflows once they exist. Non-trivial logic leaves a runnable
 regression check; trust-boundary and migration checks are never optional.
+
+New source analysis that depends on grammar, nesting, execution boundaries or control-flow
+semantics uses the repository-pinned language parser/compiler AST. Token scans are only for
+lexical checks. Existing heuristic analyzers stay within their documented behavior and regression
+coverage; do not extend them with syntax-shape exceptions. Replace the heuristic at the semantic
+boundary through an owning migration issue.
 
 ## Repository and publication
 
