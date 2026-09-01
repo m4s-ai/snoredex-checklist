@@ -457,15 +457,19 @@ export class BrowserCollectionStateController implements CollectionStateControll
     const snapshot = this.item(itemId);
     if (!snapshot.save.retryable) return Promise.resolve({ ok: true, skipped: true });
     const meta = this.editMeta(itemId);
+    const current = expandedRecord(itemId, this.records.get(itemId));
     const quantityOwned = parseQuantity(meta.quantityOwned);
     const quantityOrdered = parseQuantity(meta.quantityOrdered);
-    if (quantityOwned !== undefined && quantityOrdered !== undefined) {
+    const quantityChanged =
+      meta.quantityOwned !== String(current.quantityOwned) || meta.quantityOrdered !== String(current.quantityOrdered);
+    if (quantityChanged && quantityOwned !== undefined && quantityOrdered !== undefined) {
       const result = this.domain.applyQuantityEdit(itemId, this.records.get(itemId), quantityOwned, quantityOrdered);
       if (!result.ok) return Promise.resolve(failure(result.error ?? 'EDIT_INVALID_QUANTITY'));
-      const previous = expandedRecord(itemId, this.records.get(itemId));
       const next = expandedRecord(itemId, result.value);
       this.setRecord(itemId, result.value);
-      if (!sameCollection(previous, next)) meta.versions.collection = ++this.nextRevision;
+      meta.quantityOwned = String(next.quantityOwned);
+      meta.quantityOrdered = String(next.quantityOrdered);
+      if (!sameCollection(current, next)) meta.versions.collection = ++this.nextRevision;
     }
     return this.saveImmediate();
   }

@@ -205,6 +205,34 @@ test('preserves a failed draft and retries the current complete state', async ()
   assert.equal(submittedStates.at(-1)?.find((record) => record.itemId === ITEM_A)?.status, 'have');
 });
 
+test('retries the current status unless a quantity draft changed', async () => {
+  const unchanged = makeHarness();
+  const skipped = unchanged.controller.setStatus(ITEM_A, 'skip');
+  unchanged.immediateSaves[0].resolve({ ok: false, error: 'STORAGE_WRITE_FAILED' });
+  await skipped;
+
+  const retrySkip = unchanged.controller.retry(ITEM_A);
+  assert.equal(unchanged.submittedStates.at(-1)?.find((record) => record.itemId === ITEM_A)?.status, 'skip');
+  unchanged.immediateSaves[1].resolve(saved);
+  await retrySkip;
+  assert.equal(unchanged.controller.item(ITEM_A).confirmed?.status, 'skip');
+
+  const changed = makeHarness();
+  const failedSkip = changed.controller.setStatus(ITEM_A, 'skip');
+  changed.immediateSaves[0].resolve({ ok: false, error: 'STORAGE_WRITE_FAILED' });
+  await failedSkip;
+  changed.controller.setQuantityDraft(ITEM_A, '02', '0');
+
+  const retryQuantity = changed.controller.retry(ITEM_A);
+  const submitted = changed.submittedStates.at(-1)?.find((record) => record.itemId === ITEM_A);
+  assert.equal(submitted?.status, 'have');
+  assert.equal(submitted?.quantityOwned, 2);
+  assert.equal(changed.controller.item(ITEM_A).quantityOwned, '2');
+  changed.immediateSaves[1].resolve(saved);
+  await retryQuantity;
+  assert.equal(changed.controller.item(ITEM_A).confirmed?.status, 'have');
+});
+
 test('rejects stale completion after a newer revision settles', async () => {
   const { controller, immediateSaves } = makeHarness();
   const older = controller.setStatus(ITEM_A, 'have');
