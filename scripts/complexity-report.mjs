@@ -1412,6 +1412,29 @@ function isKeywordNamedProperty(tokens, index) {
   );
 }
 
+function hasTopLevelCommaBetween(tokens, start, end) {
+  let parens = 0;
+  let brackets = 0;
+  let braces = 0;
+  let angles = 0;
+  for (let cursor = start + 1; cursor < end; cursor += 1) {
+    const kind = tokens[cursor].kind;
+    if (kind === SyntaxKind.OpenParenToken) parens += 1;
+    else if (kind === SyntaxKind.CloseParenToken) parens = Math.max(0, parens - 1);
+    else if (kind === SyntaxKind.OpenBracketToken) brackets += 1;
+    else if (kind === SyntaxKind.CloseBracketToken) brackets = Math.max(0, brackets - 1);
+    else if (kind === SyntaxKind.OpenBraceToken) braces += 1;
+    else if (kind === SyntaxKind.CloseBraceToken) braces = Math.max(0, braces - 1);
+    else if (kind === SyntaxKind.LessThanToken) angles += 1;
+    else if (kind === SyntaxKind.GreaterThanToken) angles = Math.max(0, angles - 1);
+    else if (kind === SyntaxKind.GreaterThanGreaterThanToken) angles = Math.max(0, angles - 2);
+    else if (kind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken) angles = Math.max(0, angles - 3);
+    else if (kind === SyntaxKind.CommaToken && parens === 0 && brackets === 0 && braces === 0 && angles === 0)
+      return true;
+  }
+  return false;
+}
+
 function isConditionalTypeQuestion(tokens, index, start = 0) {
   if (tokens[index]?.kind !== SyntaxKind.QuestionToken) return false;
   let sawExtends = false;
@@ -1426,6 +1449,8 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
       continue;
     }
     if (kind === SyntaxKind.AsKeyword) {
+      if (sawExtends && extendsIndex !== undefined && hasTopLevelCommaBetween(tokens, cursor, extendsIndex))
+        return false;
       sawAs = true;
       continue;
     }
@@ -3128,6 +3153,11 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function returnAnnotatedAssertion(): unknown { return value as T extends U ? A : B; }',
       expected: [{ name: 'returnAnnotatedAssertion', complexity: 1 }],
+    },
+    {
+      source:
+        'function unrelatedExtendsInReturn() { return (value as unknown, class X extends Base {}, ready) ? yes : no; }',
+      expected: [{ name: 'unrelatedExtendsInReturn', complexity: 2 }],
     },
   ];
   for (const sample of samples) {
