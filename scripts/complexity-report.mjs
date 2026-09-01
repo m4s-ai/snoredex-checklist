@@ -1569,6 +1569,7 @@ function isConditionalTypeAssertionPrefix(tokens, index) {
       SyntaxKind.TypeOfKeyword,
       SyntaxKind.DeleteKeyword,
       SyntaxKind.EqualsGreaterThanToken,
+      SyntaxKind.DotDotDotToken,
       SyntaxKind.OpenBraceToken,
       SyntaxKind.CloseBraceToken,
       SyntaxKind.SemicolonToken,
@@ -2947,6 +2948,12 @@ if (process.argv.includes('--self-test')) {
         while (ready);
       }`,
       expected: [{ name: 'expressionAfterDo', complexity: 2 }],
+    },
+    {
+      source: `function spreadAssertion() {
+        return [...<T extends unknown[] ? T : never>value];
+      }`,
+      expected: [{ name: 'spreadAssertion', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
