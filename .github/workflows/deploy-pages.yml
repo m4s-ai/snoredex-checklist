@@ -34,7 +34,7 @@ jobs:
     name: reserve deployment lane
     runs-on: ubuntu-24.04
     permissions:
-      actions: read
+      actions: write
     outputs:
       proceed: ${{ steps.lane.outputs.proceed }}
     steps:
@@ -97,6 +97,11 @@ jobs:
 
           appendFileSync(process.env.GITHUB_OUTPUT, `proceed=${proceed}\n`);
           NODE
+      - name: Trigger independent catalogue intake
+        if: steps.lane.outputs.proceed == 'true' && (github.event_name == 'push' || inputs.deployment_mode == 'adopt')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run catalogue-release.yml --ref main
 
   deploy:
     name: deploy
