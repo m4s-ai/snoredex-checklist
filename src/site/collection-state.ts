@@ -146,6 +146,7 @@ interface FieldFailure {
 interface ItemEditMeta {
   quantityOwned: string;
   quantityOrdered: string;
+  noteDraft?: string;
   invalidQuantityFields: readonly ('owned' | 'ordered')[];
   versions: ItemVersions;
   failures: Partial<Record<EditField, FieldFailure>>;
@@ -231,6 +232,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
   private nextOperationId = 0;
   private lastConfirmedOperationId = 0;
   private lastSettledOperationId = 0;
+  private commitUncertain = false;
 
   public constructor(
     store: OrderedStateStoreLike,
@@ -271,13 +273,16 @@ export class BrowserCollectionStateController implements CollectionStateControll
     const record = expandedRecord(itemId, this.records.get(itemId));
     const meta = this.editMeta(itemId);
     const failures = Object.values(meta.failures).filter((value): value is FieldFailure => value !== undefined);
-    const conflict = failures.find((entry) => entry.error === 'STORAGE_COMMIT_UNCERTAIN');
+    const conflict = this.commitUncertain
+      ? 'STORAGE_COMMIT_UNCERTAIN'
+      : failures.find((entry) => entry.error === 'STORAGE_COMMIT_UNCERTAIN')?.error;
     const latestFailure = failures.sort((left, right) => right.operationId - left.operationId)[0];
     const saving = this.isSaving(itemId, meta) || this.isPendingNote(itemId, meta);
     const dirty =
       meta.invalidQuantityFields.length > 0 ||
       meta.quantityOwned !== String(record.quantityOwned) ||
       meta.quantityOrdered !== String(record.quantityOrdered) ||
+      meta.noteDraft !== record.note ||
       !sameCollection(record, expandedRecord(itemId, this.confirmedRecords.get(itemId))) ||
       record.note !== this.confirmedRecords.get(itemId)?.note;
     const phase: CollectionSavePhase = conflict
@@ -291,7 +296,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
             : meta.lastSavedOperation === undefined
               ? 'clean'
               : 'saved';
-    const error = conflict?.error ?? latestFailure?.error;
+    const error = conflict ?? latestFailure?.error;
     return {
       itemId,
       revision: Math.max(meta.versions.collection, meta.versions.note),
@@ -299,7 +304,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
       status: record.status,
       quantityOwned: meta.quantityOwned,
       quantityOrdered: meta.quantityOrdered,
-      ...(record.note === undefined ? {} : { note: record.note }),
+      ...(meta.noteDraft === undefined ? {} : { note: meta.noteDraft }),
       invalidQuantityFields: meta.invalidQuantityFields,
       ...(meta.invalidQuantityFields.length === 0 ? {} : { validationError: 'EDIT_INVALID_QUANTITY' as const }),
       save: { phase, ...(error === undefined ? {} : { error }), retryable: phase === 'failed' },
@@ -372,8 +377,15 @@ export class BrowserCollectionStateController implements CollectionStateControll
     const previousNote = this.records.get(itemId)?.note;
     this.setRecord(itemId, result.value);
     const meta = this.editMeta(itemId);
-    if (previousNote !== result.value?.note) meta.versions.note = ++this.nextRevision;
+    meta.noteDraft = note;
+    if (previousNote !== result.value?.note || meta.noteDraft !== previousNote) {
+      meta.versions.note = ++this.nextRevision;
+    }
     this.clearFailureAfterEdit(meta, 'note');
+    if (this.commitUncertain) {
+      this.notify(itemId);
+      return failure('STORAGE_COMMIT_UNCERTAIN');
+    }
     const pending = this.pendingSnapshot();
     const scheduled = this.store.scheduleNoteSave(pending.state, false);
     this.pendingNote = { ...pending, scheduled: scheduled.ok };
@@ -393,6 +405,11 @@ export class BrowserCollectionStateController implements CollectionStateControll
 
   public async flushNote(): Promise<CollectionEditResult> {
     this.cancelNoteTimer();
+    if (this.commitUncertain) {
+      this.pendingNote = undefined;
+      this.notify();
+      return failure('STORAGE_COMMIT_UNCERTAIN');
+    }
     const pending = this.pendingNote;
     if (pending === undefined) return { ok: true, skipped: true };
     this.pendingNote = undefined;
@@ -431,6 +448,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
   }
 
   public async adoptRecovery(): Promise<CollectionEditResult> {
+    if (this.commitUncertain) return failure('STORAGE_COMMIT_UNCERTAIN');
     const current = this.recoveryDraft;
     if (current === undefined) return { ok: true, skipped: true };
     const adopted = this.store.adoptUnsavedDraft();
@@ -451,6 +469,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
   }
 
   public discardRecovery(): CollectionEditResult {
+    if (this.commitUncertain) return failure('STORAGE_COMMIT_UNCERTAIN');
     if (this.recoveryDraft === undefined) return { ok: true, skipped: true };
     this.store.discardUnsavedDraft();
     if (this.store.unsaved() !== undefined) return failure('STORAGE_WRITE_FAILED');
@@ -466,6 +485,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     meta = {
       quantityOwned: String(record.quantityOwned),
       quantityOrdered: String(record.quantityOrdered),
+      ...(record.note === undefined ? {} : { noteDraft: record.note }),
       invalidQuantityFields: [],
       versions: { collection: 0, note: 0 },
       failures: {},
@@ -491,6 +511,10 @@ export class BrowserCollectionStateController implements CollectionStateControll
   private saveImmediate(): Promise<CollectionEditResult> {
     this.cancelNoteTimer();
     this.pendingNote = undefined;
+    if (this.commitUncertain) {
+      this.notify();
+      return Promise.resolve(failure('STORAGE_COMMIT_UNCERTAIN'));
+    }
     const operation = this.beginOperation(this.pendingSnapshot());
     return this.store.saveImmediate(operation.state).then((result) => {
       const outcome = persistenceResult(result);
@@ -517,7 +541,9 @@ export class BrowserCollectionStateController implements CollectionStateControll
       const confirmed = expandedRecord(itemId, this.confirmedRecords.get(itemId));
       const meta = this.editMeta(itemId);
       if (!sameCollection(desired, confirmed) || meta.failures.collection !== undefined) fields.add('collection');
-      if (desired.note !== confirmed.note || meta.failures.note !== undefined) fields.add('note');
+      if (desired.note !== confirmed.note || meta.noteDraft !== desired.note || meta.failures.note !== undefined) {
+        fields.add('note');
+      }
       if (fields.size > 0) affected.set(itemId, fields);
     }
     return affected;
@@ -538,6 +564,11 @@ export class BrowserCollectionStateController implements CollectionStateControll
       return;
     }
     this.lastSettledOperationId = operation.id;
+    if (!result.ok && result.error === 'STORAGE_COMMIT_UNCERTAIN') {
+      this.commitUncertain = true;
+      this.cancelNoteTimer();
+      this.pendingNote = undefined;
+    }
     if (result.ok && !result.skipped && operation.id > this.lastConfirmedOperationId) {
       this.lastConfirmedOperationId = operation.id;
       for (const itemId of this.confirmedRecords.keys()) touched.add(itemId);
@@ -550,6 +581,9 @@ export class BrowserCollectionStateController implements CollectionStateControll
         for (const field of fields) {
           const existing = meta.failures[field];
           if (existing !== undefined && versions[field] >= existing.revision) delete meta.failures[field];
+          if (field === 'note' && versions.note === meta.versions.note) {
+            meta.noteDraft = operation.records.get(itemId)?.note;
+          }
         }
         meta.lastSavedOperation = operation.id;
       }

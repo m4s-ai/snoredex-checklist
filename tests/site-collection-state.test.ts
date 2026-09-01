@@ -262,8 +262,30 @@ test('does not resurrect an older note failure after a newer note succeeds', asy
   assert.equal(snapshot.save.phase, 'saved');
 });
 
+test('keeps a raw note draft until its normalized value is saved', async () => {
+  const { controller, noteSaves } = makeHarness({
+    active: [{ itemId: ITEM_A, status: 'need', quantityOwned: 0, quantityOrdered: 0, note: 'old' }],
+  });
+
+  controller.scheduleNote(ITEM_A, '');
+  assert.equal(controller.item(ITEM_A).note, '');
+  controller.scheduleNote(ITEM_A, ' ');
+  assert.equal(controller.item(ITEM_A).note, ' ');
+  controller.scheduleNote(ITEM_A, '  first\nsecond');
+  assert.equal(controller.item(ITEM_A).note, '  first\nsecond');
+
+  const flush = controller.flushNote();
+  noteSaves[0].resolve(saved);
+  await flush;
+
+  const snapshot = controller.item(ITEM_A);
+  assert.equal(snapshot.note, '  first\nsecond');
+  assert.equal(snapshot.confirmed?.note, '  first\nsecond');
+  assert.equal(snapshot.save.phase, 'saved');
+});
+
 test('treats commit uncertainty as reload-only recovery', async () => {
-  const { controller, immediateSaves } = makeHarness();
+  const { controller, immediateSaves, submittedStates } = makeHarness();
   const save = controller.setStatus(ITEM_A, 'have');
   immediateSaves[0].resolve({ ok: false, error: 'STORAGE_COMMIT_UNCERTAIN' });
   await save;
@@ -272,5 +294,17 @@ test('treats commit uncertainty as reload-only recovery', async () => {
   assert.equal(snapshot.save.phase, 'conflict');
   assert.equal(snapshot.save.retryable, false);
   assert.deepEqual(await controller.retry(ITEM_A), { ok: false, error: 'STORAGE_COMMIT_UNCERTAIN' });
+  assert.deepEqual(await controller.setStatus(ITEM_B, 'ordered'), {
+    ok: false,
+    error: 'STORAGE_COMMIT_UNCERTAIN',
+  });
+  assert.deepEqual(controller.scheduleNote(ITEM_A, 'local draft'), {
+    ok: false,
+    error: 'STORAGE_COMMIT_UNCERTAIN',
+  });
+  assert.equal(controller.item(ITEM_A).note, 'local draft');
+  assert.equal(controller.item(ITEM_B).status, 'ordered');
+  assert.equal(controller.item(ITEM_B).save.phase, 'conflict');
   assert.equal(immediateSaves.length, 1);
+  assert.equal(submittedStates.length, 1);
 });

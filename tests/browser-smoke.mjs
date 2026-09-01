@@ -263,6 +263,34 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
       await page.close();
     }
   }
+
+  {
+    const page = await collectionScenarioPage(browser, synthetic, [{ ...initial, note: 'old note' }]);
+    try {
+      const note = page.getByRole('textbox', { name: /Private note for/u }).first();
+      const controls = note.locator(
+        'xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " collection-controls ")]',
+      );
+      await note.fill('');
+      await note.pressSequentially('  first');
+      await note.press('Enter');
+      await note.pressSequentially('second');
+      assert.equal(await note.inputValue(), '  first\nsecond', `${name}: note composition preserves leading spaces`);
+      await note.blur();
+      await controls.locator('.state-feedback').filter({ hasText: 'Saved' }).waitFor();
+      assert.equal(
+        await page.evaluate(
+          ({ key, itemId }) =>
+            JSON.parse(localStorage.getItem(key) ?? '{}').items?.find((item) => item.itemId === itemId)?.note,
+          { key: PRIVATE_STATE_KEY, itemId: synthetic.itemId },
+        ),
+        '  first\nsecond',
+        `${name}: note save preserves leading spaces`,
+      );
+    } finally {
+      await page.close();
+    }
+  }
 }
 
 try {
