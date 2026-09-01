@@ -3,7 +3,7 @@ import { strict as assert } from 'node:assert';
 import { extname, join, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { format } from 'prettier';
-import { createScanner, isBinaryOperator, SyntaxKind } from 'typescript/unstable/ast';
+import { createScanner, isBinaryOperator, LanguageVariant, SyntaxKind } from 'typescript/unstable/ast';
 
 const root = resolve(process.cwd());
 const outputPath = join(root, 'docs', 'complexity-report.md');
@@ -11,14 +11,82 @@ const shouldWrite = process.argv.includes('--write');
 const shouldCheck = process.argv.includes('--check');
 const sourceExtensions = ['.ts', '.tsx', '.js', '.mjs', '.cjs'];
 
-function scan(source) {
-  const scanner = createScanner(true, undefined, source);
+function looksLikeGenericArrow(scanner) {
+  return scanner.lookAhead(() => {
+    let angleDepth = 1;
+    let kind;
+    do {
+      kind = scanner.scan();
+      if (kind === SyntaxKind.LessThanToken) angleDepth += 1;
+      else if (kind === SyntaxKind.GreaterThanToken) angleDepth -= 1;
+      else if (kind === SyntaxKind.GreaterThanGreaterThanToken) angleDepth -= 2;
+      else if (kind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken) angleDepth -= 3;
+    } while (angleDepth > 0 && kind !== SyntaxKind.EndOfFile);
+    if (angleDepth !== 0 || scanner.scan() !== SyntaxKind.OpenParenToken) return false;
+    let parenDepth = 1;
+    do {
+      kind = scanner.scan();
+      if (kind === SyntaxKind.OpenParenToken) parenDepth += 1;
+      else if (kind === SyntaxKind.CloseParenToken) parenDepth -= 1;
+    } while (parenDepth > 0 && kind !== SyntaxKind.EndOfFile);
+    return parenDepth === 0 && scanner.scan() === SyntaxKind.EqualsGreaterThanToken;
+  });
+}
+
+function scan(source, languageVariant) {
+  const scanner = createScanner(true, languageVariant, source);
   const tokens = [];
   let previous;
   const templateSubstitutionBraces = [];
+  let jsxMode = 'standard';
+  let jsxDepth = 0;
+  let jsxTagClosing = false;
+  let jsxTagSelfClosing = false;
+  let jsxExpressionBraces = 0;
+  let jsxExpressionReturnMode = 'children';
   let kind;
   do {
-    kind = scanner.scan();
+    if (jsxMode === 'children') {
+      kind = scanner.scanJsxToken();
+      if (kind === SyntaxKind.OpenBraceToken) {
+        jsxMode = 'expression';
+        jsxExpressionBraces = 1;
+        jsxExpressionReturnMode = 'children';
+      } else if (kind === SyntaxKind.LessThanToken || kind === SyntaxKind.LessThanSlashToken) {
+        jsxMode = 'tag';
+        jsxTagClosing = kind === SyntaxKind.LessThanSlashToken;
+        jsxTagSelfClosing = false;
+      }
+    } else {
+      kind = scanner.scan();
+      if (jsxMode === 'expression') {
+        if (kind === SyntaxKind.OpenBraceToken) jsxExpressionBraces += 1;
+        else if (kind === SyntaxKind.CloseBraceToken) {
+          jsxExpressionBraces -= 1;
+          if (jsxExpressionBraces === 0) jsxMode = jsxExpressionReturnMode;
+        }
+      } else if (jsxMode === 'tag') {
+        if (kind === SyntaxKind.OpenBraceToken) {
+          jsxMode = 'expression';
+          jsxExpressionBraces = 1;
+          jsxExpressionReturnMode = 'tag';
+        } else if (kind === SyntaxKind.SlashToken) jsxTagSelfClosing = true;
+        else if (kind === SyntaxKind.GreaterThanToken) {
+          if (jsxTagClosing) jsxDepth -= 1;
+          else if (!jsxTagSelfClosing) jsxDepth += 1;
+          jsxMode = jsxDepth > 0 ? 'children' : 'standard';
+        }
+      } else if (
+        languageVariant === LanguageVariant.JSX &&
+        kind === SyntaxKind.LessThanToken &&
+        !canEndExpression(previous) &&
+        !looksLikeGenericArrow(scanner)
+      ) {
+        jsxMode = 'tag';
+        jsxTagClosing = false;
+        jsxTagSelfClosing = false;
+      }
+    }
     if (kind === SyntaxKind.TemplateHead) templateSubstitutionBraces.push(0);
     if (templateSubstitutionBraces.length > 0) {
       if (kind === SyntaxKind.OpenBraceToken) {
@@ -2001,7 +2069,9 @@ function reportFor(files) {
   for (const path of files) {
     const source = files.sourceByPath.get(path);
     lines += countSourceLines(source);
-    entries.push(...collectFunctions(scan(source), source, path));
+    entries.push(
+      ...collectFunctions(scan(source, extname(path) === '.tsx' ? LanguageVariant.JSX : undefined), source, path),
+    );
   }
   entries.sort(
     (left, right) =>
@@ -3230,16 +3300,26 @@ if (process.argv.includes('--self-test')) {
       expected: [{ name: 'namespaceKeywordGenericAssertion', complexity: 1 }],
     },
     {
+      path: 'fixture.tsx',
+      source: 'function jsxText() { const view = () => <div>Ready?</div>; }',
+      expected: [
+        { name: 'jsxText', complexity: 1 },
+        { name: 'view', complexity: 1 },
+      ],
+    },
+    {
       source:
         'function runtimeComparisonWithKeywordType() { return (value as any < other, another > something && class X extends Base {}) ? yes : no; }',
       expected: [{ name: 'runtimeComparisonWithKeywordType', complexity: 3 }],
     },
   ];
   for (const sample of samples) {
-    const actual = collectFunctions(scan(sample.source), sample.source, 'fixture.ts').map(({ name, complexity }) => ({
-      name,
-      complexity,
-    }));
+    const fixturePath = sample.path ?? 'fixture.ts';
+    const actual = collectFunctions(
+      scan(sample.source, extname(fixturePath) === '.tsx' ? LanguageVariant.JSX : undefined),
+      sample.source,
+      fixturePath,
+    ).map(({ name, complexity }) => ({ name, complexity }));
     assert.deepEqual(actual, sample.expected);
   }
   assert.equal(countSourceLines('one\n'), 1);
