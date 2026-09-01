@@ -1430,7 +1430,9 @@ function hasTopLevelCommaBetween(tokens, start, end) {
       const qualifiedType =
         (identifierLike(tokens[cursor - 1]) || isKeywordToken(tokens[cursor - 1])) &&
         (() => {
+          const keywordQualifier = isKeywordToken(tokens[cursor - 1]);
           let context = cursor - 2;
+          let importQualified = false;
           while (
             identifierLike(tokens[context]) ||
             [SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[context]?.kind)
@@ -1438,17 +1440,23 @@ function hasTopLevelCommaBetween(tokens, start, end) {
             context -= 1;
           if (tokens[context]?.kind === SyntaxKind.CloseParenToken) {
             const importOpen = matchingOpen(tokens, context, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
-            if (tokens[importOpen - 1]?.kind === SyntaxKind.ImportKeyword) context = importOpen - 2;
+            if (tokens[importOpen - 1]?.kind === SyntaxKind.ImportKeyword) {
+              importQualified = true;
+              context = importOpen - 2;
+            }
           }
-          return [
-            SyntaxKind.AsKeyword,
-            SyntaxKind.SatisfiesKeyword,
-            SyntaxKind.KeyOfKeyword,
-            SyntaxKind.TypeOfKeyword,
-            SyntaxKind.InferKeyword,
-            SyntaxKind.ReadonlyKeyword,
-            SyntaxKind.UniqueKeyword,
-          ].includes(tokens[context]?.kind);
+          return (
+            (!keywordQualifier || importQualified) &&
+            [
+              SyntaxKind.AsKeyword,
+              SyntaxKind.SatisfiesKeyword,
+              SyntaxKind.KeyOfKeyword,
+              SyntaxKind.TypeOfKeyword,
+              SyntaxKind.InferKeyword,
+              SyntaxKind.ReadonlyKeyword,
+              SyntaxKind.UniqueKeyword,
+            ].includes(tokens[context]?.kind)
+          );
         })();
       if (
         close !== undefined &&
@@ -3212,6 +3220,11 @@ if (process.argv.includes('--self-test')) {
       source:
         "function importClassGenericAssertion() { return value as keyof import('./m').class<A, B> extends U ? A : B; }",
       expected: [{ name: 'importClassGenericAssertion', complexity: 1 }],
+    },
+    {
+      source:
+        'function runtimeComparisonWithKeywordType() { return (value as any < other, another > something && class X extends Base {}) ? yes : no; }',
+      expected: [{ name: 'runtimeComparisonWithKeywordType', complexity: 3 }],
     },
   ];
   for (const sample of samples) {
