@@ -1495,6 +1495,42 @@ function isObjectMethodName(tokens, index) {
   return [SyntaxKind.OpenBraceToken, SyntaxKind.CommaToken, SyntaxKind.SemicolonToken].includes(tokens[cursor]?.kind);
 }
 
+function isClassHeritageExtends(tokens, index) {
+  let angleDepth = 0;
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const kind = tokens[cursor]?.kind;
+    if (
+      [
+        SyntaxKind.GreaterThanToken,
+        SyntaxKind.GreaterThanGreaterThanToken,
+        SyntaxKind.GreaterThanGreaterThanGreaterThanToken,
+      ].includes(kind)
+    ) {
+      angleDepth += kind === SyntaxKind.GreaterThanToken ? 1 : kind === SyntaxKind.GreaterThanGreaterThanToken ? 2 : 3;
+      continue;
+    }
+    if (kind === SyntaxKind.LessThanToken) {
+      angleDepth -= 1;
+      continue;
+    }
+    if (angleDepth > 0) continue;
+    if (kind === SyntaxKind.ClassKeyword) return true;
+    if (
+      [
+        SyntaxKind.OpenParenToken,
+        SyntaxKind.OpenBracketToken,
+        SyntaxKind.OpenBraceToken,
+        SyntaxKind.CommaToken,
+        SyntaxKind.QuestionToken,
+        SyntaxKind.ColonToken,
+        SyntaxKind.SemicolonToken,
+      ].includes(kind)
+    )
+      break;
+  }
+  return false;
+}
+
 function isConditionalTypeAngleStart(tokens, index) {
   const assertionPrefix = isConditionalTypeAssertionPrefix(tokens, index);
   if (!identifierLike(tokens[index - 1]) && !assertionPrefix) return false;
@@ -1529,7 +1565,11 @@ function isConditionalTypeAngleStart(tokens, index) {
     for (let cursor = index + 2; cursor < close; cursor += 1) {
       const kind = tokens[cursor].kind;
       if (kind === SyntaxKind.ExtendsKeyword) {
-        if (!isObjectMethodName(tokens, cursor) && tokens[cursor + 1]?.kind !== SyntaxKind.ColonToken)
+        if (
+          !isClassHeritageExtends(tokens, cursor) &&
+          !isObjectMethodName(tokens, cursor) &&
+          tokens[cursor + 1]?.kind !== SyntaxKind.ColonToken
+        )
           sawExtends = true;
       } else if (sawExtends && kind === SyntaxKind.QuestionToken) sawQuestion = true;
       else if (sawQuestion && kind === SyntaxKind.ColonToken) return true;
@@ -3038,6 +3078,11 @@ if (process.argv.includes('--self-test')) {
         { name: 'parenthesizedAccessorComparison', complexity: 2 },
         { name: 'extends', complexity: 1 },
       ],
+    },
+    {
+      source:
+        'function parenthesizedClassComparison() { return factory < (decorate(class X extends Base {}) ? A : B) > (value); }',
+      expected: [{ name: 'parenthesizedClassComparison', complexity: 2 }],
     },
   ];
   for (const sample of samples) {
