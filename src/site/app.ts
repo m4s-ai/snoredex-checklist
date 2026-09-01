@@ -762,11 +762,6 @@ function renderCollectionControls(
   retry.addEventListener('click', () => {
     if (retryAction !== undefined) runSave(retryAction);
   });
-  const stopSaveListener = controller.onSave((itemId, result) => {
-    if (itemId === item.itemId && pendingSaveCount === 0) showResult(result);
-  });
-  registerCleanup?.(stopSaveListener);
-
   const fieldset = text('fieldset', undefined, 'status-controls') as HTMLFieldSetElement;
   fieldset.append(text('legend', 'Collection status'));
   const statusName = `status-${item.itemId}`;
@@ -812,8 +807,14 @@ function renderCollectionControls(
     const latest = controller.record(item.itemId);
     const latestStatus = latest?.status ?? 'need';
     for (const [value, input] of statusInputs) input.checked = value === latestStatus;
-    if (document.activeElement !== owned) owned.value = String(latest?.quantityOwned ?? 0);
-    if (document.activeElement !== ordered) ordered.value = String(latest?.quantityOrdered ?? 0);
+    if (document.activeElement !== owned) {
+      owned.value = String(latest?.quantityOwned ?? 0);
+      owned.removeAttribute('aria-invalid');
+    }
+    if (document.activeElement !== ordered) {
+      ordered.value = String(latest?.quantityOrdered ?? 0);
+      ordered.removeAttribute('aria-invalid');
+    }
   });
   registerCleanup?.(stopChangeListener);
   const quantitiesAreValid = (): boolean => {
@@ -825,6 +826,10 @@ function renderCollectionControls(
     else ordered.setAttribute('aria-invalid', 'true');
     return ownedIsValid && orderedIsValid;
   };
+  const stopSaveListener = controller.onSave((itemId, result) => {
+    if (itemId === item.itemId && pendingSaveCount === 0 && quantitiesAreValid()) showResult(result);
+  });
+  registerCleanup?.(stopSaveListener);
   const saveQuantities = (): void => {
     if (!quantitiesAreValid()) {
       showResult({ ok: false, error: 'EDIT_INVALID_QUANTITY' });
