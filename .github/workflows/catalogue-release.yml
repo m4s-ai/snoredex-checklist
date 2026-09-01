@@ -73,7 +73,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          previous_tag="$(gh release list --limit 100 --json tagName,createdAt --jq 'map(select(.tagName | test("^catalogue-[0-9a-f]{40}-[0-9a-f]{40}$"))) | sort_by(.createdAt) | reverse | .[0].tagName // ""')"
+          previous_tag="$(gh release list --exclude-drafts --limit 100 --json tagName,createdAt --jq 'map(select(.tagName | test("^catalogue-[0-9a-f]{40}-[0-9a-f]{40}$"))) | sort_by(.createdAt) | reverse | .[0].tagName // ""')"
           if [[ -n "$previous_tag" ]]; then
             mkdir -p "$RUNNER_TEMP/previous-catalogue-release"
             gh release download "$previous_tag" --pattern catalogue-release.json --dir "$RUNNER_TEMP/previous-catalogue-release"
@@ -264,27 +264,27 @@ jobs:
           set -euo pipefail
           branch="codex/catalogue-${PRODUCER_REVISION}"
           existing_pr="$(gh pr list --state open --head "$branch" --json url --jq '.[0].url // ""')"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            git fetch origin "$branch:refs/remotes/origin/$branch"
+            if ! git diff --quiet "origin/${branch}" -- catalogue.lock.json vendor/snoredex-data/collector_catalogue.json vendor/snoredex-data/collector_migrations.json; then
+              echo "CATALOGUE_UPDATE_BRANCH_CONFLICT"
+              exit 1
+            fi
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git switch -c "$branch"
+            git add catalogue.lock.json vendor/snoredex-data/collector_catalogue.json vendor/snoredex-data/collector_migrations.json
+            git diff --cached --check
+            git commit -m "data: adopt producer catalogue ${PRODUCER_REVISION:0:12}"
+            git push origin "$branch"
+          fi
+          branch_head="$(git ls-remote origin "refs/heads/${branch}" | cut -f1)"
+          ci_state="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=${branch}&event=workflow_dispatch&per_page=100" --jq "[.workflow_runs[] | select(.head_sha == \"${branch_head}\")][0] | if .status == \"completed\" then .conclusion else .status end // \"\"")"
+          if [[ ! "$ci_state" =~ ^(success|queued|in_progress|waiting|pending)$ ]]; then
+            gh workflow run ci.yml --ref "$branch"
+          fi
           if [[ -z "$existing_pr" ]]; then
-            if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
-              git fetch origin "$branch:refs/remotes/origin/$branch"
-              if ! git diff --quiet "origin/${branch}" -- catalogue.lock.json vendor/snoredex-data/collector_catalogue.json vendor/snoredex-data/collector_migrations.json; then
-                echo "CATALOGUE_UPDATE_BRANCH_CONFLICT"
-                exit 1
-              fi
-            else
-              git config user.name "github-actions[bot]"
-              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-              git switch -c "$branch"
-              git add catalogue.lock.json vendor/snoredex-data/collector_catalogue.json vendor/snoredex-data/collector_migrations.json
-              git diff --cached --check
-              git commit -m "data: adopt producer catalogue ${PRODUCER_REVISION:0:12}"
-              git push origin "$branch"
-            fi
-            branch_head="$(git ls-remote origin "refs/heads/${branch}" | cut -f1)"
-            ci_state="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=${branch}&event=workflow_dispatch&per_page=100" --jq "[.workflow_runs[] | select(.head_sha == \"${branch_head}\")][0] | if .status == \"completed\" then .conclusion else .status end // \"\"")"
-            if [[ ! "$ci_state" =~ ^(success|queued|in_progress|waiting|pending)$ ]]; then
-              gh workflow run ci.yml --ref "$branch"
-            fi
             set +e
             existing_pr="$(gh pr create --base main --head "$branch" --title "[P4] Adopt catalogue ${PRODUCER_REVISION:0:12}" --body "Issue-backed catalogue update for #29 from m4s-ai/snoredex-data@${PRODUCER_REVISION}. Source bytes and compatibility evidence are published in the catalogue release; this PR does not close #29 before deploy and rollback verification." 2>/dev/null)"
             pr_status=$?
