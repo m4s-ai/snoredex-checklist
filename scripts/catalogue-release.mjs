@@ -181,6 +181,7 @@ export function createCatalogueReleaseManifest({
   const changed = previousRelease === undefined || !sameAssets(assets, previousRelease.assets);
   const compatibilityChanged =
     previousRelease === undefined ||
+    previousRelease.consumerRevision !== consumerRevision ||
     previousRelease.compatibility.status !== compatibilityStatus ||
     previousRelease.compatibility.code !== compatibilityCode;
   const adoptionNeeded =

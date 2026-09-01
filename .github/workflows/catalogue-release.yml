@@ -242,6 +242,11 @@ jobs:
         run: |
           set -euo pipefail
           tag="catalogue-${PRODUCER_REVISION}-${GITHUB_SHA}-${COMPATIBILITY_CODE}"
+          draft_id="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" --jq ".[] | select(.draft and .tag_name == \"${tag}\") | .id" | sed -n '1p')"
+          if [[ -n "$draft_id" ]]; then
+            echo "::notice::Removing failed draft ${draft_id} before retrying ${tag}."
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${draft_id}"
+          fi
           release_args=(create "$tag" --target "${GITHUB_SHA}" --title "Catalogue ${PRODUCER_REVISION:0:12} / Checklist ${GITHUB_SHA:0:12}" --notes "Producer ${PRODUCER_REVISION}; Checklist ${GITHUB_SHA}; ${COMPATIBILITY_CODE}. See ${CHECKLIST_ISSUE}.")
           if [[ "$COMPATIBILITY_STATUS" == "blocked" ]]; then
             release_args+=(--prerelease)

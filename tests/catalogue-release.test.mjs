@@ -77,14 +77,23 @@ test('publishes changed compatibility evidence for unchanged producer assets', (
   assert.equal(ready.changeStatus, 'unchanged');
   assert.equal(ready.publicationStatus, 'changed');
 
-  const repeated = createCatalogueReleaseManifest({
+  const retried = createCatalogueReleaseManifest({
+    ...input(),
+    consumerRevision: '2222222222222222222222222222222222222222',
+    previousRelease: ready,
+    compatibilityStatus: 'ready',
+    compatibilityCode: 'CATALOGUE_UPDATE_READY',
+  });
+  assert.equal(retried.publicationStatus, 'unchanged');
+
+  const newerConsumer = createCatalogueReleaseManifest({
     ...input(),
     consumerRevision: '3333333333333333333333333333333333333333',
     previousRelease: ready,
     compatibilityStatus: 'ready',
     compatibilityCode: 'CATALOGUE_UPDATE_READY',
   });
-  assert.equal(repeated.publicationStatus, 'unchanged');
+  assert.equal(newerConsumer.publicationStatus, 'changed');
 });
 
 test('rejects catalogue bytes whose semantic fingerprint is not sealed', () => {
@@ -147,6 +156,8 @@ test('workflow gates exact producer bytes, skips duplicate releases and preserve
   assert.match(workflow, /CATALOGUE_UPDATE_BLOCKED_CURRENT_DEPLOYMENT/u);
   assert.match(workflow, /gh release list --exclude-drafts/u);
   assert.match(workflow, /tag="catalogue-\$\{PRODUCER_REVISION\}-\$\{GITHUB_SHA\}-\$\{COMPATIBILITY_CODE\}"/u);
+  assert.match(workflow, /select\(\.draft and \.tag_name ==/u);
+  assert.match(workflow, /gh api --method DELETE "repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{draft_id\}"/u);
   assert.match(workflow, /gh workflow run ci\.yml --ref "\$branch"/u);
   assert.match(workflow, /event=workflow_dispatch/u);
   assert.match(workflow, /existing_pr=.*\n          if git ls-remote/u);

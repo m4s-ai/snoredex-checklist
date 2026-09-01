@@ -127,7 +127,8 @@ producer bytes later become compatible with a newer Checklist revision or after 
 blocker, the new evidence gets its own immutable release instead of rewriting the earlier blocked
 record.
 Release immutability is enabled for the repository, so published catalogue tags and assets cannot
-be replaced; the manifest also records the SHA-256 and byte length of every asset.
+be replaced; the manifest also records the SHA-256 and byte length of every asset. An interrupted
+publication's exact-tag draft is removed and deterministically recreated on retry.
 
 The protected Pages workflow dispatches this intake independently after reserving the deployment
 lane. Mutable producer availability or a pending producer gate therefore cannot block deployment of
