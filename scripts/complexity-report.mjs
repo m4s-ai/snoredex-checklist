@@ -1428,7 +1428,7 @@ function hasTopLevelCommaBetween(tokens, start, end) {
     else if (kind === SyntaxKind.LessThanToken) {
       const close = matchingAngleClose(tokens, cursor);
       const qualifiedType =
-        (identifierLike(tokens[cursor - 1]) || tokens[cursor - 1]?.kind === SyntaxKind.DefaultKeyword) &&
+        (identifierLike(tokens[cursor - 1]) || isKeywordToken(tokens[cursor - 1])) &&
         (() => {
           let context = cursor - 2;
           while (
@@ -3207,6 +3207,11 @@ if (process.argv.includes('--self-test')) {
       source:
         "function importDefaultGenericAssertion() { return value as keyof import('./m').default<A, B> extends U ? A : B; }",
       expected: [{ name: 'importDefaultGenericAssertion', complexity: 1 }],
+    },
+    {
+      source:
+        "function importClassGenericAssertion() { return value as keyof import('./m').class<A, B> extends U ? A : B; }",
+      expected: [{ name: 'importClassGenericAssertion', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
