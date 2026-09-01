@@ -37,6 +37,9 @@
 * {
   box-sizing: border-box;
 }
+[hidden] {
+  display: none !important;
+}
 html {
   min-width: 320px;
   background: var(--page);
@@ -495,6 +498,9 @@ select {
 .quantity-controls input {
   width: 100%;
   max-width: 100%;
+}
+.quantity-controls input[aria-invalid='true'] {
+  border-color: var(--danger);
 }
 .note-control {
   display: grid;

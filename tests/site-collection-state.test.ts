@@ -1,221 +1,276 @@
-import assert from "node:assert/strict";
-import test from "node:test";
-import { BrowserCollectionStateController } from "../src/site/collection-state.ts";
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { applyNoteEdit, applyQuantityEdit, applyStatusCommand } from '../src/state/domain.ts';
+import { BrowserCollectionStateController, type PrivateItemState } from '../src/site/collection-state.ts';
 
-const FINGERPRINT = `sha256:${"a".repeat(64)}`;
+const FINGERPRINT = `sha256:${'a'.repeat(64)}`;
+const ITEM_A = 'item-00000000-0000-0000-0000-00000000000a';
+const ITEM_B = 'item-00000000-0000-0000-0000-00000000000b';
+
+type SaveOutcome =
+  | { readonly ok: true; readonly value: { readonly skipped?: boolean } }
+  | { readonly ok: false; readonly error: string };
 
 function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => { resolve = next; });
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
   return { promise, resolve };
 }
 
 type Store = ConstructorParameters<typeof BrowserCollectionStateController>[0];
 type Domain = ConstructorParameters<typeof BrowserCollectionStateController>[1];
-type SaveOutcome = { readonly ok: true; readonly value: { readonly skipped?: boolean } } | { readonly ok: false; readonly error: string };
-type DeferredSave = ReturnType<typeof deferred<SaveOutcome>>;
-type ScheduleOutcome = { readonly ok: true; readonly value: undefined } | { readonly ok: false; readonly error: string };
 
-function makeController(
-  saves: DeferredSave[],
-  noteFlushes: DeferredSave[] = [],
-  scheduleNoteError?: string,
-  scheduleNoteOutcomes: ScheduleOutcome[] = [],
-  scheduleFlushes: boolean[] = [],
-  pendingNote = false,
-): BrowserCollectionStateController {
+interface Harness {
+  readonly controller: BrowserCollectionStateController;
+  readonly immediateSaves: Array<ReturnType<typeof deferred<SaveOutcome>>>;
+  readonly noteSaves: Array<ReturnType<typeof deferred<SaveOutcome>>>;
+  readonly submittedStates: Array<readonly PrivateItemState[]>;
+}
+
+function makeHarness(options?: {
+  readonly active?: readonly PrivateItemState[];
+  readonly scheduleResults?: Array<{ readonly ok: boolean; readonly error?: string }>;
+}): Harness {
+  const immediateSaves: Array<ReturnType<typeof deferred<SaveOutcome>>> = [];
+  const noteSaves: Array<ReturnType<typeof deferred<SaveOutcome>>> = [];
+  const submittedStates: Array<readonly PrivateItemState[]> = [];
+  let pendingNote = false;
+  const scheduleResults = [...(options?.scheduleResults ?? [])];
   const store = {
     read: () => ({ ok: true, value: undefined }),
     unsaved: () => undefined,
     adoptUnsavedDraft: () => ({ ok: true, value: undefined }),
     discardUnsavedDraft: () => undefined,
     hasPendingNote: () => pendingNote,
-    saveImmediate: () => {
+    saveImmediate: (state: { readonly items: readonly PrivateItemState[] }) => {
+      pendingNote = false;
+      submittedStates.push(state.items);
       const save = deferred<SaveOutcome>();
-      saves.push(save);
+      immediateSaves.push(save);
       return save.promise;
     },
-    scheduleNoteSave: (_state: unknown, scheduleFlush = true) => {
-      scheduleFlushes.push(scheduleFlush);
-      return scheduleNoteOutcomes.shift() ?? (scheduleNoteError === undefined
-        ? { ok: true, value: undefined }
-        : { ok: false, error: scheduleNoteError });
+    scheduleNoteSave: (state: { readonly items: readonly PrivateItemState[] }) => {
+      pendingNote = true;
+      submittedStates.push(state.items);
+      const result = scheduleResults.shift();
+      return result?.ok === false
+        ? { ok: false, error: result.error ?? 'STORAGE_WRITE_FAILED' }
+        : { ok: true, value: undefined };
     },
-    flushNote: () => noteFlushes.shift()?.promise ?? Promise.resolve({ ok: true, value: {} }),
+    flushNote: () => {
+      pendingNote = false;
+      const save = deferred<SaveOutcome>();
+      noteSaves.push(save);
+      return save.promise;
+    },
   } as Store;
-  const domain = {
-    applyStatusCommand: (itemId: string, _current: unknown, status: string) => ({
-      ok: true,
-      value: { itemId, status, quantityOwned: 0, quantityOrdered: 0 },
-    }),
-    applyQuantityEdit: () => ({ ok: true, value: undefined }),
-    applyNoteEdit: () => ({ ok: true, value: undefined }),
-  } as Domain;
-  return new BrowserCollectionStateController(store, domain, 1_000, FINGERPRINT, undefined);
+  const active =
+    options?.active === undefined
+      ? undefined
+      : {
+          schema: 'snoredex-collection-state' as const,
+          schemaVersion: '1.0.0' as const,
+          datasetId: 'snoredex-data/snorlax-current-known' as const,
+          catalogueFingerprint: FINGERPRINT,
+          items: options.active,
+        };
+  const controller = new BrowserCollectionStateController(
+    store,
+    { applyStatusCommand, applyQuantityEdit, applyNoteEdit } as Domain,
+    1_000,
+    FINGERPRINT,
+    active,
+  );
+  return { controller, immediateSaves, noteSaves, submittedStates };
 }
 
-test("settles superseded immediate edits with the encompassing save", async () => {
-  const saves: Array<ReturnType<typeof deferred<SaveOutcome>>> = [];
-  const controller = makeController(saves);
-  const events: string[] = [];
-  controller.onSave((itemId, result) => events.push(`${itemId}:${result.ok ? (result.skipped ? "skipped" : "saved") : "failed"}`));
+const saved: SaveOutcome = { ok: true, value: {} };
 
-  const first = controller.setStatus("item-a", "have");
-  const second = controller.setStatus("item-b", "have");
-  saves[1].resolve({ ok: true, value: {} });
-  await Promise.resolve();
-  assert.deepEqual(events, ["item-a:saved", "item-b:saved"]);
-  saves[0].resolve({ ok: true, value: { skipped: true } });
-  const [firstResult, secondResult] = await Promise.all([first, second]);
-  assert.deepEqual(firstResult, { ok: true, skipped: true, deferred: true });
-  assert.deepEqual(secondResult, { ok: true, skipped: undefined });
-  assert.deepEqual(events, ["item-a:saved", "item-b:saved"]);
+test('keeps quantity validation as a field draft transition matrix', () => {
+  const { controller } = makeHarness();
+  const cases = [
+    { owned: '', ordered: '0', invalid: ['owned'] },
+    { owned: '-1', ordered: '0', invalid: ['owned'] },
+    { owned: '0', ordered: '10000', invalid: ['ordered'] },
+    { owned: '1.5', ordered: '0', invalid: ['owned'] },
+    { owned: '9999', ordered: '0', invalid: [] },
+  ] as const;
+
+  for (const entry of cases) {
+    controller.setQuantityDraft(ITEM_A, entry.owned, entry.ordered);
+    const snapshot = controller.item(ITEM_A);
+    assert.equal(snapshot.quantityOwned, entry.owned);
+    assert.equal(snapshot.quantityOrdered, entry.ordered);
+    assert.deepEqual(snapshot.invalidQuantityFields, entry.invalid);
+    assert.equal(snapshot.validationError, entry.invalid.length === 0 ? undefined : 'EDIT_INVALID_QUANTITY');
+    assert.equal(snapshot.save.phase, 'dirty');
+  }
 });
 
-test("retains failed immediate edit owners until a later save succeeds", async () => {
-  const saves: Array<ReturnType<typeof deferred<SaveOutcome>>> = [];
-  const controller = makeController(saves);
-  const events: string[] = [];
-  controller.onSave((itemId, result) => events.push(`${itemId}:${result.ok ? "saved" : "failed"}`));
+test('does not republish unchanged validation during blur', async () => {
+  const { controller } = makeHarness();
+  controller.setQuantityDraft(ITEM_A, '10000', '0');
+  let notifications = 0;
+  controller.onChange(() => notifications++);
 
-  const first = controller.setStatus("item-a", "have");
-  const second = controller.setStatus("item-b", "have");
-  saves[0].resolve({ ok: true, value: { skipped: true } });
-  saves[1].resolve({ ok: false, error: "STORAGE_COMMIT_UNCERTAIN" });
-  await Promise.all([first, second]);
-  assert.deepEqual(events, ["item-a:failed", "item-b:failed"]);
+  assert.deepEqual(await controller.commitQuantities(ITEM_A), { ok: false, error: 'EDIT_INVALID_QUANTITY' });
+  assert.equal(notifications, 0);
+});
 
-  const retry = controller.setStatus("item-a", "have");
-  saves[2].resolve({ ok: true, value: {} });
+test('moves a valid quantity through dirty, saving, and saved with a confirmed snapshot', async () => {
+  const { controller, immediateSaves } = makeHarness();
+  controller.setQuantityDraft(ITEM_A, '5', '0');
+  assert.equal(controller.item(ITEM_A).save.phase, 'dirty');
+
+  const commit = controller.commitQuantities(ITEM_A);
+  assert.equal(controller.item(ITEM_A).save.phase, 'saving');
+  immediateSaves[0].resolve(saved);
+  assert.deepEqual(await commit, { ok: true, skipped: undefined });
+
+  const snapshot = controller.item(ITEM_A);
+  assert.equal(snapshot.save.phase, 'saved');
+  assert.equal(snapshot.confirmed?.quantityOwned, 5);
+  assert.equal(snapshot.confirmed?.status, 'have');
+  assert.equal(controller.state.statuses.get(ITEM_A), 'have');
+});
+
+test('keeps an invalid quantity visible while an independent status save succeeds', async () => {
+  const { controller, immediateSaves } = makeHarness();
+  controller.setQuantityDraft(ITEM_A, '1123123123', '0');
+
+  const status = controller.setStatus(ITEM_A, 'have');
+  immediateSaves[0].resolve(saved);
+  await status;
+
+  const snapshot = controller.item(ITEM_A);
+  assert.equal(snapshot.quantityOwned, '1123123123');
+  assert.equal(snapshot.validationError, 'EDIT_INVALID_QUANTITY');
+  assert.equal(snapshot.status, 'have');
+  assert.equal(snapshot.confirmed?.status, 'have');
+  assert.equal(snapshot.confirmed?.quantityOwned, 1);
+  assert.equal(snapshot.save.phase, 'dirty');
+});
+
+test('preserves a failed draft and retries the current complete state', async () => {
+  const { controller, immediateSaves, submittedStates } = makeHarness();
+  const first = controller.setStatus(ITEM_A, 'have');
+  immediateSaves[0].resolve({ ok: false, error: 'STORAGE_WRITE_FAILED' });
+  await first;
+
+  assert.equal(controller.item(ITEM_A).save.phase, 'failed');
+  assert.equal(controller.item(ITEM_A).confirmed, undefined);
+  const retry = controller.retry(ITEM_A);
+  assert.equal(controller.item(ITEM_A).save.phase, 'saving');
+  immediateSaves[1].resolve(saved);
   await retry;
-  assert.deepEqual(events, ["item-a:failed", "item-b:failed", "item-a:saved", "item-b:saved"]);
+
+  assert.equal(controller.item(ITEM_A).save.phase, 'saved');
+  assert.equal(controller.item(ITEM_A).confirmed?.status, 'have');
+  assert.equal(submittedStates.at(-1)?.find((record) => record.itemId === ITEM_A)?.status, 'have');
 });
 
-test("settles failed immediate owners after a successful note save", async () => {
-  const saves: DeferredSave[] = [];
-  const controller = makeController(saves);
-  const events: string[] = [];
-  controller.onSave((itemId, result) => events.push(`${itemId}:${result.ok ? "saved" : "failed"}`));
+test('rejects stale completion after a newer revision settles', async () => {
+  const { controller, immediateSaves } = makeHarness();
+  const older = controller.setStatus(ITEM_A, 'have');
+  const newer = controller.setStatus(ITEM_A, 'skip');
 
-  const first = controller.setStatus("item-a", "have");
-  const second = controller.setStatus("item-b", "have");
-  saves[0].resolve({ ok: true, value: { skipped: true } });
-  saves[1].resolve({ ok: false, error: "STORAGE_COMMIT_UNCERTAIN" });
-  await Promise.all([first, second]);
-  assert.deepEqual(events, ["item-a:failed", "item-b:failed"]);
+  immediateSaves[1].resolve(saved);
+  await newer;
+  immediateSaves[0].resolve({ ok: false, error: 'STORAGE_WRITE_FAILED' });
+  await older;
 
-  controller.scheduleNote("item-c", "note");
-  await controller.flushNote();
-  assert.deepEqual(events, ["item-a:failed", "item-b:failed", "item-a:saved", "item-b:saved", "item-c:saved"]);
+  const snapshot = controller.item(ITEM_A);
+  assert.equal(snapshot.status, 'skip');
+  assert.equal(snapshot.confirmed?.status, 'skip');
+  assert.equal(snapshot.save.phase, 'saved');
+  assert.equal(snapshot.save.error, undefined);
 });
 
-test("retains a failed note owner through a later immediate save", async () => {
-  const saves: DeferredSave[] = [];
-  const noteFlush = deferred<SaveOutcome>();
-  const noteFlushes = [noteFlush];
-  const controller = makeController(saves, noteFlushes);
-  const events: string[] = [];
-  controller.onSave((itemId, result) => events.push(`${itemId}:${result.ok ? "saved" : "failed"}`));
+test('lets one encompassing save settle failed owners across cards', async () => {
+  const { controller, immediateSaves } = makeHarness();
+  const first = controller.setStatus(ITEM_A, 'have');
+  immediateSaves[0].resolve({ ok: false, error: 'STORAGE_WRITE_FAILED' });
+  await first;
+  assert.equal(controller.item(ITEM_A).save.phase, 'failed');
 
-  controller.scheduleNote("item-a", "note");
-  const note = controller.flushNote();
-  noteFlush.resolve({ ok: false, error: "STORAGE_WRITE_FAILED" });
-  await note;
-  assert.deepEqual(events, ["item-a:failed"]);
+  const second = controller.setStatus(ITEM_B, 'ordered');
+  immediateSaves[1].resolve(saved);
+  await second;
 
-  const status = controller.setStatus("item-b", "have");
-  saves[0].resolve({ ok: true, value: {} });
-  await status;
-  assert.deepEqual(events, ["item-a:failed", "item-a:saved", "item-b:saved"]);
+  assert.equal(controller.item(ITEM_A).save.phase, 'saved');
+  assert.equal(controller.item(ITEM_A).confirmed?.status, 'have');
+  assert.equal(controller.item(ITEM_B).confirmed?.status, 'ordered');
 });
 
-test("retains a note owner when scheduling the durable draft fails", async () => {
-  const saves: DeferredSave[] = [];
-  const controller = makeController(saves, [], "STORAGE_WRITE_FAILED");
-  const events: string[] = [];
-  controller.onSave((itemId, result) => events.push(`${itemId}:${result.ok ? "saved" : "failed"}`));
+test('keeps a note failure recoverable while quantity validation changes', async () => {
+  const { controller, immediateSaves, noteSaves } = makeHarness();
+  assert.deepEqual(controller.scheduleNote(ITEM_A, 'private note'), { ok: true });
+  const flush = controller.flushNote();
+  noteSaves[0].resolve({ ok: false, error: 'STORAGE_WRITE_FAILED' });
+  await flush;
+  controller.setQuantityDraft(ITEM_A, '10000', '0');
 
-  assert.deepEqual(controller.scheduleNote("item-a", "note"), { ok: false, error: "STORAGE_WRITE_FAILED" });
-  assert.deepEqual(events, ["item-a:failed"]);
+  let snapshot = controller.item(ITEM_A);
+  assert.equal(snapshot.validationError, 'EDIT_INVALID_QUANTITY');
+  assert.equal(snapshot.save.phase, 'failed');
+  assert.equal(snapshot.save.retryable, true);
 
-  const status = controller.setStatus("item-b", "have");
-  saves[0].resolve({ ok: true, value: {} });
-  await status;
-  assert.deepEqual(events, ["item-a:failed", "item-a:saved", "item-b:saved"]);
-  await controller.flushNote();
+  const retry = controller.retry(ITEM_A);
+  immediateSaves[0].resolve(saved);
+  await retry;
+  snapshot = controller.item(ITEM_A);
+  assert.equal(snapshot.validationError, 'EDIT_INVALID_QUANTITY');
+  assert.equal(snapshot.save.error, undefined);
+  assert.equal(snapshot.confirmed?.note, 'private note');
 });
 
-test("settles superseded note owners after a later note save succeeds", async () => {
-  const firstFlush = deferred<SaveOutcome>();
-  const secondFlush = deferred<SaveOutcome>();
-  const controller = makeController(
-    [],
-    [firstFlush, secondFlush],
-    undefined,
-    [{ ok: true, value: undefined }, { ok: false, error: "STORAGE_WRITE_FAILED" }],
-  );
-  const events: string[] = [];
-  controller.onSave((itemId, result) => events.push(`${itemId}:${result.ok ? "saved" : "failed"}`));
+test('lets a later complete save recover a synchronous note-draft failure', async () => {
+  const { controller, immediateSaves } = makeHarness({
+    scheduleResults: [{ ok: false, error: 'STORAGE_WRITE_FAILED' }],
+  });
+  assert.deepEqual(controller.scheduleNote(ITEM_A, 'private note'), {
+    ok: false,
+    error: 'STORAGE_WRITE_FAILED',
+  });
+  assert.equal(controller.item(ITEM_A).save.phase, 'failed');
 
-  assert.deepEqual(controller.scheduleNote("item-a", "first"), { ok: true });
-  assert.deepEqual(controller.scheduleNote("item-b", "second"), { ok: false, error: "STORAGE_WRITE_FAILED" });
-  assert.deepEqual(events, ["item-b:failed", "item-a:failed"]);
+  const save = controller.setStatus(ITEM_B, 'have');
+  immediateSaves[0].resolve(saved);
+  await save;
 
-  const failedFlush = controller.flushNote();
-  firstFlush.resolve({ ok: false, error: "STORAGE_WRITE_FAILED" });
-  await failedFlush;
-  assert.deepEqual(events, ["item-b:failed", "item-a:failed", "item-a:failed", "item-b:failed"]);
-
-  const successfulFlush = controller.flushNote();
-  secondFlush.resolve({ ok: true, value: {} });
-  await successfulFlush;
-  assert.deepEqual(events, [
-    "item-b:failed",
-    "item-a:failed",
-    "item-a:failed",
-    "item-b:failed",
-    "item-a:saved",
-    "item-b:saved",
-  ]);
+  assert.equal(controller.item(ITEM_A).save.phase, 'saved');
+  assert.equal(controller.item(ITEM_A).confirmed?.note, 'private note');
 });
 
-test("lets the controller own note autosave timing", async () => {
-  const scheduleFlushes: boolean[] = [];
-  const controller = makeController([], [], undefined, [], scheduleFlushes, true);
-
-  assert.deepEqual(controller.scheduleNote("item-a", "note"), { ok: true });
-  await controller.flushNote();
-  assert.deepEqual(scheduleFlushes, [false]);
-});
-
-test("coalesces blur and timer note flushes while one save is in flight", async () => {
-  const noteFlush = deferred<SaveOutcome>();
-  const controller = makeController([], [noteFlush], undefined, [], [], true);
-
-  assert.deepEqual(controller.scheduleNote("item-a", "note"), { ok: true });
-  const timerFlush = controller.flushNote();
-  const blurFlush = controller.flushNote();
-  assert.strictEqual(blurFlush, timerFlush);
-
-  noteFlush.resolve({ ok: true, value: {} });
-  assert.deepEqual(await blurFlush, { ok: true, skipped: undefined });
-});
-
-test("flushes a newer note generation after an older flush is in flight", async () => {
-  const firstFlush = deferred<SaveOutcome>();
-  const secondFlush = deferred<SaveOutcome>();
-  const controller = makeController([], [firstFlush, secondFlush], undefined, [], [], true);
-
-  assert.deepEqual(controller.scheduleNote("item-a", "first"), { ok: true });
+test('does not resurrect an older note failure after a newer note succeeds', async () => {
+  const { controller, noteSaves } = makeHarness();
+  controller.scheduleNote(ITEM_A, 'first');
   const first = controller.flushNote();
-  assert.deepEqual(controller.scheduleNote("item-a", "second"), { ok: true });
+  controller.scheduleNote(ITEM_A, 'second');
   const second = controller.flushNote();
-  assert.notStrictEqual(second, first);
 
-  firstFlush.resolve({ ok: true, value: { skipped: true } });
-  await Promise.resolve();
-  secondFlush.resolve({ ok: true, value: {} });
+  noteSaves[1].resolve(saved);
+  await second;
+  noteSaves[0].resolve({ ok: false, error: 'STORAGE_WRITE_FAILED' });
+  await first;
 
-  assert.deepEqual(await first, { ok: true, skipped: true });
-  assert.deepEqual(await second, { ok: true, skipped: undefined });
+  const snapshot = controller.item(ITEM_A);
+  assert.equal(snapshot.note, 'second');
+  assert.equal(snapshot.confirmed?.note, 'second');
+  assert.equal(snapshot.save.phase, 'saved');
+});
+
+test('treats commit uncertainty as reload-only recovery', async () => {
+  const { controller, immediateSaves } = makeHarness();
+  const save = controller.setStatus(ITEM_A, 'have');
+  immediateSaves[0].resolve({ ok: false, error: 'STORAGE_COMMIT_UNCERTAIN' });
+  await save;
+
+  const snapshot = controller.item(ITEM_A);
+  assert.equal(snapshot.save.phase, 'conflict');
+  assert.equal(snapshot.save.retryable, false);
+  assert.deepEqual(await controller.retry(ITEM_A), { ok: false, error: 'STORAGE_COMMIT_UNCERTAIN' });
+  assert.equal(immediateSaves.length, 1);
 });

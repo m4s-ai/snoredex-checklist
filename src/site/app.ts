@@ -709,50 +709,14 @@ function renderCollectionControls(
   controller: CollectionStateController,
   registerCleanup?: (cleanup: Cleanup) => void,
 ): HTMLElement {
-  const record = controller.record(item.itemId);
   const wrapper = text('div', undefined, 'collection-controls');
   const feedback = text('span', undefined, 'state-feedback');
+  feedback.id = `state-feedback-${item.itemId}`;
   feedback.setAttribute('role', 'status');
   feedback.setAttribute('aria-live', 'polite');
   const retry = text('button', 'Retry save', 'state-retry') as HTMLButtonElement;
   retry.type = 'button';
   retry.hidden = true;
-  let retryAction: (() => Promise<CollectionEditResult>) | undefined;
-  const showResult = (result: CollectionEditResult): void => {
-    if (result.deferred) return;
-    retry.textContent = 'Retry save';
-    if (result.ok && !result.skipped) {
-      feedback.textContent = 'Saved';
-      retry.hidden = true;
-    } else if (result.ok) {
-      feedback.textContent = 'Saving…';
-      retry.hidden = true;
-    } else if (result.error === 'STORAGE_COMMIT_UNCERTAIN') {
-      feedback.textContent = 'Save conflict detected. Reload to reconcile your collection.';
-      retry.textContent = 'Reload to recover';
-      retryAction = () => {
-        globalThis.location?.reload();
-        return Promise.resolve({ ok: true, skipped: true });
-      };
-      retry.hidden = false;
-    } else {
-      feedback.textContent = 'Save failed. Your draft is still visible; retry when ready.';
-      retry.hidden = false;
-    }
-  };
-  const runSave = (action: () => Promise<CollectionEditResult>): void => {
-    retryAction = action;
-    retry.hidden = true;
-    feedback.textContent = 'Saving…';
-    void action().then(showResult);
-  };
-  retry.addEventListener('click', () => {
-    if (retryAction !== undefined) runSave(retryAction);
-  });
-  const stopSaveListener = controller.onSave((itemId, result) => {
-    if (itemId === item.itemId) showResult(result);
-  });
-  registerCleanup?.(stopSaveListener);
 
   const fieldset = text('fieldset', undefined, 'status-controls') as HTMLFieldSetElement;
   fieldset.append(text('legend', 'Collection status'));
@@ -764,10 +728,9 @@ function renderCollectionControls(
     input.type = 'radio';
     input.name = statusName;
     input.value = value;
-    input.checked = (record?.status ?? 'need') === value;
     statusInputs.set(value, input);
     input.addEventListener('change', () => {
-      runSave(() => controller.setStatus(item.itemId, value));
+      void controller.setStatus(item.itemId, value);
     });
     labelElement.append(input, text('span', label));
     fieldset.append(labelElement);
@@ -781,8 +744,9 @@ function renderCollectionControls(
   owned.min = '0';
   owned.max = '9999';
   owned.step = '1';
-  owned.value = String(record?.quantityOwned ?? 0);
+  owned.required = true;
   owned.setAttribute('inputmode', 'numeric');
+  owned.setAttribute('aria-describedby', feedback.id);
   ownedLabel.append(owned);
   const orderedLabel = text('label', 'Ordered');
   const ordered = document.createElement('input');
@@ -790,35 +754,29 @@ function renderCollectionControls(
   ordered.min = '0';
   ordered.max = '9999';
   ordered.step = '1';
-  ordered.value = String(record?.quantityOrdered ?? 0);
+  ordered.required = true;
   ordered.setAttribute('inputmode', 'numeric');
+  ordered.setAttribute('aria-describedby', feedback.id);
   orderedLabel.append(ordered);
-  const stopChangeListener = controller.onChange(() => {
-    const latest = controller.record(item.itemId);
-    const latestStatus = latest?.status ?? 'need';
-    for (const [value, input] of statusInputs) input.checked = value === latestStatus;
-    if (document.activeElement !== owned) owned.value = String(latest?.quantityOwned ?? 0);
-    if (document.activeElement !== ordered) ordered.value = String(latest?.quantityOrdered ?? 0);
-  });
-  registerCleanup?.(stopChangeListener);
-  const saveQuantities = (): void => {
-    runSave(() => controller.setQuantities(item.itemId, Number(owned.value), Number(ordered.value)));
+  const updateQuantityDraft = (): void => {
+    controller.setQuantityDraft(item.itemId, owned.value, ordered.value);
   };
-  owned.addEventListener('change', saveQuantities);
-  ordered.addEventListener('change', saveQuantities);
+  owned.addEventListener('input', updateQuantityDraft);
+  ordered.addEventListener('input', updateQuantityDraft);
+  owned.addEventListener('change', () => void controller.commitQuantities(item.itemId));
+  ordered.addEventListener('change', () => void controller.commitQuantities(item.itemId));
   quantity.append(quantityHeading, ownedLabel, orderedLabel);
 
   const note = text('div', undefined, 'note-control');
   const noteButton = text('button', 'Add note') as HTMLButtonElement;
   noteButton.type = 'button';
-  noteButton.hidden = record?.note !== undefined;
   const textarea = document.createElement('textarea');
   textarea.rows = 3;
   textarea.placeholder = 'Private note';
-  textarea.value = record?.note ?? '';
-  textarea.hidden = record?.note === undefined;
   textarea.setAttribute('aria-label', `Private note for ${itemCardLabel(item)}`);
+  let noteOpened = controller.item(item.itemId).note !== undefined;
   const openNote = (): void => {
+    noteOpened = true;
     textarea.hidden = false;
     noteButton.hidden = true;
     textarea.focus();
@@ -827,17 +785,54 @@ function renderCollectionControls(
   textarea.addEventListener('input', () => {
     const codePoints = [...textarea.value];
     if (codePoints.length > MAX_NOTE_CODE_POINTS) textarea.value = codePoints.slice(0, MAX_NOTE_CODE_POINTS).join('');
-    retryAction = () => controller.flushNote();
-    retry.hidden = true;
-    const scheduled = controller.scheduleNote(item.itemId, textarea.value);
-    if (!scheduled.ok) showResult(scheduled);
-    else feedback.textContent = 'Saving…';
+    controller.scheduleNote(item.itemId, textarea.value);
   });
   textarea.addEventListener('focusout', () => {
     void controller.flushNote();
   });
+
+  const renderSnapshot = (): void => {
+    const snapshot = controller.item(item.itemId);
+    for (const [value, input] of statusInputs) input.checked = value === snapshot.status;
+    if (owned.value !== snapshot.quantityOwned) owned.value = snapshot.quantityOwned;
+    if (ordered.value !== snapshot.quantityOrdered) ordered.value = snapshot.quantityOrdered;
+    if (textarea.value !== (snapshot.note ?? '')) textarea.value = snapshot.note ?? '';
+    if (snapshot.note !== undefined) noteOpened = true;
+    textarea.hidden = !noteOpened;
+    noteButton.hidden = noteOpened;
+    const ownedInvalid = snapshot.invalidQuantityFields.includes('owned');
+    const orderedInvalid = snapshot.invalidQuantityFields.includes('ordered');
+    if (ownedInvalid) owned.setAttribute('aria-invalid', 'true');
+    else owned.removeAttribute('aria-invalid');
+    if (orderedInvalid) ordered.setAttribute('aria-invalid', 'true');
+    else ordered.removeAttribute('aria-invalid');
+    const messages: string[] = [];
+    if (snapshot.validationError !== undefined) {
+      messages.push(
+        'Quantity is invalid. Enter a whole number from 0 through 9999. This draft was not saved, and the previous collection value remains unchanged. Error code: EDIT_INVALID_QUANTITY',
+      );
+    }
+    if (snapshot.save.phase === 'saving') messages.push(snapshot.validationError ? 'Saving other changes…' : 'Saving…');
+    else if (snapshot.save.phase === 'saved' && snapshot.validationError === undefined) messages.push('Saved');
+    else if (snapshot.save.phase === 'failed')
+      messages.push('Save failed. Your draft is still visible; retry when ready.');
+    else if (snapshot.save.phase === 'conflict')
+      messages.push('Save conflict detected. Reload to reconcile your collection.');
+    feedback.textContent = messages.join(' ');
+    retry.textContent = snapshot.save.phase === 'conflict' ? 'Reload to recover' : 'Retry save';
+    retry.hidden = snapshot.save.phase !== 'failed' && snapshot.save.phase !== 'conflict';
+  };
+  retry.addEventListener('click', () => {
+    if (controller.item(item.itemId).save.phase === 'conflict') globalThis.location?.reload();
+    else void controller.retry(item.itemId);
+  });
+  const stopChangeListener = controller.onChange((changedItemId) => {
+    if (changedItemId === undefined || changedItemId === item.itemId) renderSnapshot();
+  });
+  registerCleanup?.(stopChangeListener);
   note.append(noteButton, textarea);
   wrapper.append(fieldset, quantity, note, feedback, retry);
+  renderSnapshot();
   return wrapper;
 }
 
@@ -1375,8 +1370,7 @@ function renderResults(
   if (criteria.status && stateController !== undefined) {
     let previousStatusKey = statusKey(stateController.state);
     let stopStatusListener: (() => void) | undefined;
-    stopStatusListener = stateController.onSave((_itemId, result) => {
-      if (!result.ok || result.skipped) return;
+    stopStatusListener = stateController.onChange(() => {
       const nextStatusKey = statusKey(stateController.state);
       if (nextStatusKey === previousStatusKey) return;
       previousStatusKey = nextStatusKey;
