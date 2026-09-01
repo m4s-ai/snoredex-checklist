@@ -721,6 +721,7 @@ function renderCollectionControls(
   let retryAction: (() => Promise<CollectionEditResult>) | undefined;
   let feedbackGeneration = 0;
   let pendingSaveCount = 0;
+  let pendingSaveFailure: CollectionEditResult | undefined;
   const showResult = (result: CollectionEditResult, generation = ++feedbackGeneration): void => {
     if (generation !== feedbackGeneration || result.deferred) return;
     retry.textContent = 'Retry save';
@@ -749,6 +750,7 @@ function renderCollectionControls(
     }
   };
   const runSave = (action: () => Promise<CollectionEditResult>): void => {
+    pendingSaveFailure = undefined;
     const generation = ++feedbackGeneration;
     pendingSaveCount += 1;
     retryAction = action;
@@ -827,7 +829,13 @@ function renderCollectionControls(
     return ownedIsValid && orderedIsValid;
   };
   const stopSaveListener = controller.onSave((itemId, result) => {
-    if (itemId === item.itemId && pendingSaveCount === 0 && quantitiesAreValid()) showResult(result);
+    if (itemId !== item.itemId || pendingSaveCount !== 0) return;
+    if (!quantitiesAreValid()) {
+      pendingSaveFailure = !result.ok && !result.deferred ? result : undefined;
+      return;
+    }
+    pendingSaveFailure = undefined;
+    showResult(result);
   });
   registerCleanup?.(stopSaveListener);
   const saveQuantities = (): void => {
@@ -837,8 +845,14 @@ function renderCollectionControls(
     }
     runSave(() => controller.setQuantities(item.itemId, Number(owned.value), Number(ordered.value)));
   };
-  owned.addEventListener('input', quantitiesAreValid);
-  ordered.addEventListener('input', quantitiesAreValid);
+  const revalidateQuantities = (): void => {
+    if (!quantitiesAreValid() || pendingSaveFailure === undefined) return;
+    const result = pendingSaveFailure;
+    pendingSaveFailure = undefined;
+    showResult(result);
+  };
+  owned.addEventListener('input', revalidateQuantities);
+  ordered.addEventListener('input', revalidateQuantities);
   owned.addEventListener('change', saveQuantities);
   ordered.addEventListener('change', saveQuantities);
   quantity.append(quantityHeading, ownedLabel, orderedLabel);
@@ -860,6 +874,7 @@ function renderCollectionControls(
   };
   noteButton.addEventListener('click', openNote);
   textarea.addEventListener('input', () => {
+    pendingSaveFailure = undefined;
     const generation = ++feedbackGeneration;
     const codePoints = [...textarea.value];
     if (codePoints.length > MAX_NOTE_CODE_POINTS) textarea.value = codePoints.slice(0, MAX_NOTE_CODE_POINTS).join('');

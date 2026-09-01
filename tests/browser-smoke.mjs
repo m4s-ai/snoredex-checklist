@@ -269,6 +269,7 @@ try {
         const privateNote = collectionControls.getByRole('textbox', { name: /^Private note for /u });
         const invalidQuantityMessage =
           'Quantity is invalid. Enter a whole number from 0 through 9999. This draft was not saved, and the previous collection value remains unchanged. Error code: EDIT_INVALID_QUANTITY';
+        const saveFailedMessage = 'Save failed. Your draft is still visible; retry when ready.';
         const beforeInvalidQuantity = await page.evaluate(() =>
           localStorage.getItem('snoredex-checklist.private-state'),
         );
@@ -315,6 +316,50 @@ try {
           invalidQuantityMessage,
           `${name}: invalid feedback survives older note save completion`,
         );
+        await page.evaluate(async (lockName) => {
+          let lockAcquired;
+          const acquired = new Promise((resolve) => {
+            lockAcquired = resolve;
+          });
+          void navigator.locks.request(lockName, async () => {
+            await new Promise((resolve) => {
+              globalThis.__snoredexReleaseFailedNoteLock = resolve;
+              lockAcquired();
+            });
+          });
+          await acquired;
+        }, PRIVATE_STATE_LOCK_NAME);
+        await page.evaluate(() => {
+          const setItem = Storage.prototype.setItem;
+          Storage.prototype.setItem = function failNextStateWrite(key, value) {
+            if (key === 'snoredex-checklist.private-state') {
+              Storage.prototype.setItem = setItem;
+              globalThis.__snoredexFailedStateWrite = true;
+              throw new Error('synthetic state write failure');
+            }
+            return setItem.call(this, key, value);
+          };
+        });
+        await privateNote.fill('synthetic failed note save');
+        await ownedQuantity.fill('10000');
+        await ownedQuantity.blur();
+        await page.getByText(invalidQuantityMessage, { exact: true }).waitFor();
+        await page.evaluate(() => globalThis.__snoredexReleaseFailedNoteLock?.());
+        await page.waitForFunction(() => globalThis.__snoredexFailedStateWrite === true);
+        assert.equal(
+          await quantityFeedback.textContent(),
+          invalidQuantityMessage,
+          `${name}: quantity feedback remains primary while note save fails`,
+        );
+        await ownedQuantity.fill('1');
+        await page.getByText(saveFailedMessage, { exact: true }).waitFor();
+        assert.equal(
+          await collectionControls.getByRole('button', { name: 'Retry save' }).isVisible(),
+          true,
+          `${name}: failed note save becomes recoverable after quantity correction`,
+        );
+        await ownedQuantity.blur();
+        await page.getByText('Saved', { exact: true }).first().waitFor();
         await page.evaluate(async (lockName) => {
           let lockAcquired;
           const acquired = new Promise((resolve) => {
