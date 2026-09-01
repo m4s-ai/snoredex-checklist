@@ -242,10 +242,29 @@ jobs:
         run: |
           set -euo pipefail
           tag="catalogue-${PRODUCER_REVISION}-${GITHUB_SHA}-${COMPATIBILITY_CODE}"
-          draft_id="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" --jq ".[] | select(.draft and .tag_name == \"${tag}\") | .id" | sed -n '1p')"
-          if [[ -n "$draft_id" ]]; then
-            echo "::notice::Removing failed draft ${draft_id} before retrying ${tag}."
-            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${draft_id}"
+          release_record="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" --jq ".[] | select(.tag_name == \"${tag}\") | \"\(.id)\t\(.draft)\"" | sed -n '1p')"
+          if [[ -n "$release_record" ]]; then
+            IFS=$'\t' read -r release_id release_is_draft <<< "$release_record"
+            if [[ ! "$release_id" =~ ^[0-9]+$ || ! "$release_is_draft" =~ ^(true|false)$ ]]; then
+              echo "CATALOGUE_RELEASE_RECORD_INVALID"
+              exit 1
+            fi
+            if [[ "$release_is_draft" == "false" ]]; then
+              published="$RUNNER_TEMP/published-catalogue-release"
+              mkdir -p "$published"
+              gh release download "$tag" --pattern catalogue-release.json --dir "$published"
+              node --input-type=module <<'NODE'
+              import { readFile } from 'node:fs/promises';
+              import { assertCatalogueReleaseEvidenceMatches } from './scripts/catalogue-release.mjs';
+              const published = JSON.parse(await readFile(`${process.env.RUNNER_TEMP}/published-catalogue-release/catalogue-release.json`, 'utf8'));
+              const current = JSON.parse(await readFile(`${process.env.RUNNER_TEMP}/catalogue-release/catalogue-release.json`, 'utf8'));
+              assertCatalogueReleaseEvidenceMatches(published, current);
+              NODE
+              echo "::notice::Reusing immutable catalogue evidence ${tag}."
+              exit 0
+            fi
+            echo "::notice::Removing failed draft ${release_id} before retrying ${tag}."
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${release_id}"
           fi
           release_args=(create "$tag" --target "${GITHUB_SHA}" --title "Catalogue ${PRODUCER_REVISION:0:12} / Checklist ${GITHUB_SHA:0:12}" --notes "Producer ${PRODUCER_REVISION}; Checklist ${GITHUB_SHA}; ${COMPATIBILITY_CODE}. See ${CHECKLIST_ISSUE}.")
           if [[ "$COMPATIBILITY_STATUS" == "blocked" ]]; then
@@ -267,10 +286,15 @@ jobs:
           PRODUCER_REVISION: ${{ steps.producer.outputs.revision }}
         run: |
           set -euo pipefail
-          branch="codex/catalogue-${PRODUCER_REVISION}"
+          branch="codex/catalogue-${PRODUCER_REVISION}-${GITHUB_SHA}"
           existing_pr="$(gh pr list --state open --head "$branch" --json url --jq '.[0].url // ""')"
           if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
             git fetch origin "$branch:refs/remotes/origin/$branch"
+            branch_parent="$(git rev-parse "origin/${branch}^" 2>/dev/null || true)"
+            if [[ "$branch_parent" != "$GITHUB_SHA" ]] || ! git diff --quiet "$GITHUB_SHA" "origin/${branch}" -- . ':(exclude)catalogue.lock.json' ':(exclude)vendor/snoredex-data/collector_catalogue.json' ':(exclude)vendor/snoredex-data/collector_migrations.json'; then
+              echo "CATALOGUE_UPDATE_BRANCH_BASE_CONFLICT"
+              exit 1
+            fi
             if ! git diff --quiet "origin/${branch}" -- catalogue.lock.json vendor/snoredex-data/collector_catalogue.json vendor/snoredex-data/collector_migrations.json; then
               echo "CATALOGUE_UPDATE_BRANCH_CONFLICT"
               exit 1

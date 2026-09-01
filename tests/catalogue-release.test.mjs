@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { createCatalogueReleaseManifest } from '../scripts/catalogue-release.mjs';
+import {
+  assertCatalogueReleaseEvidenceMatches,
+  createCatalogueReleaseManifest,
+} from '../scripts/catalogue-release.mjs';
 import { semanticFingerprint } from '../src/catalogue/validate.ts';
 
 const catalogueBytes = await readFile('vendor/snoredex-data/collector_catalogue.json');
@@ -96,6 +99,32 @@ test('publishes changed compatibility evidence for unchanged producer assets', (
   assert.equal(newerConsumer.publicationStatus, 'changed');
 });
 
+test('reuses only matching immutable publication evidence', () => {
+  const published = createCatalogueReleaseManifest({
+    ...input(),
+    compatibilityStatus: 'ready',
+    compatibilityCode: 'CATALOGUE_UPDATE_READY',
+  });
+  const retried = {
+    ...structuredClone(published),
+    comparedTo: {
+      producerRevision: '2222222222222222222222222222222222222222',
+      consumerRevision: '3333333333333333333333333333333333333333',
+      catalogueFingerprint: published.catalogueFingerprint,
+    },
+    publicationStatus: 'changed',
+  };
+  assert.doesNotThrow(() => assertCatalogueReleaseEvidenceMatches(published, retried));
+  assert.throws(
+    () =>
+      assertCatalogueReleaseEvidenceMatches(published, {
+        ...retried,
+        consumerRevision: '4444444444444444444444444444444444444444',
+      }),
+    /CATALOGUE_RELEASE_PUBLISHED_CONFLICT/u,
+  );
+});
+
 test('rejects catalogue bytes whose semantic fingerprint is not sealed', () => {
   const catalogue = JSON.parse(catalogueBytes.toString('utf8'));
   catalogue.meta.dataAsOf = '2099-01-01';
@@ -156,8 +185,11 @@ test('workflow gates exact producer bytes, skips duplicate releases and preserve
   assert.match(workflow, /CATALOGUE_UPDATE_BLOCKED_CURRENT_DEPLOYMENT/u);
   assert.match(workflow, /gh release list --exclude-drafts/u);
   assert.match(workflow, /tag="catalogue-\$\{PRODUCER_REVISION\}-\$\{GITHUB_SHA\}-\$\{COMPATIBILITY_CODE\}"/u);
-  assert.match(workflow, /select\(\.draft and \.tag_name ==/u);
-  assert.match(workflow, /gh api --method DELETE "repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{draft_id\}"/u);
+  assert.match(workflow, /select\(\.tag_name ==/u);
+  assert.match(workflow, /assertCatalogueReleaseEvidenceMatches/u);
+  assert.match(workflow, /gh api --method DELETE "repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{release_id\}"/u);
+  assert.match(workflow, /branch="codex\/catalogue-\$\{PRODUCER_REVISION\}-\$\{GITHUB_SHA\}"/u);
+  assert.match(workflow, /branch_parent=.*git rev-parse "origin\/\$\{branch\}\^"/u);
   assert.match(workflow, /gh workflow run ci\.yml --ref "\$branch"/u);
   assert.match(workflow, /event=workflow_dispatch/u);
   assert.match(workflow, /existing_pr=.*\n          if git ls-remote/u);

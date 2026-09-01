@@ -84,6 +84,46 @@ function isIssueUrl(value) {
   );
 }
 
+function releaseEvidence(value) {
+  if (
+    !validRelease(value) ||
+    typeof value.contractVersion !== 'string' ||
+    !isRecord(value.consumerValidation) ||
+    !['accepted', 'blocked'].includes(value.consumerValidation.status) ||
+    !Array.isArray(value.consumerValidation.codes) ||
+    !value.consumerValidation.codes.every((code) => typeof code === 'string') ||
+    !Array.isArray(value.issueUrls) ||
+    !value.issueUrls.every(isIssueUrl)
+  ) {
+    throw new Error('CATALOGUE_RELEASE_PUBLISHED_INVALID');
+  }
+  return {
+    schema: value.schema,
+    schemaVersion: value.schemaVersion,
+    sourceRepository: value.sourceRepository,
+    producerRevision: value.producerRevision,
+    consumerRevision: value.consumerRevision,
+    contractVersion: value.contractVersion,
+    catalogueFingerprint: value.catalogueFingerprint,
+    consumerValidation: {
+      status: value.consumerValidation.status,
+      codes: [...value.consumerValidation.codes].sort(),
+    },
+    assets: Object.fromEntries(FILES.map((filename) => [filename, value.assets[filename]])),
+    compatibility: {
+      status: value.compatibility.status,
+      code: value.compatibility.code,
+    },
+    issueUrls: [...value.issueUrls].sort(),
+  };
+}
+
+export function assertCatalogueReleaseEvidenceMatches(publishedRelease, currentRelease) {
+  if (JSON.stringify(releaseEvidence(publishedRelease)) !== JSON.stringify(releaseEvidence(currentRelease))) {
+    throw new Error('CATALOGUE_RELEASE_PUBLISHED_CONFLICT');
+  }
+}
+
 export function createCatalogueReleaseManifest({
   producerRevision,
   consumerRevision,

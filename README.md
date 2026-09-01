@@ -129,11 +129,14 @@ record.
 Release immutability is enabled for the repository, so published catalogue tags and assets cannot
 be replaced; the manifest also records the SHA-256 and byte length of every asset. An interrupted
 publication's exact-tag draft is removed and deterministically recreated on retry.
+An existing published exact-tag outcome is verified against the current assets, consumer revision
+and compatibility result, then reused without modifying the immutable record.
 
 The protected Pages workflow dispatches this intake independently after reserving the deployment
 lane. Mutable producer availability or a pending producer gate therefore cannot block deployment of
 the committed known-good Checklist snapshot. A compatible candidate atomically stages the vendor
-pair and lock on a `codex/catalogue-*` branch, explicitly dispatches CI for that exact bot commit,
+pair and lock on a producer-and-consumer-specific `codex/catalogue-*` branch based on the exact
+validated Checklist revision, explicitly dispatches CI for that exact bot commit,
 and creates or reuses an issue-backed PR. If repository policy denies bot-created PRs, the workflow
 leaves the ready branch and compare URL instead. The following deployment adopts the update only
 after that PR is reviewed and merged. A consumer-contract failure, unavailable current deployment
