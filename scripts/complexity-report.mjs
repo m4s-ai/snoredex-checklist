@@ -1511,8 +1511,13 @@ function isConditionalTypeAngleStart(tokens, index) {
     let sawQuestion = false;
     for (let cursor = index + 2; cursor < close; cursor += 1) {
       const kind = tokens[cursor].kind;
-      if (kind === SyntaxKind.ExtendsKeyword && tokens[cursor + 1]?.kind !== SyntaxKind.ColonToken) sawExtends = true;
-      else if (sawExtends && kind === SyntaxKind.QuestionToken) sawQuestion = true;
+      if (kind === SyntaxKind.ExtendsKeyword) {
+        const previousKind = tokens[cursor - 1]?.kind;
+        const isObjectMethodName =
+          tokens[cursor + 1]?.kind === SyntaxKind.OpenParenToken &&
+          [SyntaxKind.OpenBraceToken, SyntaxKind.CommaToken, SyntaxKind.SemicolonToken].includes(previousKind);
+        if (!isObjectMethodName && tokens[cursor + 1]?.kind !== SyntaxKind.ColonToken) sawExtends = true;
+      } else if (sawExtends && kind === SyntaxKind.QuestionToken) sawQuestion = true;
       else if (sawQuestion && kind === SyntaxKind.ColonToken) return true;
     }
     return false;
@@ -3003,6 +3008,14 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function parenthesizedComparison() { return factory < ({ extends: ready } ? A : B) > (value); }',
       expected: [{ name: 'parenthesizedComparison', complexity: 2 }],
+    },
+    {
+      source:
+        'function parenthesizedMethodComparison() { return factory < ({ extends() {}, value: ready } ? A : B) > (value); }',
+      expected: [
+        { name: 'parenthesizedMethodComparison', complexity: 2 },
+        { name: 'extends', complexity: 1 },
+      ],
     },
   ];
   for (const sample of samples) {
