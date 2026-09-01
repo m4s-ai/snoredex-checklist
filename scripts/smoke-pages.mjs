@@ -65,7 +65,7 @@ const [homeText, collectionText, guideText, stylesheetText, appScriptText, ...mo
 const [themeText, collectionThemeText] = await Promise.all([theme.text(), collectionTheme.text()]);
 if (
   !homeText.includes('Snoredex Checklist') ||
-  !collectionText.includes('Public catalogue text is rendered from the validated snapshot') ||
+  !collectionText.includes('<body data-page="collection">') ||
   !homeText.includes(`name="snoredex-app-revision" content="${expected.appRevision}"`) ||
   !collectionText.includes(`name="snoredex-app-revision" content="${expected.appRevision}"`) ||
   !guideText.includes(`snoredex-app-revision:${expected.appRevision}`) ||
