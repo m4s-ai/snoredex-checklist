@@ -37,6 +37,9 @@ const logicalOperators = new Set([
   SyntaxKind.AmpersandAmpersandToken,
   SyntaxKind.BarBarToken,
   SyntaxKind.QuestionQuestionToken,
+  SyntaxKind.AmpersandAmpersandEqualsToken,
+  SyntaxKind.BarBarEqualsToken,
+  SyntaxKind.QuestionQuestionEqualsToken,
 ]);
 
 function isFunctionNode(node) {
@@ -260,6 +263,11 @@ async function selfTest() {
       name: 'operators.ts',
       source: 'function operators(value, ready) { return value / 2 && ready ? value ** 2 : value % 2 || value; }',
       expected: [{ name: 'operators', complexity: 4 }],
+    },
+    {
+      name: 'short-circuit-assignment.ts',
+      source: 'function assignments(value, fallback) { value &&= fallback; value ||= fallback; value ??= fallback; }',
+      expected: [{ name: 'assignments', complexity: 4 }],
     },
     {
       name: 'jsx.tsx',
