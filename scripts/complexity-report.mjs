@@ -1490,6 +1490,7 @@ function isObjectMethodName(tokens, index) {
     SyntaxKind.PrivateKeyword,
     SyntaxKind.ProtectedKeyword,
     SyntaxKind.OverrideKeyword,
+    SyntaxKind.AbstractKeyword,
   ];
   let cursor = index - 1;
   while (modifiers.includes(tokens[cursor]?.kind)) cursor -= 1;
@@ -3092,6 +3093,11 @@ if (process.argv.includes('--self-test')) {
         { name: 'parenthesizedOverrideMethodComparison', complexity: 2 },
         { name: 'extends', complexity: 1 },
       ],
+    },
+    {
+      source:
+        'function parenthesizedAbstractOverrideMethodComparison() { return factory < (((() => { abstract class X extends Base { abstract override extends(): void } return ready; })()) ? A : B) > (value); }',
+      expected: [{ name: 'parenthesizedAbstractOverrideMethodComparison', complexity: 2 }],
     },
   ];
   for (const sample of samples) {
