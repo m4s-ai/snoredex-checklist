@@ -809,17 +809,35 @@ function renderCollectionControls(
   ordered.setAttribute('inputmode', 'numeric');
   ordered.setAttribute('aria-describedby', feedback.id);
   orderedLabel.append(ordered);
+  const showPendingSaveFailure = (): boolean => {
+    if (pendingSaveFailure === undefined) return false;
+    const pending = pendingSaveFailure;
+    pendingSaveFailure = undefined;
+    retryAction = pending.retry;
+    showResult(pending.result);
+    return true;
+  };
   const stopChangeListener = controller.onChange(() => {
     const latest = controller.record(item.itemId);
     const latestStatus = latest?.status ?? 'need';
+    let resetInvalidQuantity = false;
     for (const [value, input] of statusInputs) input.checked = value === latestStatus;
     if (document.activeElement !== owned) {
+      resetInvalidQuantity ||= owned.getAttribute('aria-invalid') === 'true';
       owned.value = String(latest?.quantityOwned ?? 0);
       owned.removeAttribute('aria-invalid');
     }
     if (document.activeElement !== ordered) {
+      resetInvalidQuantity ||= ordered.getAttribute('aria-invalid') === 'true';
       ordered.value = String(latest?.quantityOrdered ?? 0);
       ordered.removeAttribute('aria-invalid');
+    }
+    if (resetInvalidQuantity && owned.checkValidity() && ordered.checkValidity()) {
+      ++feedbackGeneration;
+      if (!showPendingSaveFailure()) {
+        feedback.textContent = '';
+        retry.hidden = true;
+      }
     }
   });
   registerCleanup?.(stopChangeListener);
@@ -851,11 +869,7 @@ function renderCollectionControls(
     runSave(() => controller.setQuantities(item.itemId, Number(owned.value), Number(ordered.value)));
   };
   const revalidateQuantities = (): void => {
-    if (!quantitiesAreValid() || pendingSaveFailure === undefined) return;
-    const pending = pendingSaveFailure;
-    pendingSaveFailure = undefined;
-    retryAction = pending.retry;
-    showResult(pending.result);
+    if (quantitiesAreValid()) showPendingSaveFailure();
   };
   owned.addEventListener('input', revalidateQuantities);
   ordered.addEventListener('input', revalidateQuantities);

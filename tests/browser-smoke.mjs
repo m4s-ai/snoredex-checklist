@@ -267,6 +267,12 @@ try {
         );
         const quantityFeedback = collectionControls.locator('.state-feedback');
         const privateNote = collectionControls.getByRole('textbox', { name: /^Private note for /u });
+        const secondOwnedQuantity = page.getByRole('spinbutton', { name: 'Owned' }).nth(1);
+        assert.equal(await secondOwnedQuantity.count(), 1, `${name}: second trackable card`);
+        const secondCollectionControls = secondOwnedQuantity.locator(
+          'xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " collection-controls ")]',
+        );
+        const secondQuantityFeedback = secondCollectionControls.locator('.state-feedback');
         const invalidQuantityMessage =
           'Quantity is invalid. Enter a whole number from 0 through 9999. This draft was not saved, and the previous collection value remains unchanged. Error code: EDIT_INVALID_QUANTITY';
         const saveFailedMessage = 'Save failed. Your draft is still visible; retry when ready.';
@@ -283,6 +289,14 @@ try {
           beforeInvalidQuantity,
           `${name}: invalid quantity leaves storage unchanged`,
         );
+        await secondCollectionControls.getByRole('radio', { name: 'Have' }).check();
+        await secondQuantityFeedback.filter({ hasText: 'Saved' }).waitFor();
+        assert.equal(await ownedQuantity.inputValue(), '1', `${name}: another card resets the invalid draft`);
+        assert.equal(await ownedQuantity.getAttribute('aria-invalid'), null, `${name}: reset draft is valid`);
+        assert.equal(await quantityFeedback.textContent(), '', `${name}: reset clears stale invalid feedback`);
+        await ownedQuantity.fill('10000');
+        await ownedQuantity.blur();
+        await page.getByText(invalidQuantityMessage, { exact: true }).waitFor();
         await page.evaluate(async (lockName) => {
           let lockAcquired;
           const acquired = new Promise((resolve) => {
@@ -409,12 +423,6 @@ try {
           beforeInvalidQuantity,
           `${name}: corrected quantity saves`,
         );
-        const secondOwnedQuantity = page.getByRole('spinbutton', { name: 'Owned' }).nth(1);
-        assert.equal(await secondOwnedQuantity.count(), 1, `${name}: second trackable card for overlapping saves`);
-        const secondCollectionControls = secondOwnedQuantity.locator(
-          'xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " collection-controls ")]',
-        );
-        const secondQuantityFeedback = secondCollectionControls.locator('.state-feedback');
         await page.evaluate(async (lockName) => {
           let lockAcquired;
           const acquired = new Promise((resolve) => {
