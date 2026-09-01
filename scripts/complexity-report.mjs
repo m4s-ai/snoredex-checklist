@@ -310,6 +310,39 @@ function isMethodTypeParameterArrow(tokens, arrowIndex) {
   return false;
 }
 
+function isJsxGenericFunctionTypeArrow(tokens, arrowIndex) {
+  const parameterClose = arrowIndex - 1;
+  if (tokens[parameterClose]?.kind !== SyntaxKind.CloseParenToken) return false;
+  const parameterOpen = matchingOpen(tokens, parameterClose, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+  if (parameterOpen === undefined) return false;
+  const genericClose = parameterOpen - 1;
+  if (tokens[genericClose]?.kind !== SyntaxKind.GreaterThanToken) return false;
+  let genericOpen;
+  for (let cursor = genericClose - 1; cursor >= 0; cursor -= 1) {
+    if (tokens[cursor].kind !== SyntaxKind.LessThanToken) continue;
+    if (matchingAngleClose(tokens, cursor) === genericClose) {
+      genericOpen = cursor;
+      break;
+    }
+  }
+  if (genericOpen === undefined || tokens[genericOpen - 1]?.kind !== SyntaxKind.OpenParenToken) return false;
+  for (
+    let outer = enclosingAngleOpen(tokens, genericOpen);
+    outer !== undefined;
+    outer = enclosingAngleOpen(tokens, outer)
+  ) {
+    let qualifier = outer - 1;
+    if (!identifierLike(tokens[qualifier])) continue;
+    while ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[qualifier - 1]?.kind)) {
+      qualifier -= 2;
+      if (!identifierLike(tokens[qualifier])) break;
+    }
+    if (tokens[qualifier - 1]?.kind === SyntaxKind.LessThanToken && !canEndExpression(tokens[qualifier - 2]))
+      return true;
+  }
+  return false;
+}
+
 function isClassTypeParameterArrow(tokens, arrowIndex) {
   const close = arrowIndex - 1;
   if (tokens[close]?.kind !== SyntaxKind.CloseParenToken) return false;
@@ -1067,6 +1100,7 @@ function isTypeOnlyArrow(tokens, arrowIndex) {
   if ([SyntaxKind.AsKeyword, SyntaxKind.SatisfiesKeyword].includes(tokens[open - 1]?.kind)) return true;
   if (isFunctionTypeParameterArrow(tokens, arrowIndex)) return true;
   if (isMethodTypeParameterArrow(tokens, arrowIndex)) return true;
+  if (isJsxGenericFunctionTypeArrow(tokens, arrowIndex)) return true;
   if (isClassTypeParameterArrow(tokens, arrowIndex)) return true;
   if (isTupleTypeArrow(tokens, arrowIndex)) return true;
   if (tokens[open - 1]?.kind === SyntaxKind.ColonToken) return !isConditionalExpressionColon(tokens, open - 1);
@@ -3370,6 +3404,11 @@ if (process.argv.includes('--self-test')) {
       path: 'fixture.tsx',
       source: 'function jsxGenericComponent() { return <Comp<boolean> value={ready ? true : false} />; }',
       expected: [{ name: 'jsxGenericComponent', complexity: 2 }],
+    },
+    {
+      path: 'fixture.tsx',
+      source: 'function jsxGenericFunctionType() { return <Comp<(<T,>() => T)> value={ready ? true : false} />; }',
+      expected: [{ name: 'jsxGenericFunctionType', complexity: 2 }],
     },
     {
       source:
