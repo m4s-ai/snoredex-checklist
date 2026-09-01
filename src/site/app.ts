@@ -899,13 +899,7 @@ function renderCollectionControls(
       showResult({ ok: false, error: 'EDIT_INVALID_QUANTITY' });
       return;
     }
-    if (
-      !showPendingSaveFailure() &&
-      !restoreRetryAfterQuantityValidation() &&
-      feedback.textContent === invalidQuantityFeedback
-    ) {
-      feedback.textContent = '';
-    }
+    if (feedback.textContent === invalidQuantityFeedback) feedback.textContent = '';
   };
   owned.addEventListener('input', revalidateQuantities);
   ordered.addEventListener('input', revalidateQuantities);

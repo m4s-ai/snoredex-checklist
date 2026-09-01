@@ -317,17 +317,37 @@ try {
           false,
           `${name}: scheduling failure retry stays hidden while invalid`,
         );
-        await ownedQuantity.fill('1');
-        await quantityFeedback.filter({ hasText: saveFailedMessage }).waitFor();
-        assert.equal(await retrySave.isVisible(), true, `${name}: scheduling failure becomes recoverable when valid`);
+        const beforeCorrectedDraftSave = await page.evaluate(() =>
+          localStorage.getItem('snoredex-checklist.private-state'),
+        );
+        await ownedQuantity.fill('2');
+        assert.equal(await retrySave.isVisible(), false, `${name}: corrected draft keeps scheduling retry hidden`);
         await retrySave.evaluate((button) => button.click());
+        await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))));
+        assert.equal(
+          await page.evaluate(() => localStorage.getItem('snoredex-checklist.private-state')),
+          beforeCorrectedDraftSave,
+          `${name}: hidden scheduling retry cannot skip the corrected quantity`,
+        );
+        await ownedQuantity.blur();
         await quantityFeedback.filter({ hasText: 'Saved' }).waitFor();
+        assert.equal(
+          await page.evaluate(
+            (itemId) =>
+              JSON.parse(localStorage.getItem('snoredex-checklist.private-state') ?? '{}').items?.find(
+                (item) => item.itemId === itemId,
+              )?.quantityOwned,
+            synthetic.itemId,
+          ),
+          2,
+          `${name}: corrected quantity saves with the scheduled note`,
+        );
         await ownedQuantity.fill('10000');
         await ownedQuantity.blur();
         await quantityFeedback.filter({ hasText: invalidQuantityMessage }).waitFor();
         await secondCollectionControls.getByRole('radio', { name: 'Have' }).check();
         await secondQuantityFeedback.filter({ hasText: 'Saved' }).waitFor();
-        assert.equal(await ownedQuantity.inputValue(), '1', `${name}: another card resets the invalid draft`);
+        assert.equal(await ownedQuantity.inputValue(), '2', `${name}: another card resets the invalid draft`);
         assert.equal(await ownedQuantity.getAttribute('aria-invalid'), null, `${name}: reset draft is valid`);
         assert.equal(await quantityFeedback.textContent(), '', `${name}: reset clears stale invalid feedback`);
         await ownedQuantity.fill('10000');
@@ -347,7 +367,7 @@ try {
           await acquired;
         }, PRIVATE_STATE_LOCK_NAME);
         await privateNote.fill('synthetic pending note save');
-        assert.equal(await ownedQuantity.inputValue(), '1', `${name}: controller reset restores persisted quantity`);
+        assert.equal(await ownedQuantity.inputValue(), '2', `${name}: controller reset restores persisted quantity`);
         assert.equal(
           await ownedQuantity.getAttribute('aria-invalid'),
           null,
@@ -401,37 +421,89 @@ try {
           invalidQuantityMessage,
           `${name}: quantity feedback remains primary while note save fails`,
         );
+        const beforeCorrectedRetry = await page.evaluate(() =>
+          localStorage.getItem('snoredex-checklist.private-state'),
+        );
         await ownedQuantity.fill('1');
-        await page.getByText(saveFailedMessage, { exact: true }).waitFor();
         assert.equal(
           await retrySave.isVisible(),
-          true,
-          `${name}: failed note save becomes recoverable after quantity correction`,
+          false,
+          `${name}: corrected input keeps the deferred note retry hidden`,
         );
+        await retrySave.evaluate((button) => button.click());
+        await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))));
         assert.equal(
-          await ownedQuantity.evaluate((input) => document.activeElement === input),
-          true,
-          `${name}: quantity remains focused before programmatic retry`,
+          await page.evaluate(() => localStorage.getItem('snoredex-checklist.private-state')),
+          beforeCorrectedRetry,
+          `${name}: hidden retry cannot save the stale persisted quantity`,
+        );
+        await ownedQuantity.blur();
+        await quantityFeedback.filter({ hasText: 'Saved' }).waitFor();
+        assert.equal(
+          await page.evaluate(
+            (itemId) =>
+              JSON.parse(localStorage.getItem('snoredex-checklist.private-state') ?? '{}').items?.find(
+                (item) => item.itemId === itemId,
+              )?.quantityOwned,
+            synthetic.itemId,
+          ),
+          1,
+          `${name}: corrected quantity saves before recovery completes`,
+        );
+        await page.evaluate(() => {
+          const setItem = Storage.prototype.setItem;
+          Storage.prototype.setItem = function failNextStatusWrite(key, value) {
+            if (key === 'snoredex-checklist.private-state') {
+              Storage.prototype.setItem = setItem;
+              globalThis.__snoredexFailedStatusWrite = true;
+              throw new Error('synthetic status write failure');
+            }
+            return setItem.call(this, key, value);
+          };
+        });
+        await collectionControls.getByRole('radio', { name: 'Ordered' }).check();
+        await page.waitForFunction(() => globalThis.__snoredexFailedStatusWrite === true);
+        await quantityFeedback.filter({ hasText: saveFailedMessage }).waitFor();
+        assert.equal(await retrySave.isVisible(), true, `${name}: failed status save exposes retry while valid`);
+        const beforeHiddenStatusRetry = await page.evaluate(() =>
+          localStorage.getItem('snoredex-checklist.private-state'),
         );
         await ownedQuantity.fill('10000');
         await quantityFeedback.filter({ hasText: invalidQuantityMessage }).waitFor();
-        assert.equal(await retrySave.isVisible(), false, `${name}: invalid input hides the pending save retry`);
+        assert.equal(await retrySave.isVisible(), false, `${name}: invalid input hides the pending status retry`);
         await retrySave.evaluate((button) => button.click());
         await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))));
         assert.equal(
           await quantityFeedback.textContent(),
           invalidQuantityMessage,
-          `${name}: hidden retry is inert while the quantity is invalid`,
+          `${name}: hidden status retry is inert while the quantity is invalid`,
         );
-        await ownedQuantity.fill('1');
-        await quantityFeedback.filter({ hasText: saveFailedMessage }).waitFor();
-        assert.equal(await retrySave.isVisible(), true, `${name}: valid input restores the pending save retry`);
+        await ownedQuantity.fill('0');
+        assert.equal(await retrySave.isVisible(), false, `${name}: corrected input keeps the old status retry hidden`);
         await retrySave.evaluate((button) => button.click());
-        await page.getByText('Saved', { exact: true }).first().waitFor();
+        await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))));
+        assert.equal(
+          await page.evaluate(() => localStorage.getItem('snoredex-checklist.private-state')),
+          beforeHiddenStatusRetry,
+          `${name}: hidden status retry cannot save the stale persisted quantity`,
+        );
         assert.equal(
           await ownedQuantity.evaluate((input) => document.activeElement === input),
           true,
-          `${name}: retry succeeds without quantity blur or change`,
+          `${name}: corrected quantity retains focus before keyboard commit`,
+        );
+        await ownedQuantity.dispatchEvent('change');
+        await quantityFeedback.filter({ hasText: 'Saved' }).waitFor();
+        assert.equal(
+          await page.evaluate(
+            (itemId) =>
+              JSON.parse(localStorage.getItem('snoredex-checklist.private-state') ?? '{}').items?.find(
+                (item) => item.itemId === itemId,
+              )?.quantityOwned,
+            synthetic.itemId,
+          ),
+          0,
+          `${name}: corrected quantity commits the failed status state`,
         );
         await page.evaluate(async (lockName) => {
           let lockAcquired;
@@ -507,15 +579,21 @@ try {
         await page.evaluate(() => globalThis.__snoredexReleaseOverlappingLock?.());
         await page.waitForFunction(() => globalThis.__snoredexFailedOverlappingWrite === true);
         await ownedQuantity.fill('4');
-        await quantityFeedback.filter({ hasText: saveFailedMessage }).waitFor();
-        const overlappingRetry = collectionControls.getByRole('button', { name: 'Retry save' });
-        assert.equal(await overlappingRetry.isVisible(), true, `${name}: overlapping failure exposes retry`);
-        await overlappingRetry.evaluate((button) => button.click());
+        assert.equal(await retrySave.isVisible(), false, `${name}: overlapping retry stays hidden before change`);
+        await retrySave.evaluate((button) => button.click());
+        await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))));
+        await ownedQuantity.dispatchEvent('change');
         await quantityFeedback.filter({ hasText: 'Saved' }).waitFor();
         assert.equal(
-          await ownedQuantity.evaluate((input) => document.activeElement === input),
-          true,
-          `${name}: overlapping immediate retry succeeds without quantity change`,
+          await page.evaluate(
+            (itemId) =>
+              JSON.parse(localStorage.getItem('snoredex-checklist.private-state') ?? '{}').items?.find(
+                (item) => item.itemId === itemId,
+              )?.quantityOwned,
+            synthetic.itemId,
+          ),
+          4,
+          `${name}: overlapping failure saves the corrected quantity on change`,
         );
         assert.notEqual(synthetic.research, undefined, `${name}: synthetic research item`);
         if (synthetic.research?.setEditionId) {
