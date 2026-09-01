@@ -425,6 +425,11 @@ try {
       assert.equal(await page.locator("a[href='collection/']").count(), 2, `${name}: collection links`);
       await page.locator('.localization-group').first().waitFor();
       assert.match(
+        await page.locator('.proof-list').innerText(),
+        /Per-item statuses, quantities, and notes stay local; selected filter criteria are shareable/u,
+        `${name}: public status criterion is distinguished from private records`,
+      );
+      assert.match(
         await page.locator('.provenance-disclosure > summary').innerText(),
         /^Catalogue (?:verified|fixture) · Data as of /u,
         `${name}: human catalogue summary`,
