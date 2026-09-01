@@ -133,10 +133,6 @@ jobs:
           elif [[ "$http_status" == "200" ]]; then
             echo "state=available" >> "$GITHUB_OUTPUT"
             echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
-          elif [[ "$http_status" == "404" ]]; then
-            rm -f "$manifest"
-            echo "state=missing" >> "$GITHUB_OUTPUT"
-            echo "manifest=" >> "$GITHUB_OUTPUT"
           else
             rm -f "$manifest"
             echo "state=unavailable" >> "$GITHUB_OUTPUT"
