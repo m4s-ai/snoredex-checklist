@@ -423,7 +423,7 @@ try {
       assert.equal(home?.status(), 200, `${name}: home status`);
       assert.equal(await page.title(), 'Snoredex Checklist', `${name}: home title`);
       assert.equal(await page.locator("a[href='collection/']").count(), 2, `${name}: collection links`);
-      assert.ok(await page.locator('.localization-group').count(), `${name}: grouped localization directory`);
+      await page.locator('.localization-group').first().waitFor();
       assert.match(
         await page.locator('.provenance-disclosure > summary').innerText(),
         /^Catalogue (?:verified|fixture) · Data as of /u,
