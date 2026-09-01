@@ -25,6 +25,21 @@ or serious violations were reported.
 The browser harness uses only the reviewed synthetic fixture and fails on unexpected network
 requests. No private collection state or personal card images are included in this record.
 
+### Manual-review remediation — 2026-09-01
+
+Owner review of the deployed Indonesian research-only view exposed usability failures that the
+initial automated checks did not catch. The remediation removes the always-expanded catalogue
+tree, uses native localization and set pickers, keeps advanced filters collapsed, replaces opaque
+ID fallback labels with neutral unidentified-set labels, removes zero-total progress bars, explains
+why research rows have no collection controls, simplifies item cards and collapses backup and
+catalogue provenance panels.
+
+The final remediation build passed the complete unit/security and contract suites, Chromium,
+Firefox and WebKit browser smoke, and all 12 accessibility combinations above. Focused regressions
+also prove that a research-only edition has no status radios or progress bar, contains no visible
+`LOCALSET:` or `EDITION:` identifier, and has no horizontal page overflow. This automated evidence
+does not replace the owner-run assistive-technology and real-device rows below.
+
 ## Manual release evidence
 
 The following checks require a real supported device or assistive technology session. They are

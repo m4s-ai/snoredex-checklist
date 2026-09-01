@@ -9,9 +9,18 @@ const scopeItem = builtSnapshot.items.find((item) => item.active && item.progres
 const collectionScope = scopeItem
   ? `/collection/?localization=${encodeURIComponent(scopeItem.localizationId)}`
   : '/collection/?q=Snorlax';
-const researchItem = builtSnapshot.items.find((item) => item.active && item.progressClass === 'research');
+const researchItem = builtSnapshot.items.find(
+  (item) =>
+    item.active &&
+    item.progressClass === 'research' &&
+    item.setEditionId &&
+    !builtSnapshot.items.some(
+      (candidate) =>
+        candidate.active && candidate.progressClass === 'current-known' && candidate.setEditionId === item.setEditionId,
+    ),
+);
 const researchScope = researchItem
-  ? `/collection/?localization=${encodeURIComponent(researchItem.localizationId)}`
+  ? `/collection/?localization=${encodeURIComponent(researchItem.localizationId)}&edition=${encodeURIComponent(researchItem.setEditionId)}`
   : collectionScope;
 const engines = [
   ['chromium', chromium],
@@ -252,13 +261,38 @@ try {
         await page.getByRole('combobox', { name: 'Research' }).selectOption('true');
         await Promise.all([
           page.waitForURL(/research=true/u),
-          page.getByRole('button', { name: 'Apply criteria' }).click(),
+          page.getByRole('button', { name: 'Show collection' }).click(),
         ]);
         await page.waitForLoadState('networkidle');
         assert.equal(
           (await page.getByText('Research (read-only)').count()) > 0,
           true,
           `${engineName}/${viewportName}: research state`,
+        );
+        assert.equal(
+          await page.getByRole('heading', { name: 'Research (read-only)', level: 3 }).count(),
+          1,
+          `${engineName}/${viewportName}: selected-edition heading order`,
+        );
+        assert.equal(
+          await page.getByRole('heading', { name: 'Research-only view' }).count(),
+          1,
+          `${engineName}/${viewportName}: research-only explanation`,
+        );
+        assert.equal(
+          await page.getByRole('progressbar').count(),
+          0,
+          `${engineName}/${viewportName}: no zero-total progressbar`,
+        );
+        assert.doesNotMatch(
+          await page.locator('main').innerText(),
+          /(?:LOCALSET|EDITION):/u,
+          `${engineName}/${viewportName}: no opaque IDs in visible UI`,
+        );
+        assert.equal(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+          true,
+          `${engineName}/${viewportName}: research-only reflow`,
         );
         await page.goto(`${baseUrl}/collection/?localization=unknown`, { waitUntil: 'networkidle' });
         assert.equal(

@@ -141,10 +141,11 @@ try {
       assert.equal(await page.title(), 'Collection · Snoredex Checklist', `${name}: collection title`);
       await assertSecurityBoundary(page, `${name}/collection`);
       assert.equal(
-        await page.getByRole('heading', { name: 'Collection data and recovery' }).count(),
+        await page.getByText('Backup and recovery', { exact: true }).count(),
         1,
-        `${name}: recovery heading`,
+        `${name}: recovery disclosure`,
       );
+      await page.getByText('Backup and recovery', { exact: true }).click();
       assert.equal(
         await page.getByRole('button', { name: 'Choose backup to preview' }).count(),
         1,
@@ -165,6 +166,14 @@ try {
         return {
           fingerprint: catalogue.meta.catalogueFingerprint,
           itemId: item.itemId,
+          research: catalogue.items.find(
+            (candidate) =>
+              candidate.active &&
+              candidate.progressClass === 'research' &&
+              candidate.setEditionId &&
+              !candidate.localSetCode &&
+              !candidate.localSetName,
+          ),
         };
       });
       assert.notEqual(synthetic, null, `${name}: synthetic trackable item`);
@@ -184,6 +193,7 @@ try {
           );
         }, synthetic);
         await page.reload({ waitUntil: 'networkidle' });
+        await page.getByText('Backup and recovery', { exact: true }).click();
         const exportButton = page.getByRole('button', { name: 'Export collection' });
         assert.equal(await exportButton.isEnabled(), true, `${name}: export enabled for synthetic state`);
         const downloadPromise = page.waitForEvent('download');
@@ -245,6 +255,29 @@ try {
           `${name}: confirmation name`,
         );
         await confirmation.getByRole('button', { name: 'Cancel' }).click();
+        assert.notEqual(synthetic.research, undefined, `${name}: synthetic research item`);
+        if (synthetic.research?.setEditionId) {
+          await page.goto(
+            `${baseUrl}/collection/?localization=${encodeURIComponent(synthetic.research.localizationId)}&edition=${encodeURIComponent(synthetic.research.setEditionId)}`,
+            { waitUntil: 'networkidle' },
+          );
+          assert.equal(await page.getByRole('combobox', { name: 'Set' }).count(), 1, `${name}: compact set picker`);
+          assert.equal(
+            await page.getByRole('navigation', { name: 'Localities, sets and editions' }).count(),
+            0,
+            `${name}: full catalogue tree removed`,
+          );
+          assert.equal(
+            await page.getByRole('heading', { name: 'Research-only view' }).count(),
+            1,
+            `${name}: research-only explanation`,
+          );
+          assert.equal(await page.getByRole('progressbar').count(), 0, `${name}: no zero-total progressbar`);
+          assert.equal(await page.getByRole('radio').count(), 0, `${name}: research remains read-only`);
+          const visibleText = await page.locator('main').innerText();
+          assert.doesNotMatch(visibleText, /(?:LOCALSET|EDITION):/u, `${name}: opaque IDs stay out of visible UI`);
+          assert.match(visibleText, /Unidentified set/u, `${name}: neutral unresolved label`);
+        }
       }
       assert.equal(unexpectedRequests.length, 0, `${name}: unexpected network requests`);
       assert.deepEqual(failures, [], `${name}: browser failures`);

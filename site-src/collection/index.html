@@ -25,36 +25,27 @@
         <a href="../">Home</a><span aria-hidden="true">/</span><span>Collection</span>
       </nav>
       <div class="collection-grid">
-        <aside class="surface sidebar" data-catalogue-dependent aria-labelledby="browse-title">
-          <h2 id="browse-title">Browse sets</h2>
-          <nav aria-label="Localities, sets and editions">
-            <div data-localizations><p>Loading localizations…</p></div>
-          </nav>
-        </aside>
         <section class="content-column" aria-labelledby="collection-title">
           <div class="surface">
-            <p class="eyebrow">Private browser-local view</p>
             <h1 id="collection-title">Collection</h1>
-            <p data-catalogue-dependent>
-              Public catalogue text is rendered from the validated snapshot. Collection state is deliberately
-              independent and is not serialized into this URL.
-            </p>
+            <p data-catalogue-dependent>Your progress stays private in this browser.</p>
             <div data-query data-catalogue-dependent></div>
             <div data-view aria-live="polite"><p>Loading collection…</p></div>
           </div>
-          <section class="surface recovery-tools" data-recovery-tools aria-labelledby="recovery-title">
-            <h2 id="recovery-title">Collection data and recovery</h2>
-            <p>
-              Export a private backup, preview an import, or restore the last recoverable snapshot. Notes and collection
-              records never leave this browser.
-            </p>
-            <div data-recovery-actions></div>
-            <div data-recovery-preview hidden></div>
-            <p data-recovery-status class="state-feedback" role="status" aria-live="polite"></p>
+          <section class="surface secondary-panel recovery-tools" data-recovery-tools>
+            <details>
+              <summary>Backup and recovery</summary>
+              <p>Export, import, or restore this browser-local collection.</p>
+              <div data-recovery-actions></div>
+              <div data-recovery-preview hidden></div>
+              <p data-recovery-status class="state-feedback" role="status" aria-live="polite"></p>
+            </details>
           </section>
-          <section class="surface" data-catalogue-dependent aria-labelledby="provenance-title">
-            <h2 id="provenance-title">Source and version</h2>
-            <div data-provenance></div>
+          <section class="surface secondary-panel" data-catalogue-dependent>
+            <details>
+              <summary>Catalogue information</summary>
+              <div data-provenance></div>
+            </details>
           </section>
         </section>
       </div>

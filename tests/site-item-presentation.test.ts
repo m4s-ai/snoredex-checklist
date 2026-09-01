@@ -16,11 +16,11 @@ test('keeps item presentation labels explicit and distinct', () => {
   const verified = fixture.catalogue.items[0];
   assert.equal(collectorNumberLabel(verified), '1/10');
   assert.equal(imageScopeLabel(verified, true), 'Authored placeholder (image scope unknown)');
-  assert.equal(itemCueLabel(verified), 'Current-known · verified printing');
+  assert.equal(itemCueLabel(verified), 'Trackable');
   assert.equal(evidenceCueLabel(verified), 'Producer evidence: confirmed');
 
   const research = fixture.catalogue.items[1];
-  assert.equal(itemCueLabel(research), 'Research · Finish candidate · read-only');
+  assert.equal(itemCueLabel(research), 'Research · read-only');
   assert.equal(evidenceCueLabel(research), 'Producer evidence: marketplace-claimed');
   assert.equal(
     imageScopeLabel({ ...research, imageScope: 'card-release' }, true),
