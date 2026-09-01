@@ -39,52 +39,77 @@ function scan(source, languageVariant) {
   let previous;
   const templateSubstitutionBraces = [];
   let jsxMode = 'standard';
-  let jsxDepth = 0;
+  const jsxElementStack = [];
   let jsxTagClosing = false;
   let jsxTagSelfClosing = false;
-  let jsxExpressionBraces = 0;
-  let jsxExpressionReturnMode = 'children';
+  let jsxTagParentMode = 'standard';
+  const jsxExpressionStack = [];
+  const enterJsxExpression = (returnMode) => {
+    jsxMode = 'expression';
+    jsxExpressionStack.push({ braces: 1, returnMode, templateDepth: templateSubstitutionBraces.length });
+  };
+  const enterJsxTag = (parentMode, closing = false) => {
+    jsxMode = 'tag';
+    jsxTagParentMode = parentMode;
+    jsxTagClosing = closing;
+    jsxTagSelfClosing = false;
+  };
   let kind;
   do {
     if (jsxMode === 'children') {
       kind = scanner.scanJsxToken();
       if (kind === SyntaxKind.OpenBraceToken) {
-        jsxMode = 'expression';
-        jsxExpressionBraces = 1;
-        jsxExpressionReturnMode = 'children';
+        enterJsxExpression('children');
       } else if (kind === SyntaxKind.LessThanToken || kind === SyntaxKind.LessThanSlashToken) {
-        jsxMode = 'tag';
-        jsxTagClosing = kind === SyntaxKind.LessThanSlashToken;
-        jsxTagSelfClosing = false;
+        enterJsxTag('children', kind === SyntaxKind.LessThanSlashToken);
       }
     } else {
       kind = scanner.scan();
       if (jsxMode === 'expression') {
-        if (kind === SyntaxKind.OpenBraceToken) jsxExpressionBraces += 1;
-        else if (kind === SyntaxKind.CloseBraceToken) {
-          jsxExpressionBraces -= 1;
-          if (jsxExpressionBraces === 0) jsxMode = jsxExpressionReturnMode;
+        const expression = jsxExpressionStack.at(-1);
+        const closesJsxExpression =
+          kind === SyntaxKind.CloseBraceToken &&
+          expression?.braces === 1 &&
+          templateSubstitutionBraces.length <= expression.templateDepth;
+        if (
+          languageVariant === LanguageVariant.JSX &&
+          kind === SyntaxKind.LessThanToken &&
+          !canEndExpressionForJsx(previous, tokens) &&
+          !looksLikeGenericArrow(scanner)
+        ) {
+          enterJsxTag('expression');
+        } else if (kind === SyntaxKind.OpenBraceToken) {
+          expression.braces += 1;
+        } else if (kind === SyntaxKind.CloseBraceToken) {
+          if (closesJsxExpression) {
+            jsxExpressionStack.pop();
+            jsxMode = expression.returnMode;
+          } else if (expression.braces > 1) {
+            expression.braces -= 1;
+          }
         }
       } else if (jsxMode === 'tag') {
         if (kind === SyntaxKind.OpenBraceToken) {
-          jsxMode = 'expression';
-          jsxExpressionBraces = 1;
-          jsxExpressionReturnMode = 'tag';
+          enterJsxExpression('tag');
         } else if (kind === SyntaxKind.SlashToken) jsxTagSelfClosing = true;
         else if (kind === SyntaxKind.GreaterThanToken) {
-          if (jsxTagClosing) jsxDepth -= 1;
-          else if (!jsxTagSelfClosing) jsxDepth += 1;
-          jsxMode = jsxDepth > 0 ? 'children' : 'standard';
+          if (jsxTagClosing) {
+            const opening = jsxElementStack.pop();
+            jsxMode = opening?.parentMode ?? jsxTagParentMode;
+          } else if (jsxTagSelfClosing) {
+            jsxMode = jsxTagParentMode;
+          } else {
+            jsxElementStack.push({ parentMode: jsxTagParentMode });
+            jsxMode = 'children';
+          }
         }
       } else if (
         languageVariant === LanguageVariant.JSX &&
         kind === SyntaxKind.LessThanToken &&
-        !canEndExpression(previous) &&
+        !canEndExpressionForJsx(previous, tokens) &&
         !looksLikeGenericArrow(scanner)
       ) {
-        jsxMode = 'tag';
-        jsxTagClosing = false;
-        jsxTagSelfClosing = false;
+        enterJsxTag('standard');
       }
     }
     if (kind === SyntaxKind.TemplateHead) templateSubstitutionBraces.push(0);
@@ -134,6 +159,10 @@ function canEndExpression(token) {
     SyntaxKind.RegularExpressionLiteral,
     SyntaxKind.TemplateTail,
   ].includes(token.kind);
+}
+
+function canEndExpressionForJsx(previous, tokens) {
+  return canEndExpression(previous) || isMemberPropertyAccess(tokens, tokens.length - 1);
 }
 
 function isControlHeaderClose(tokens, closeIndex) {
@@ -3306,6 +3335,24 @@ if (process.argv.includes('--self-test')) {
         { name: 'jsxText', complexity: 1 },
         { name: 'view', complexity: 1 },
       ],
+    },
+    {
+      path: 'fixture.tsx',
+      source: 'function nestedJsx() { const view = () => <div>{ready ? <span>Why?</span> : null}</div>; }',
+      expected: [
+        { name: 'nestedJsx', complexity: 1 },
+        { name: 'view', complexity: 2 },
+      ],
+    },
+    {
+      path: 'fixture.tsx',
+      source: 'function jsxTemplate() { const view = <div>{`${value}` && ready ? yes : no}</div>; }',
+      expected: [{ name: 'jsxTemplate', complexity: 3 }],
+    },
+    {
+      path: 'fixture.tsx',
+      source: 'function jsxKeywordComparison() { return (obj.default < limit) > other && ready ? yes : no; }',
+      expected: [{ name: 'jsxKeywordComparison', complexity: 3 }],
     },
     {
       source:

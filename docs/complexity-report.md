@@ -3,9 +3,9 @@
 > Advisory lexical estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (32 production code files).
-Lines: 14,916.
-Function-like nodes: 795.
-McCabe estimate: sum 4,357; mean 5.5; median 2; P90 14; P95 24.
+Lines: 14,963.
+Function-like nodes: 798.
+McCabe estimate: sum 4,368; mean 5.5; median 2; P90 14; P95 24.
 Hotspots: 106 functions exceed 10; 50 exceed 20.
 
 The estimate counts if/for/while/do/catch/case statements, conditional `?` tokens and `&&`/`||`/`??` operators inside function-like bodies. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
@@ -18,17 +18,17 @@ The estimate counts if/for/while/do/catch/case statements, conditional `?` token
 | `src/catalogue/validate.ts:235`      | `validateSemantics`          |         56 |
 | `src/state/reconciliation.ts:513`    | `reconcilePrivateState`      |         55 |
 | `src/catalogue/validate.ts:416`      | `validateCatalogueFixture`   |         54 |
-| `scripts/complexity-report.mjs:1895` | `collectFunctions`           |         49 |
-| `scripts/complexity-report.mjs:1097` | `findArrowExpressionEnd`     |         47 |
+| `scripts/complexity-report.mjs:1924` | `collectFunctions`           |         49 |
+| `scripts/complexity-report.mjs:1126` | `findArrowExpressionEnd`     |         47 |
 | `scripts/check-artifact.mjs:1311`    | `extractHead`                |         45 |
 | `src/site/query.ts:31`               | `parseQuery`                 |         39 |
-| `scripts/complexity-report.mjs:1811` | `findStatementEnd`           |         36 |
+| `scripts/complexity-report.mjs:36`   | `scan`                       |         37 |
+| `scripts/complexity-report.mjs:1840` | `findStatementEnd`           |         36 |
 | `src/state/storage.ts:1142`          | `setDraftOwnerState`         |         36 |
-| `scripts/complexity-report.mjs:469`  | `isSemicolonlessClassMethod` |         35 |
-| `scripts/complexity-report.mjs:1548` | `isConditionalTypeQuestion`  |         35 |
+| `scripts/complexity-report.mjs:498`  | `isSemicolonlessClassMethod` |         35 |
+| `scripts/complexity-report.mjs:1577` | `isConditionalTypeQuestion`  |         35 |
 | `src/catalogue/sync.ts:517`          | `parseJournal`               |         34 |
 | `scripts/check-artifact.mjs:239`     | `stripHtmlComments`          |         32 |
 | `src/state/domain.ts:211`            | `parseState`                 |         32 |
 | `src/site/deployment.ts:24`          | `validatePagesDeployment`    |         31 |
-| `scripts/complexity-report.mjs:36`   | `scan`                       |         30 |
 | `src/state/backup.ts:289`            | `writeAuthority`             |         30 |
