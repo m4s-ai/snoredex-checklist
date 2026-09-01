@@ -1505,7 +1505,17 @@ function isConditionalTypeAngleStart(tokens, index) {
   }
   if (first?.kind === SyntaxKind.OpenParenToken) {
     const close = matching(tokens, index + 1, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
-    return close !== undefined && tokens[close + 1]?.kind === SyntaxKind.ExtendsKeyword;
+    if (close === undefined) return false;
+    if (tokens[close + 1]?.kind === SyntaxKind.ExtendsKeyword) return true;
+    let sawExtends = false;
+    let sawQuestion = false;
+    for (let cursor = index + 2; cursor < close; cursor += 1) {
+      const kind = tokens[cursor].kind;
+      if (kind === SyntaxKind.ExtendsKeyword) sawExtends = true;
+      else if (sawExtends && kind === SyntaxKind.QuestionToken) sawQuestion = true;
+      else if (sawQuestion && kind === SyntaxKind.ColonToken) return true;
+    }
+    return false;
   }
   if ([SyntaxKind.MinusToken, SyntaxKind.PlusToken].includes(first?.kind))
     return (
@@ -2985,6 +2995,10 @@ if (process.argv.includes('--self-test')) {
         return [first, <T extends U ? A : B>value];
       }`,
       expected: [{ name: 'commaAssertion', complexity: 1 }],
+    },
+    {
+      source: 'function parenthesizedTypeArgument() { return factory<(T extends U ? A : B)>(); }',
+      expected: [{ name: 'parenthesizedTypeArgument', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
