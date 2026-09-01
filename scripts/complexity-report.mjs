@@ -1494,7 +1494,10 @@ function isObjectMethodName(tokens, index) {
   ];
   let cursor = index - 1;
   while (modifiers.includes(tokens[cursor]?.kind)) cursor -= 1;
-  return [SyntaxKind.OpenBraceToken, SyntaxKind.CommaToken, SyntaxKind.SemicolonToken].includes(tokens[cursor]?.kind);
+  return (
+    [SyntaxKind.OpenBraceToken, SyntaxKind.CommaToken, SyntaxKind.SemicolonToken].includes(tokens[cursor]?.kind) ||
+    looksLikeMethodName(tokens, index)
+  );
 }
 
 function isClassHeritageExtends(tokens, index) {
@@ -3098,6 +3101,14 @@ if (process.argv.includes('--self-test')) {
       source:
         'function parenthesizedAbstractOverrideMethodComparison() { return factory < (((() => { abstract class X extends Base { abstract override extends(): void } return ready; })()) ? A : B) > (value); }',
       expected: [{ name: 'parenthesizedAbstractOverrideMethodComparison', complexity: 2 }],
+    },
+    {
+      source:
+        'function parenthesizedDecoratedMethodComparison() { return factory < (((() => { class X { @dec extends() {} } return ready; })()) ? A : B) > (value); }',
+      expected: [
+        { name: 'parenthesizedDecoratedMethodComparison', complexity: 2 },
+        { name: 'extends', complexity: 1 },
+      ],
     },
   ];
   for (const sample of samples) {
