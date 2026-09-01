@@ -1433,11 +1433,15 @@ function hasTopLevelCommaBetween(tokens, start, end) {
           const keywordQualifier = isKeywordToken(tokens[cursor - 1]);
           let context = cursor - 2;
           let importQualified = false;
+          let pathQualified = false;
           while (
             identifierLike(tokens[context]) ||
             [SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[context]?.kind)
-          )
+          ) {
+            if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[context]?.kind))
+              pathQualified = true;
             context -= 1;
+          }
           if (tokens[context]?.kind === SyntaxKind.CloseParenToken) {
             const importOpen = matchingOpen(tokens, context, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
             if (tokens[importOpen - 1]?.kind === SyntaxKind.ImportKeyword) {
@@ -1446,7 +1450,7 @@ function hasTopLevelCommaBetween(tokens, start, end) {
             }
           }
           return (
-            (!keywordQualifier || importQualified) &&
+            (!keywordQualifier || importQualified || pathQualified) &&
             [
               SyntaxKind.AsKeyword,
               SyntaxKind.SatisfiesKeyword,
@@ -3220,6 +3224,10 @@ if (process.argv.includes('--self-test')) {
       source:
         "function importClassGenericAssertion() { return value as keyof import('./m').class<A, B> extends U ? A : B; }",
       expected: [{ name: 'importClassGenericAssertion', complexity: 1 }],
+    },
+    {
+      source: 'function namespaceKeywordGenericAssertion() { return value as keyof N.class<A, B> extends U ? A : B; }',
+      expected: [{ name: 'namespaceKeywordGenericAssertion', complexity: 1 }],
     },
     {
       source:
