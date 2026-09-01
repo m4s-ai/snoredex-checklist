@@ -1,0 +1,657 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-01T19:21:31Z",
+  "title": "Design System: Snoredex Checklist",
+  "extensions": {
+    "colorMeta": {
+      "resting-cream": {
+        "role": "neutral",
+        "displayName": "Resting Cream",
+        "canonical": "#fbf8ee",
+        "tonalRamp": [
+          "oklch(15% 0.014 93.0)",
+          "oklch(25% 0.014 93.0)",
+          "oklch(35% 0.014 93.0)",
+          "oklch(45% 0.014 93.0)",
+          "oklch(55% 0.014 93.0)",
+          "oklch(65% 0.014 93.0)",
+          "oklch(80% 0.014 93.0)",
+          "oklch(95% 0.014 93.0)"
+        ]
+      },
+      "paper-surface": {
+        "role": "neutral",
+        "displayName": "Paper Surface",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "oklch(15% 0.000 89.9)",
+          "oklch(25% 0.000 89.9)",
+          "oklch(35% 0.000 89.9)",
+          "oklch(45% 0.000 89.9)",
+          "oklch(55% 0.000 89.9)",
+          "oklch(65% 0.000 89.9)",
+          "oklch(80% 0.000 89.9)",
+          "oklch(95% 0.000 89.9)"
+        ]
+      },
+      "quiet-parchment": {
+        "role": "neutral",
+        "displayName": "Quiet Parchment",
+        "canonical": "#f1edda",
+        "tonalRamp": [
+          "oklch(15% 0.025 97.1)",
+          "oklch(25% 0.025 97.1)",
+          "oklch(35% 0.025 97.1)",
+          "oklch(45% 0.025 97.1)",
+          "oklch(55% 0.025 97.1)",
+          "oklch(65% 0.025 97.1)",
+          "oklch(80% 0.025 97.1)",
+          "oklch(95% 0.025 97.1)"
+        ]
+      },
+      "deep-ink": {
+        "role": "neutral",
+        "displayName": "Deep Ink",
+        "canonical": "#23343a",
+        "tonalRamp": [
+          "oklch(15% 0.025 221.8)",
+          "oklch(25% 0.025 221.8)",
+          "oklch(35% 0.025 221.8)",
+          "oklch(45% 0.025 221.8)",
+          "oklch(55% 0.025 221.8)",
+          "oklch(65% 0.025 221.8)",
+          "oklch(80% 0.025 221.8)",
+          "oklch(95% 0.025 221.8)"
+        ]
+      },
+      "muted-slate": {
+        "role": "neutral",
+        "displayName": "Muted Slate",
+        "canonical": "#59686b",
+        "tonalRamp": [
+          "oklch(15% 0.019 211.1)",
+          "oklch(25% 0.019 211.1)",
+          "oklch(35% 0.019 211.1)",
+          "oklch(45% 0.019 211.1)",
+          "oklch(55% 0.019 211.1)",
+          "oklch(65% 0.019 211.1)",
+          "oklch(80% 0.019 211.1)",
+          "oklch(95% 0.019 211.1)"
+        ]
+      },
+      "collector-teal": {
+        "role": "primary",
+        "displayName": "Collector Teal",
+        "canonical": "#456f78",
+        "tonalRamp": [
+          "oklch(15% 0.049 212.7)",
+          "oklch(25% 0.049 212.7)",
+          "oklch(35% 0.049 212.7)",
+          "oklch(45% 0.049 212.7)",
+          "oklch(55% 0.049 212.7)",
+          "oklch(65% 0.049 212.7)",
+          "oklch(80% 0.049 212.7)",
+          "oklch(95% 0.049 212.7)"
+        ]
+      },
+      "primary-ink-light": {
+        "role": "primary",
+        "displayName": "Clean Primary Ink",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "oklch(15% 0.000 89.9)",
+          "oklch(25% 0.000 89.9)",
+          "oklch(35% 0.000 89.9)",
+          "oklch(45% 0.000 89.9)",
+          "oklch(55% 0.000 89.9)",
+          "oklch(65% 0.000 89.9)",
+          "oklch(80% 0.000 89.9)",
+          "oklch(95% 0.000 89.9)"
+        ]
+      },
+      "pale-collector-teal": {
+        "role": "primary",
+        "displayName": "Pale Collector Teal",
+        "canonical": "#dcebed",
+        "tonalRamp": [
+          "oklch(15% 0.016 206.4)",
+          "oklch(25% 0.016 206.4)",
+          "oklch(35% 0.016 206.4)",
+          "oklch(45% 0.016 206.4)",
+          "oklch(55% 0.016 206.4)",
+          "oklch(65% 0.016 206.4)",
+          "oklch(80% 0.016 206.4)",
+          "oklch(95% 0.016 206.4)"
+        ]
+      },
+      "quiet-seafoam": {
+        "role": "secondary",
+        "displayName": "Quiet Seafoam",
+        "canonical": "#a7c8b8",
+        "tonalRamp": [
+          "oklch(15% 0.042 164.5)",
+          "oklch(25% 0.042 164.5)",
+          "oklch(35% 0.042 164.5)",
+          "oklch(45% 0.042 164.5)",
+          "oklch(55% 0.042 164.5)",
+          "oklch(65% 0.042 164.5)",
+          "oklch(80% 0.042 164.5)",
+          "oklch(95% 0.042 164.5)"
+        ]
+      },
+      "binder-gold": {
+        "role": "tertiary",
+        "displayName": "Binder Gold",
+        "canonical": "#e8d69b",
+        "tonalRamp": [
+          "oklch(15% 0.079 93.1)",
+          "oklch(25% 0.079 93.1)",
+          "oklch(35% 0.079 93.1)",
+          "oklch(45% 0.079 93.1)",
+          "oklch(55% 0.079 93.1)",
+          "oklch(65% 0.079 93.1)",
+          "oklch(80% 0.079 93.1)",
+          "oklch(95% 0.079 93.1)"
+        ]
+      },
+      "soft-coral-warning": {
+        "role": "error",
+        "displayName": "Soft Coral Warning",
+        "canonical": "#ad5752",
+        "tonalRamp": [
+          "oklch(15% 0.113 24.8)",
+          "oklch(25% 0.113 24.8)",
+          "oklch(35% 0.113 24.8)",
+          "oklch(45% 0.113 24.8)",
+          "oklch(55% 0.113 24.8)",
+          "oklch(65% 0.113 24.8)",
+          "oklch(80% 0.113 24.8)",
+          "oklch(95% 0.113 24.8)"
+        ]
+      },
+      "paper-border": {
+        "role": "neutral",
+        "displayName": "Paper Border",
+        "canonical": "#d8ddd3",
+        "tonalRamp": [
+          "oklch(15% 0.015 128.6)",
+          "oklch(25% 0.015 128.6)",
+          "oklch(35% 0.015 128.6)",
+          "oklch(45% 0.015 128.6)",
+          "oklch(55% 0.015 128.6)",
+          "oklch(65% 0.015 128.6)",
+          "oklch(80% 0.015 128.6)",
+          "oklch(95% 0.015 128.6)"
+        ]
+      },
+      "control-slate": {
+        "role": "neutral",
+        "displayName": "Control Slate",
+        "canonical": "#7c8b8a",
+        "tonalRamp": [
+          "oklch(15% 0.017 191.8)",
+          "oklch(25% 0.017 191.8)",
+          "oklch(35% 0.017 191.8)",
+          "oklch(45% 0.017 191.8)",
+          "oklch(55% 0.017 191.8)",
+          "oklch(65% 0.017 191.8)",
+          "oklch(80% 0.017 191.8)",
+          "oklch(95% 0.017 191.8)"
+        ]
+      },
+      "amber-focus": {
+        "role": "tertiary",
+        "displayName": "Amber Focus",
+        "canonical": "#7a5c00",
+        "tonalRamp": [
+          "oklch(15% 0.101 86.4)",
+          "oklch(25% 0.101 86.4)",
+          "oklch(35% 0.101 86.4)",
+          "oklch(45% 0.101 86.4)",
+          "oklch(55% 0.101 86.4)",
+          "oklch(65% 0.101 86.4)",
+          "oklch(80% 0.101 86.4)",
+          "oklch(95% 0.101 86.4)"
+        ]
+      },
+      "night-page": {
+        "role": "neutral",
+        "displayName": "Night Page",
+        "canonical": "#172326",
+        "tonalRamp": [
+          "oklch(15% 0.018 214.9)",
+          "oklch(25% 0.018 214.9)",
+          "oklch(35% 0.018 214.9)",
+          "oklch(45% 0.018 214.9)",
+          "oklch(55% 0.018 214.9)",
+          "oklch(65% 0.018 214.9)",
+          "oklch(80% 0.018 214.9)",
+          "oklch(95% 0.018 214.9)"
+        ]
+      },
+      "night-surface": {
+        "role": "neutral",
+        "displayName": "Night Surface",
+        "canonical": "#213136",
+        "tonalRamp": [
+          "oklch(15% 0.023 219.2)",
+          "oklch(25% 0.023 219.2)",
+          "oklch(35% 0.023 219.2)",
+          "oklch(45% 0.023 219.2)",
+          "oklch(55% 0.023 219.2)",
+          "oklch(65% 0.023 219.2)",
+          "oklch(80% 0.023 219.2)",
+          "oklch(95% 0.023 219.2)"
+        ]
+      },
+      "night-soft": {
+        "role": "neutral",
+        "displayName": "Night Soft Layer",
+        "canonical": "#2a3c40",
+        "tonalRamp": [
+          "oklch(15% 0.024 212.9)",
+          "oklch(25% 0.024 212.9)",
+          "oklch(35% 0.024 212.9)",
+          "oklch(45% 0.024 212.9)",
+          "oklch(55% 0.024 212.9)",
+          "oklch(65% 0.024 212.9)",
+          "oklch(80% 0.024 212.9)",
+          "oklch(95% 0.024 212.9)"
+        ]
+      },
+      "night-ink": {
+        "role": "neutral",
+        "displayName": "Night Ink",
+        "canonical": "#f4f0dd",
+        "tonalRamp": [
+          "oklch(15% 0.025 97.1)",
+          "oklch(25% 0.025 97.1)",
+          "oklch(35% 0.025 97.1)",
+          "oklch(45% 0.025 97.1)",
+          "oklch(55% 0.025 97.1)",
+          "oklch(65% 0.025 97.1)",
+          "oklch(80% 0.025 97.1)",
+          "oklch(95% 0.025 97.1)"
+        ]
+      },
+      "night-muted": {
+        "role": "neutral",
+        "displayName": "Night Muted",
+        "canonical": "#b7c2bd",
+        "tonalRamp": [
+          "oklch(15% 0.014 167.1)",
+          "oklch(25% 0.014 167.1)",
+          "oklch(35% 0.014 167.1)",
+          "oklch(45% 0.014 167.1)",
+          "oklch(55% 0.014 167.1)",
+          "oklch(65% 0.014 167.1)",
+          "oklch(80% 0.014 167.1)",
+          "oklch(95% 0.014 167.1)"
+        ]
+      },
+      "night-collector-teal": {
+        "role": "primary",
+        "displayName": "Night Collector Teal",
+        "canonical": "#79aeb8",
+        "tonalRamp": [
+          "oklch(15% 0.057 210.6)",
+          "oklch(25% 0.057 210.6)",
+          "oklch(35% 0.057 210.6)",
+          "oklch(45% 0.057 210.6)",
+          "oklch(55% 0.057 210.6)",
+          "oklch(65% 0.057 210.6)",
+          "oklch(80% 0.057 210.6)",
+          "oklch(95% 0.057 210.6)"
+        ]
+      },
+      "night-primary-ink": {
+        "role": "primary",
+        "displayName": "Night Primary Ink",
+        "canonical": "#172326",
+        "tonalRamp": [
+          "oklch(15% 0.018 214.9)",
+          "oklch(25% 0.018 214.9)",
+          "oklch(35% 0.018 214.9)",
+          "oklch(45% 0.018 214.9)",
+          "oklch(55% 0.018 214.9)",
+          "oklch(65% 0.018 214.9)",
+          "oklch(80% 0.018 214.9)",
+          "oklch(95% 0.018 214.9)"
+        ]
+      },
+      "night-primary-soft": {
+        "role": "primary",
+        "displayName": "Night Primary Soft",
+        "canonical": "#29464c",
+        "tonalRamp": [
+          "oklch(15% 0.036 212.2)",
+          "oklch(25% 0.036 212.2)",
+          "oklch(35% 0.036 212.2)",
+          "oklch(45% 0.036 212.2)",
+          "oklch(55% 0.036 212.2)",
+          "oklch(65% 0.036 212.2)",
+          "oklch(80% 0.036 212.2)",
+          "oklch(95% 0.036 212.2)"
+        ]
+      },
+      "night-seafoam": {
+        "role": "secondary",
+        "displayName": "Night Seafoam",
+        "canonical": "#9cc2af",
+        "tonalRamp": [
+          "oklch(15% 0.049 163.4)",
+          "oklch(25% 0.049 163.4)",
+          "oklch(35% 0.049 163.4)",
+          "oklch(45% 0.049 163.4)",
+          "oklch(55% 0.049 163.4)",
+          "oklch(65% 0.049 163.4)",
+          "oklch(80% 0.049 163.4)",
+          "oklch(95% 0.049 163.4)"
+        ]
+      },
+      "night-binder-gold": {
+        "role": "tertiary",
+        "displayName": "Night Binder Gold",
+        "canonical": "#d8c78e",
+        "tonalRamp": [
+          "oklch(15% 0.077 93.5)",
+          "oklch(25% 0.077 93.5)",
+          "oklch(35% 0.077 93.5)",
+          "oklch(45% 0.077 93.5)",
+          "oklch(55% 0.077 93.5)",
+          "oklch(65% 0.077 93.5)",
+          "oklch(80% 0.077 93.5)",
+          "oklch(95% 0.077 93.5)"
+        ]
+      },
+      "night-coral-warning": {
+        "role": "error",
+        "displayName": "Night Coral Warning",
+        "canonical": "#e28f87",
+        "tonalRamp": [
+          "oklch(15% 0.102 25.8)",
+          "oklch(25% 0.102 25.8)",
+          "oklch(35% 0.102 25.8)",
+          "oklch(45% 0.102 25.8)",
+          "oklch(55% 0.102 25.8)",
+          "oklch(65% 0.102 25.8)",
+          "oklch(80% 0.102 25.8)",
+          "oklch(95% 0.102 25.8)"
+        ]
+      },
+      "night-border": {
+        "role": "neutral",
+        "displayName": "Night Border",
+        "canonical": "#405257",
+        "tonalRamp": [
+          "oklch(15% 0.024 216.5)",
+          "oklch(25% 0.024 216.5)",
+          "oklch(35% 0.024 216.5)",
+          "oklch(45% 0.024 216.5)",
+          "oklch(55% 0.024 216.5)",
+          "oklch(65% 0.024 216.5)",
+          "oklch(80% 0.024 216.5)",
+          "oklch(95% 0.024 216.5)"
+        ]
+      },
+      "night-control": {
+        "role": "neutral",
+        "displayName": "Night Control",
+        "canonical": "#7b8d8f",
+        "tonalRamp": [
+          "oklch(15% 0.021 204.8)",
+          "oklch(25% 0.021 204.8)",
+          "oklch(35% 0.021 204.8)",
+          "oklch(45% 0.021 204.8)",
+          "oklch(55% 0.021 204.8)",
+          "oklch(65% 0.021 204.8)",
+          "oklch(80% 0.021 204.8)",
+          "oklch(95% 0.021 204.8)"
+        ]
+      },
+      "night-focus": {
+        "role": "tertiary",
+        "displayName": "Night Focus",
+        "canonical": "#f0d276",
+        "tonalRamp": [
+          "oklch(15% 0.117 91.8)",
+          "oklch(25% 0.117 91.8)",
+          "oklch(35% 0.117 91.8)",
+          "oklch(45% 0.117 91.8)",
+          "oklch(55% 0.117 91.8)",
+          "oklch(65% 0.117 91.8)",
+          "oklch(80% 0.117 91.8)",
+          "oklch(95% 0.117 91.8)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Marketing index hero only."
+      },
+      "collection-title": {
+        "displayName": "Collection Title",
+        "purpose": "Page-level title for the collection work view."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section hierarchy and meaningful collection milestones."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Catalogue explanation, metadata, and task copy."
+      },
+      "lede": {
+        "displayName": "Lede",
+        "purpose": "Short introductory copy with a readable measure."
+      },
+      "control": {
+        "displayName": "Control",
+        "purpose": "Primary actions and strong interactive labels."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Form labels, metadata headings, and secondary controls."
+      },
+      "eyebrow": {
+        "displayName": "Eyebrow",
+        "purpose": "Sparse uppercase page orientation."
+      }
+    },
+    "shadows": [
+      {
+        "name": "ambient-surface-light",
+        "value": "0 12px 32px rgb(35 52 58 / 9%)",
+        "purpose": "Soft separation for major light-theme surfaces and dialogs."
+      },
+      {
+        "name": "ambient-surface-dark",
+        "value": "0 12px 32px rgb(0 0 0 / 20%)",
+        "purpose": "Soft separation for major dark-theme surfaces and dialogs."
+      },
+      {
+        "name": "collector-row",
+        "value": "0 6px 18px rgb(35 52 58 / 7%)",
+        "purpose": "Small lift for trackable collector rows; never apply to research rows."
+      }
+    ],
+    "motion": [
+      {
+        "name": "image-inspection",
+        "value": "transform 160ms ease",
+        "purpose": "Quiet scale feedback on an inspectable card image."
+      },
+      {
+        "name": "reduced-motion-floor",
+        "value": "0.01ms",
+        "purpose": "Effectively disables transition and animation duration when reduced motion is requested."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "layout-collapse",
+        "value": "900px"
+      },
+      {
+        "name": "item-stack",
+        "value": "520px"
+      },
+      {
+        "name": "minimum-layout",
+        "value": "320px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary-light",
+      "description": "The stable primary action used to open or update a collection view.",
+      "html": "<button class=\"ds-btn-primary\">Show collection</button>",
+      "css": ".ds-btn-primary { min-height: 44px; border: 1px solid var(--control, #7c8b8a); border-radius: 12px; padding: 0.6rem 1rem; background: var(--primary, #456f78); color: var(--primary-ink, #fff); font: 500 1rem/1.55 \"Nunito Sans\", system-ui, sans-serif; cursor: pointer; } .ds-btn-primary:hover { background: var(--primary, #456f78); } .ds-btn-primary:focus-visible { outline: 3px solid var(--focus, #7a5c00); outline-offset: 3px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary-light",
+      "description": "A quiet supporting action for theme, retry, recovery, or disclosure flows.",
+      "html": "<button class=\"ds-btn-secondary\">Dark theme</button>",
+      "css": ".ds-btn-secondary { min-height: 44px; border: 1px solid var(--control, #7c8b8a); border-radius: 12px; padding: 0.6rem 1rem; background: var(--surface, #fff); color: var(--ink, #23343a); font: 500 0.9rem/1.55 \"Nunito Sans\", system-ui, sans-serif; cursor: pointer; } .ds-btn-secondary:hover { background: var(--surface, #fff); } .ds-btn-secondary:focus-visible { outline: 3px solid var(--focus, #7a5c00); outline-offset: 3px; }"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "field-light",
+      "description": "The native, high-contrast field treatment shared by search, selects, quantities, and notes.",
+      "html": "<label class=\"ds-field-label\">Search public catalogue text<input class=\"ds-input-search\" type=\"search\" /></label>",
+      "css": ".ds-field-label { display: grid; gap: 0.3rem; color: var(--muted, #59686b); font: 500 0.9rem/1.55 \"Nunito Sans\", system-ui, sans-serif; } .ds-input-search { min-height: 44px; width: 100%; border: 1px solid var(--control, #7c8b8a); border-radius: 12px; padding: 0.55rem 0.7rem; background: var(--surface, #fff); color: var(--ink, #23343a); font: 400 1rem/1.55 \"Nunito Sans\", system-ui, sans-serif; } .ds-input-search:hover { border-color: var(--control, #7c8b8a); } .ds-input-search:focus-visible { outline: 3px solid var(--focus, #7a5c00); outline-offset: 3px; }"
+    },
+    {
+      "name": "Localization Navigation Link",
+      "kind": "nav",
+      "description": "A semantic catalogue link with a soft teal hover and focus surface.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Localizations\"><a class=\"ds-nav-link\" href=\"#\">English (WEST)</a></nav>",
+      "css": ".ds-nav { display: grid; gap: 0.5rem; } .ds-nav-link { min-height: 44px; display: flex; align-items: center; padding: 0.55rem 0.7rem; border-radius: 12px; color: var(--primary, #456f78); font: 400 1rem/1.55 \"Nunito Sans\", system-ui, sans-serif; text-underline-offset: 0.18em; } .ds-nav-link:hover { background: var(--primary-soft, #dcebed); } .ds-nav-link:focus-visible { background: var(--primary-soft, #dcebed); outline: 3px solid var(--focus, #7a5c00); outline-offset: 3px; }"
+    },
+    {
+      "name": "Working Surface",
+      "kind": "card",
+      "refersTo": "surface-light",
+      "description": "The major paper-like container for index and collection content.",
+      "html": "<section class=\"ds-surface\"><h2>Public data, private collection</h2><p>Catalogue criteria stay public; collection progress stays local.</p></section>",
+      "css": ".ds-surface { background: var(--surface, #fff); color: var(--ink, #23343a); border: 1px solid var(--border, #d8ddd3); border-radius: 18px; box-shadow: var(--shadow, 0 12px 32px rgb(35 52 58 / 9%)); padding: clamp(1rem, 3vw, 2rem); font: 400 1rem/1.55 \"Nunito Sans\", system-ui, sans-serif; } .ds-surface h2 { margin: 0 0 0.75rem; line-height: 1.15; letter-spacing: -0.025em; } .ds-surface:hover { border-color: var(--border, #d8ddd3); } .ds-surface:focus-within { outline: 3px solid var(--focus, #7a5c00); outline-offset: 3px; }"
+    },
+    {
+      "name": "Progress Panel",
+      "kind": "custom",
+      "description": "A flat tonal region that separates current-known progress from research counts.",
+      "html": "<section class=\"ds-progress-panel\"><h2>Current-known progress</h2><p>12 of 40 current-known items owned</p><progress max=\"40\" value=\"12\">12 of 40</progress><p>3 research items excluded from progress.</p></section>",
+      "css": ".ds-progress-panel { border: 1px solid var(--border, #d8ddd3); border-radius: 14px; padding: 1rem; background: var(--soft, #f1edda); color: var(--ink, #23343a); font: 400 1rem/1.55 \"Nunito Sans\", system-ui, sans-serif; } .ds-progress-panel h2 { margin: 0 0 0.45rem; line-height: 1.15; letter-spacing: -0.025em; } .ds-progress-panel p { margin: 0.35rem 0; } .ds-progress-panel progress { display: block; width: 100%; height: 1rem; accent-color: var(--primary, #456f78); } .ds-progress-panel:hover { border-color: var(--border, #d8ddd3); } .ds-progress-panel:focus-within { outline: 3px solid var(--focus, #7a5c00); outline-offset: 3px; }"
+    },
+    {
+      "name": "Collector Item Row",
+      "kind": "card",
+      "refersTo": "item-row-light",
+      "description": "The signature trackable item: compact image rail, identity, metadata, and evidence cue.",
+      "html": "<article class=\"ds-item-row\"><div class=\"ds-card-placeholder\" aria-hidden=\"true\"></div><div class=\"ds-item-content\"><strong>Snorlax</strong><p class=\"ds-item-meta\">Set · 001 · Finish: holo</p><span class=\"ds-item-cue\">Trackable</span></div></article>",
+      "css": ".ds-item-row { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: start; gap: 0.85rem; padding: 0.8rem; border: 1px solid var(--border, #d8ddd3); border-radius: 18px; background: var(--surface, #fff); color: var(--ink, #23343a); box-shadow: 0 6px 18px rgb(35 52 58 / 7%); font: 400 1rem/1.55 \"Nunito Sans\", system-ui, sans-serif; } .ds-card-placeholder { width: 76px; min-height: 104px; border-radius: 14px; background: var(--primary-soft, #dcebed); } .ds-item-meta { margin: 0.22rem 0 0.5rem; color: var(--muted, #59686b); font-size: 0.9rem; } .ds-item-cue { color: var(--muted, #59686b); font-size: 0.9rem; } .ds-item-row:hover { border-color: var(--border, #d8ddd3); } .ds-item-row:focus-within { outline: 3px solid var(--focus, #7a5c00); outline-offset: 3px; }"
+    },
+    {
+      "name": "Collection Controls",
+      "kind": "custom",
+      "description": "The soft inset region for private status and quantity controls.",
+      "html": "<fieldset class=\"ds-collection-controls\"><legend>Collection status</legend><label class=\"ds-status-option\"><input type=\"radio\" name=\"status\" checked /> Need</label><label class=\"ds-status-option\"><input type=\"radio\" name=\"status\" /> Have</label></fieldset>",
+      "css": ".ds-collection-controls { display: flex; flex-wrap: wrap; gap: 0.35rem 0.65rem; margin: 0; padding: 0.75rem; border: 1px solid var(--border, #d8ddd3); border-radius: 14px; background: var(--soft, #f1edda); color: var(--ink, #23343a); font: 400 1rem/1.55 \"Nunito Sans\", system-ui, sans-serif; } .ds-collection-controls legend { color: var(--muted, #59686b); font-size: 0.85rem; font-weight: 500; } .ds-status-option { display: inline-flex; align-items: center; gap: 0.35rem; min-height: 44px; padding: 0.3rem 0.45rem; border-radius: 10px; } .ds-status-option:hover { background: var(--primary-soft, #dcebed); } .ds-status-option:focus-within { outline: 3px solid var(--focus, #7a5c00); outline-offset: 3px; }"
+    },
+    {
+      "name": "Research Item Row",
+      "kind": "card",
+      "description": "A grounded, dashed, read-only variant that cannot be mistaken for a trackable item.",
+      "html": "<article class=\"ds-research-row\"><div class=\"ds-card-placeholder\" aria-hidden=\"true\"></div><div><strong>Snorlax</strong><p class=\"ds-item-meta\">Finish candidate</p><span class=\"ds-item-cue\">Research · read-only</span></div></article>",
+      "css": ".ds-research-row { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 0.85rem; padding: 0.8rem; border: 1px dashed var(--border, #d8ddd3); border-radius: 18px; background: var(--surface, #fff); color: var(--ink, #23343a); box-shadow: none; font: 400 1rem/1.55 \"Nunito Sans\", system-ui, sans-serif; } .ds-research-row .ds-card-placeholder { width: 76px; min-height: 104px; border-radius: 14px; background: var(--primary-soft, #dcebed); } .ds-research-row .ds-item-meta, .ds-research-row .ds-item-cue { color: var(--muted, #59686b); font-size: 0.9rem; } .ds-research-row:hover { border-style: dashed; } .ds-research-row:focus-within { outline: 3px solid var(--focus, #7a5c00); outline-offset: 3px; }"
+    },
+    {
+      "name": "Image Inspection Dialog",
+      "kind": "custom",
+      "description": "A compact native-style modal for inspecting an approved image and its scope.",
+      "html": "<div class=\"ds-image-dialog\" role=\"dialog\" aria-labelledby=\"ds-dialog-title\"><h3 id=\"ds-dialog-title\">Inspect image</h3><div class=\"ds-dialog-image\">Card image area</div><button class=\"ds-btn-primary\">Close</button></div>",
+      "css": ".ds-image-dialog { width: min(30rem, calc(100vw - 2rem)); padding: 1rem; border: 1px solid var(--border, #d8ddd3); border-radius: 18px; background: var(--surface, #fff); color: var(--ink, #23343a); box-shadow: var(--shadow, 0 12px 32px rgb(35 52 58 / 9%)); font: 400 1rem/1.55 \"Nunito Sans\", system-ui, sans-serif; } .ds-image-dialog h3 { margin-top: 0; } .ds-dialog-image { display: grid; place-items: center; min-height: 12rem; margin-bottom: 0.7rem; border-radius: 14px; background: var(--primary-soft, #dcebed); color: var(--muted, #59686b); } .ds-image-dialog:hover { border-color: var(--border, #d8ddd3); } .ds-image-dialog:focus-within { outline: 3px solid var(--focus, #7a5c00); outline-offset: 3px; } .ds-image-dialog .ds-btn-primary { min-height: 44px; border: 1px solid var(--control, #7c8b8a); border-radius: 12px; padding: 0.6rem 1rem; background: var(--primary, #456f78); color: var(--primary-ink, #fff); font: 500 1rem/1.55 \"Nunito Sans\", system-ui, sans-serif; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Calm Collector's Desk",
+    "overview": "The interface should feel like a carefully arranged place to sort a collection: calm enough for a long session, tactile enough to feel personal, and precise enough to support evidence-sensitive decisions. Warm paper tones and softened teal layers make the catalogue approachable without turning it into a toy. The collection application stays operational and scan-friendly; expression comes through restrained color, generous touch geometry, and small material cues.\n\nThe voice is calm, trustworthy, softly tactile, and friendly without childishness. The system does not mimic official Pokémon artwork or product UI, does not borrow the flash of a game dashboard, and does not collapse into clinical database styling. Its visual character supports the product's careful language about privacy, provenance, and uncertainty.",
+    "keyCharacteristics": [
+      "Warm cream and ink neutrals anchored by Collector Teal.",
+      "Paired light and dark themes with the same semantic hierarchy.",
+      "Rounded, generous controls and softly layered working surfaces.",
+      "Compact collector rows that keep identity, evidence, and private controls distinct.",
+      "Visible focus, non-color cues, and calm motion that respects reduced-motion preferences."
+    ],
+    "rules": [
+      {
+        "name": "The Paired Theme Rule",
+        "body": "Components use semantic theme variables. Do not hard-code a light or dark color inside a reusable component.",
+        "section": "colors"
+      },
+      {
+        "name": "The Quiet Accent Rule",
+        "body": "Collector Teal establishes action and orientation; Binder Gold and Seafoam support it and never turn collection progress into gamified celebration.",
+        "section": "colors"
+      },
+      {
+        "name": "The Native Clarity Rule",
+        "body": "Do not introduce a display font merely for novelty. The incumbent system earns personality through composition and material color while preserving native legibility.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tight Heading Rule",
+        "body": "Large headings use compact line-height and modest negative tracking; body and control text retain the relaxed reading rhythm.",
+        "section": "typography"
+      },
+      {
+        "name": "The Work Surface Rule",
+        "body": "Keep the collection column compact enough to scan; use width for readable identity and controls, not for ornamental emptiness.",
+        "section": "layout"
+      },
+      {
+        "name": "The Progressive Detail Rule",
+        "body": "Evidence, recovery, and dense metadata stay in native disclosure patterns until the collector asks for them.",
+        "section": "layout"
+      },
+      {
+        "name": "The Ambient, Not Altitude Rule",
+        "body": "Shadows suggest paper resting on a desk; they do not create a stack of floating application layers.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Research Stays Grounded Rule",
+        "body": "Read-only research rows use no shadow. Their dashed boundary is the durable cue that they are not ordinary collection items.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Three-Radius Rule",
+        "body": "Most interface geometry belongs to control, inset, or surface scale. Introduce another radius only when the object's physical role is genuinely different.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do use semantic theme variables so light and dark modes preserve the same hierarchy.",
+      "Do reserve Collector Teal for action, orientation, links, and progress.",
+      "Do use tonal layers and quiet borders before reaching for stronger shadow.",
+      "Do keep collection rows compact while preserving readable identity and 44px controls.",
+      "Do pair uncertainty, warning, research, and save state with explicit text and non-color cues.",
+      "Do preserve the 320px reflow floor, visible focus, reduced motion, and forced-color behavior."
+    ],
+    "donts": [
+      "Don't mimic official Pokémon artwork, silhouettes, trading-card UI, or game-dashboard effects.",
+      "Don't make the interface childish, neon, celebratory, or gamified.",
+      "Don't flatten the product into a clinical table or generic admin dashboard.",
+      "Don't wrap every nested region in another elevated card; inset layers are tonal and flat.",
+      "Don't use pill shapes for ordinary buttons, fields, surfaces, or long labels.",
+      "Don't use shadow, color, or imagery to imply that research is a verified physical printing."
+    ]
+  }
+}

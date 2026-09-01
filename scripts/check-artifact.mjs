@@ -1,10 +1,27 @@
 import { readdir, readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { join, resolve, relative, posix } from 'node:path';
 import process from 'node:process';
 import { SyntaxKind } from 'typescript/unstable/ast';
 import { API } from 'typescript/unstable/sync';
 
 const root = resolve(process.cwd(), process.argv[2] ?? 'dist/site');
+const fontAssets = new Map([
+  [
+    'assets/fonts/nunito-sans-latin-400-normal.woff2',
+    {
+      byteLength: 13892,
+      sha256: 'd9976dd1dc9c0d65046b52810e7cc69cfc229ee9939628ffe637e17efe4ef1ed',
+    },
+  ],
+  [
+    'assets/fonts/nunito-sans-latin-500-normal.woff2',
+    {
+      byteLength: 13968,
+      sha256: '48dded5f1bd76377af9bd7da7da1433080e275bb26a81f1c1ae0dce3564d3f52',
+    },
+  ],
+]);
 const required = [
   'index.html',
   'collection/index.html',
@@ -15,6 +32,7 @@ const required = [
   'LICENSE.md',
   'THIRD_PARTY_NOTICES.md',
   'provenance.json',
+  ...fontAssets.keys(),
 ];
 
 function containsPrivateStateSchema(value) {
@@ -760,7 +778,7 @@ try {
 
   const forbiddenContent = /\.snoredex-private\.json|synthetic-secret|PRIVATE-NOTE-DO-NOT-LOG/iu;
   const csp =
-    "default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'none'; media-src 'none'; manifest-src 'none'";
+    "default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'self'; media-src 'none'; manifest-src 'none'";
   for (const page of ['index.html', 'collection/index.html']) {
     const html = await readFile(join(root, page), 'utf8');
     const withoutComments = stripHtmlComments(html);
@@ -813,8 +831,15 @@ try {
   );
   for (const file of allFiles) {
     const bytes = await readFile(file);
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     const relativePath = relative(root, file).replaceAll('\\', '/');
+    const font = fontAssets.get(relativePath);
+    if (font) {
+      if (bytes.byteLength !== font.byteLength || createHash('sha256').update(bytes).digest('hex') !== font.sha256) {
+        throw new Error(`ARTIFACT_FONT_DIGEST_MISMATCH: ${relativePath}`);
+      }
+      continue;
+    }
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     if (/\.css$/iu.test(relativePath)) {
       for (const match of stripCssComments(decodeCssEscapes(text)).matchAll(
         /@import\b\s*(?:url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s)]+))\s*\)|"([^"]*)"|'([^']*)')/giu,

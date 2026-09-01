@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
@@ -11,7 +11,7 @@ import { validatePagesDeployment } from '../src/site/deployment.ts';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const checker = resolve(root, 'scripts/check-artifact.mjs');
 const csp =
-  "default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'none'; media-src 'none'; manifest-src 'none'";
+  "default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'self'; media-src 'none'; manifest-src 'none'";
 
 test('requires Pages smoke provenance to match the expected workflow tuple', () => {
   const expected = {
@@ -72,6 +72,7 @@ async function writeValidArtifact(
   } = {},
 ) {
   await mkdir(join(directory, 'collection'), { recursive: true });
+  await mkdir(join(directory, 'assets', 'fonts'), { recursive: true });
   await Promise.all([
     writeFile(join(directory, 'index.html'), `${indexMeta}${indexScript}`),
     writeFile(join(directory, 'collection/index.html'), `${collectionMeta}${collectionScript}`),
@@ -81,6 +82,14 @@ async function writeValidArtifact(
     writeFile(join(directory, 'llms.txt'), ''),
     writeFile(join(directory, 'LICENSE.md'), ''),
     writeFile(join(directory, 'THIRD_PARTY_NOTICES.md'), ''),
+    copyFile(
+      resolve(root, 'site-src/assets/fonts/nunito-sans-latin-400-normal.woff2'),
+      join(directory, 'assets/fonts/nunito-sans-latin-400-normal.woff2'),
+    ),
+    copyFile(
+      resolve(root, 'site-src/assets/fonts/nunito-sans-latin-500-normal.woff2'),
+      join(directory, 'assets/fonts/nunito-sans-latin-500-normal.woff2'),
+    ),
     writeFile(
       join(directory, 'provenance.json'),
       JSON.stringify({
@@ -99,6 +108,22 @@ async function writeValidArtifact(
     ),
   ]);
 }
+
+test('rejects modified self-hosted font assets', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-font-test-'));
+  try {
+    await writeValidArtifact(directory);
+    await writeFile(join(directory, 'assets/fonts/nunito-sans-latin-400-normal.woff2'), 'not a font');
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(
+      `${result.stdout}${result.stderr}`,
+      /ARTIFACT_FONT_DIGEST_MISMATCH: assets\/fonts\/nunito-sans-latin-400-normal\.woff2/u,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test('rejects a renamed private-state JSON export', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-test-'));

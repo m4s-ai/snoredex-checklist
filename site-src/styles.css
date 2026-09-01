@@ -1,3 +1,17 @@
+@font-face {
+  font-family: 'Nunito Sans';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('assets/fonts/nunito-sans-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Nunito Sans';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url('assets/fonts/nunito-sans-latin-500-normal.woff2') format('woff2');
+}
 :root {
   color-scheme: light;
   --page: #fbf8ee;
@@ -14,6 +28,7 @@
   --border: #d8ddd3;
   --control: #7c8b8a;
   --focus: #7a5c00;
+  --backdrop: color-mix(in srgb, var(--ink) 55%, transparent);
   --shadow: 0 12px 32px rgb(35 52 58 / 9%);
 }
 :root[data-theme='dark'] {
@@ -32,6 +47,7 @@
   --border: #405257;
   --control: #7b8d8f;
   --focus: #f0d276;
+  --backdrop: color-mix(in srgb, var(--page) 78%, transparent);
   --shadow: 0 12px 32px rgb(0 0 0 / 20%);
 }
 * {
@@ -50,7 +66,8 @@ body {
   background: var(--page);
   color: var(--ink);
   font:
-    400 1rem/1.55 system-ui,
+    400 1rem/1.55 'Nunito Sans',
+    system-ui,
     sans-serif;
 }
 a {
@@ -108,7 +125,7 @@ textarea:focus-visible {
 }
 .brand {
   color: var(--ink);
-  font-weight: 700;
+  font-weight: 500;
   text-decoration: none;
   letter-spacing: 0.01em;
 }
@@ -121,7 +138,7 @@ button,
   background: var(--primary);
   color: var(--primary-ink);
   font: inherit;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   text-decoration: none;
   display: inline-flex;
@@ -144,8 +161,17 @@ button[data-theme-toggle] {
 }
 h1,
 h2 {
+  font-weight: 500;
   line-height: 1.15;
   letter-spacing: -0.025em;
+}
+h3,
+h4,
+h5,
+h6,
+strong,
+b {
+  font-weight: 500;
 }
 h1 {
   font-size: clamp(2.3rem, 6vw, 4.8rem);
@@ -163,7 +189,7 @@ h2 {
 .eyebrow {
   color: var(--primary);
   font-size: 0.8rem;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -176,10 +202,55 @@ h2 {
   margin-block: 1rem;
   min-width: 0;
 }
-.split {
+.persuasion-copy {
+  max-width: 70ch;
+}
+.proof-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: clamp(1rem, 4vw, 4rem);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem 1.5rem;
+  padding: 1rem 0 0;
+  margin: 1.2rem 0 0;
+  border-top: 1px solid var(--border);
+  list-style: none;
+}
+.proof-list li {
+  display: grid;
+  align-content: start;
+  gap: 0.25rem;
+}
+.directory-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem 2rem;
+  margin-bottom: 1.2rem;
+}
+.directory-heading h2,
+.directory-heading p {
+  margin-bottom: 0;
+}
+.directory-heading p {
+  max-width: 65ch;
+  color: var(--muted);
+}
+.localization-groups {
+  columns: 13rem;
+  column-gap: 2rem;
+}
+.localization-group {
+  min-width: 0;
+  margin-bottom: 1.25rem;
+  break-inside: avoid;
+}
+.localization-group h3 {
+  margin: 0 0 0.35rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .collection-grid {
   max-width: 960px;
@@ -225,12 +296,21 @@ h2 {
 }
 .provenance dt {
   color: var(--muted);
-  font-weight: 600;
+  font-weight: 500;
 }
 .provenance dd {
   margin: 0;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+.provenance-disclosure > summary {
+  cursor: pointer;
+  color: var(--primary);
+  font-weight: 500;
+  padding-block: 0.35rem;
+}
+.provenance-disclosure[open] > summary {
+  margin-bottom: 0.75rem;
 }
 .query-form {
   display: grid;
@@ -240,19 +320,19 @@ h2 {
 }
 .query-primary {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) max-content;
+  grid-template-columns: minmax(14rem, 1.6fr) repeat(2, minmax(0, 1fr)) max-content;
   gap: 0.75rem;
   align-items: end;
 }
 .query-advanced > summary,
 .secondary-panel summary {
   cursor: pointer;
-  font-weight: 700;
+  font-weight: 500;
   padding-block: 0.35rem;
 }
 .query-advanced-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.75rem;
   margin-top: 0.75rem;
 }
@@ -261,7 +341,7 @@ h2 {
   gap: 0.3rem;
   color: var(--muted);
   font-size: 0.9rem;
-  font-weight: 600;
+  font-weight: 500;
 }
 input,
 select {
@@ -273,6 +353,8 @@ select {
   background: var(--surface);
   color: var(--ink);
   font: inherit;
+  font-size: 1rem;
+  font-weight: 400;
 }
 .query-form button {
   align-self: end;
@@ -360,7 +442,7 @@ select {
 .item-image > figcaption {
   margin-top: 0.3rem;
   color: var(--muted);
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   line-height: 1.25;
 }
 .item-image img {
@@ -414,6 +496,7 @@ select {
 .item-meta {
   margin: 0.22rem 0 0.5rem;
   overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
 }
 .item-tags {
   display: flex;
@@ -447,9 +530,9 @@ select {
   max-width: 100%;
 }
 .status-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem 0.65rem;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.4rem;
   min-inline-size: 0;
   border: 0;
   padding: 0;
@@ -458,24 +541,37 @@ select {
   max-width: 100%;
   overflow-wrap: anywhere;
 }
-.status-controls legend,
-.control-heading {
+.status-controls legend {
   color: var(--muted);
-  font-size: 0.85rem;
-  font-weight: 700;
+  font-size: 0.9rem;
+  font-weight: 500;
 }
 .status-option {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.35rem;
   min-height: 44px;
   padding: 0.3rem 0.45rem;
+  border: 1px solid var(--border);
   border-radius: 10px;
+  background: var(--surface);
   min-width: 0;
+}
+.status-option:has(input:checked) {
+  border-color: var(--primary);
+  background: var(--primary-soft);
 }
 .status-option input {
   width: 1.1rem;
   min-height: 1.1rem;
+  accent-color: var(--primary);
+}
+.quantity-control > summary {
+  cursor: pointer;
+  color: var(--primary);
+  font-size: 0.9rem;
+  font-weight: 500;
 }
 .quantity-controls {
   display: flex;
@@ -485,6 +581,7 @@ select {
   min-width: 0;
   width: 100%;
   max-width: 100%;
+  margin-top: 0.45rem;
 }
 .quantity-controls label {
   display: grid;
@@ -492,12 +589,13 @@ select {
   min-width: 0;
   gap: 0.2rem;
   color: var(--muted);
-  font-size: 0.85rem;
-  font-weight: 600;
+  font-size: 0.9rem;
+  font-weight: 500;
 }
 .quantity-controls input {
   width: 100%;
   max-width: 100%;
+  font-variant-numeric: tabular-nums;
 }
 .quantity-controls input[aria-invalid='true'] {
   border-color: var(--danger);
@@ -511,6 +609,8 @@ select {
 }
 .note-control button {
   justify-self: start;
+  background: var(--surface);
+  color: var(--ink);
 }
 textarea {
   width: 100%;
@@ -526,7 +626,7 @@ textarea {
 .state-feedback {
   min-height: 1.4em;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.9rem;
 }
 .state-retry {
   justify-self: start;
@@ -564,7 +664,7 @@ textarea {
   margin: 0;
 }
 .recovery-preview dt {
-  font-weight: 700;
+  font-weight: 500;
 }
 .recovery-preview dd {
   margin: 0;
@@ -582,7 +682,7 @@ textarea {
 .item-details > summary {
   color: var(--primary);
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 500;
 }
 .item-detail-list {
   display: grid;
@@ -594,7 +694,7 @@ textarea {
 }
 .item-detail-list dt {
   color: var(--muted);
-  font-weight: 600;
+  font-weight: 500;
 }
 .item-detail-list dd {
   margin: 0;
@@ -620,7 +720,7 @@ textarea {
   box-shadow: var(--shadow);
 }
 .image-dialog::backdrop {
-  background: rgb(0 0 0 / 55%);
+  background: var(--backdrop);
 }
 .image-dialog h3 {
   margin-top: 0;
@@ -638,8 +738,15 @@ textarea {
 }
 .empty-state {
   padding: 1rem;
-  border: 1px dashed var(--control);
+  border: 1px dashed var(--primary);
   border-radius: 12px;
+  background: var(--primary-soft);
+}
+.notice-panel {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+  background: var(--soft);
 }
 .state-panel {
   border: 2px solid var(--danger);
@@ -658,11 +765,15 @@ textarea {
   border: 0;
 }
 @media (max-width: 900px) {
-  .split,
+  .proof-list,
   .query-primary,
   .query-advanced-grid,
   .item-detail-list {
     grid-template-columns: 1fr;
+  }
+  .directory-heading {
+    align-items: start;
+    flex-direction: column;
   }
   .site-header {
     align-items: flex-start;
@@ -673,6 +784,9 @@ textarea {
   }
 }
 @media (max-width: 520px) {
+  .status-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .item-row {
     grid-template-columns: 1fr;
   }

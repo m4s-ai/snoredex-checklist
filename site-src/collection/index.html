@@ -7,7 +7,7 @@
     <meta name="snoredex-app-revision" content="__SNOREDEX_APP_REVISION__" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'none'; media-src 'none'; manifest-src 'none'"
+      content="default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'self'; media-src 'none'; manifest-src 'none'"
     />
     <title>Collection · Snoredex Checklist</title>
     <link rel="stylesheet" href="../styles.css" />
@@ -42,10 +42,7 @@
             </details>
           </section>
           <section class="surface secondary-panel" data-catalogue-dependent>
-            <details>
-              <summary>Catalogue information</summary>
-              <div data-provenance></div>
-            </details>
+            <div data-provenance></div>
           </section>
         </section>
       </div>

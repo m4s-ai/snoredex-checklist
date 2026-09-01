@@ -8,6 +8,18 @@ import { buildValidatedSourceMembershipIndex } from './migration-membership.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const output = resolve(root, process.argv[2] === '--out-dir' ? process.argv[3] : 'dist/site');
+const fontAssets = [
+  {
+    name: 'nunito-sans-latin-400-normal.woff2',
+    byteLength: 13892,
+    sha256: 'd9976dd1dc9c0d65046b52810e7cc69cfc229ee9939628ffe637e17efe4ef1ed',
+  },
+  {
+    name: 'nunito-sans-latin-500-normal.woff2',
+    byteLength: 13968,
+    sha256: '48dded5f1bd76377af9bd7da7da1433080e275bb26a81f1c1ae0dce3564d3f52',
+  },
+];
 const validator = await import(pathToFileURL(resolve(root, 'src/catalogue/validate.ts')));
 const sync = await import(pathToFileURL(resolve(root, 'src/catalogue/sync.ts')));
 const committed = await sync.readCommittedCataloguePair(root);
@@ -107,6 +119,16 @@ await rm(staging, { recursive: true, force: true });
 await rm(previous, { recursive: true, force: true });
 try {
   await mkdir(assets, { recursive: true });
+  for (const font of fontAssets) {
+    const source = resolve(root, 'site-src/assets/fonts', font.name);
+    const bytes = await readFile(source);
+    if (bytes.byteLength !== font.byteLength || createHash('sha256').update(bytes).digest('hex') !== font.sha256) {
+      throw new Error(`site font digest mismatch for ${font.name}`);
+    }
+    const destination = resolve(assets, 'fonts', font.name);
+    await mkdir(dirname(destination), { recursive: true });
+    await cp(source, destination);
+  }
   const tsc = resolve(root, 'node_modules/typescript/bin/tsc');
   const result = spawnSync(process.execPath, [tsc, '-p', resolve(root, 'tsconfig.site.json'), '--outDir', assets], {
     cwd: root,
