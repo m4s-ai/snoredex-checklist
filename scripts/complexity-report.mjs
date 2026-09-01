@@ -96,7 +96,6 @@ function collectFunctions(sourceFile, filePath) {
 }
 
 function countDecisions(functionEntry) {
-  if (isFunctionNode(functionEntry.body)) return 0;
   let decisions = 0;
   function visit(node) {
     if (node !== functionEntry.body && isFunctionNode(node)) return;
@@ -108,11 +107,15 @@ function countDecisions(functionEntry) {
     }
     node.forEachChild(visit);
   }
-  visit(functionEntry.body);
   for (const parameter of functionEntry.parameters) {
     if (parameter.initializer) visit(parameter.initializer);
     if (parameter.name) visit(parameter.name);
   }
+  // A concise arrow may return another function directly. Its parameter
+  // defaults still execute in the outer function, but the returned function's
+  // body belongs exclusively to the inner function's metric.
+  if (isFunctionNode(functionEntry.body)) return decisions;
+  visit(functionEntry.body);
   return decisions;
 }
 
@@ -237,6 +240,14 @@ async function selfTest() {
       expected: [
         { name: 'make', complexity: 1 },
         { name: '<arrow>', complexity: 2 },
+      ],
+    },
+    {
+      name: 'concise-return-default.ts',
+      source: 'const make = (choice = ready ? yes : no) => value => value;',
+      expected: [
+        { name: 'make', complexity: 2 },
+        { name: '<arrow>', complexity: 1 },
       ],
     },
     {
