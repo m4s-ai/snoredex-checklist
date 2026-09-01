@@ -40,9 +40,7 @@ function scan(source, languageVariant) {
   const templateSubstitutionBraces = [];
   let jsxMode = 'standard';
   const jsxElementStack = [];
-  let jsxTagClosing = false;
-  let jsxTagSelfClosing = false;
-  let jsxTagParentMode = 'standard';
+  const jsxTagStack = [];
   const jsxExpressionStack = [];
   const enterJsxExpression = (returnMode) => {
     jsxMode = 'expression';
@@ -50,9 +48,7 @@ function scan(source, languageVariant) {
   };
   const enterJsxTag = (parentMode, closing = false) => {
     jsxMode = 'tag';
-    jsxTagParentMode = parentMode;
-    jsxTagClosing = closing;
-    jsxTagSelfClosing = false;
+    jsxTagStack.push({ closing, parentMode, selfClosing: false });
   };
   let kind;
   do {
@@ -91,15 +87,18 @@ function scan(source, languageVariant) {
       } else if (jsxMode === 'tag') {
         if (kind === SyntaxKind.OpenBraceToken) {
           enterJsxExpression('tag');
-        } else if (kind === SyntaxKind.SlashToken) jsxTagSelfClosing = true;
-        else if (kind === SyntaxKind.GreaterThanToken) {
-          if (jsxTagClosing) {
+        } else if (kind === SyntaxKind.SlashToken) {
+          const tag = jsxTagStack.at(-1);
+          if (tag) tag.selfClosing = true;
+        } else if (kind === SyntaxKind.GreaterThanToken) {
+          const tag = jsxTagStack.pop();
+          if (tag?.closing) {
             const opening = jsxElementStack.pop();
-            jsxMode = opening?.parentMode ?? jsxTagParentMode;
-          } else if (jsxTagSelfClosing) {
-            jsxMode = jsxTagParentMode;
+            jsxMode = opening?.parentMode ?? tag.parentMode;
+          } else if (tag?.selfClosing) {
+            jsxMode = tag.parentMode;
           } else {
-            jsxElementStack.push({ parentMode: jsxTagParentMode });
+            jsxElementStack.push({ parentMode: tag?.parentMode ?? 'standard' });
             jsxMode = 'children';
           }
         }
@@ -3353,6 +3352,11 @@ if (process.argv.includes('--self-test')) {
       path: 'fixture.tsx',
       source: 'function jsxKeywordComparison() { return (obj.default < limit) > other && ready ? yes : no; }',
       expected: [{ name: 'jsxKeywordComparison', complexity: 3 }],
+    },
+    {
+      path: 'fixture.tsx',
+      source: 'function jsxAttributeExpression() { return <Comp child={<span />} />; }',
+      expected: [{ name: 'jsxAttributeExpression', complexity: 1 }],
     },
     {
       source:
