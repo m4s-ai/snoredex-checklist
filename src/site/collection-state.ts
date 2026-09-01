@@ -379,6 +379,8 @@ export class BrowserCollectionStateController implements CollectionStateControll
     const previous = expandedRecord(itemId, this.records.get(itemId));
     const next = expandedRecord(itemId, result.value);
     this.setRecord(itemId, result.value);
+    meta.quantityOwned = String(next.quantityOwned);
+    meta.quantityOrdered = String(next.quantityOrdered);
     meta.invalidQuantityFields = [];
     if (!sameCollection(previous, next)) meta.versions.collection = ++this.nextRevision;
     if (sameCollection(next, expandedRecord(itemId, this.confirmedRecords.get(itemId)))) {

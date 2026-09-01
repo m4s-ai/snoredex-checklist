@@ -149,6 +149,27 @@ test('moves a valid quantity through dirty, saving, and saved with a confirmed s
   assert.equal(controller.state.statuses.get(ITEM_A), 'have');
 });
 
+test('canonicalizes equivalent quantity drafts on no-op and persisted commits', async () => {
+  const unchanged = makeHarness({
+    active: [{ itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],
+  });
+  unchanged.controller.setQuantityDraft(ITEM_A, '01', '0');
+  assert.deepEqual(await unchanged.controller.commitQuantities(ITEM_A), { ok: true, skipped: true });
+  assert.equal(unchanged.controller.item(ITEM_A).quantityOwned, '1');
+  assert.equal(unchanged.controller.item(ITEM_A).save.phase, 'clean');
+  assert.equal(unchanged.immediateSaves.length, 0);
+
+  const changed = makeHarness();
+  changed.controller.setQuantityDraft(ITEM_A, '1e2', '0');
+  const commit = changed.controller.commitQuantities(ITEM_A);
+  assert.equal(changed.controller.item(ITEM_A).quantityOwned, '100');
+  assert.equal(changed.controller.item(ITEM_A).save.phase, 'saving');
+  changed.immediateSaves[0].resolve(saved);
+  await commit;
+  assert.equal(changed.controller.item(ITEM_A).quantityOwned, '100');
+  assert.equal(changed.controller.item(ITEM_A).save.phase, 'saved');
+});
+
 test('keeps an invalid quantity visible while an independent status save succeeds', async () => {
   const { controller, immediateSaves } = makeHarness();
   controller.setQuantityDraft(ITEM_A, '1123123123', '0');
