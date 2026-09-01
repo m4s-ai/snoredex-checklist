@@ -1473,7 +1473,7 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
         }
       }
     }
-    if (kind === SyntaxKind.SemicolonToken) return false;
+    if ([SyntaxKind.ReturnKeyword, SyntaxKind.SemicolonToken].includes(kind)) return false;
   }
   return false;
 }
@@ -3109,6 +3109,13 @@ if (process.argv.includes('--self-test')) {
         { name: 'parenthesizedDecoratedMethodComparison', complexity: 2 },
         { name: 'extends', complexity: 1 },
       ],
+    },
+    {
+      source: `function semicolonlessTypeAlias() {
+        type Choice = T extends U ? A : B
+        return ready ? yes : no;
+      }`,
+      expected: [{ name: 'semicolonlessTypeAlias', complexity: 2 }],
     },
   ];
   for (const sample of samples) {
