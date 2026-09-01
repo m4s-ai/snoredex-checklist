@@ -938,8 +938,9 @@ function renderCollectionControls(
     retryAction = () => controller.flushNote();
     retry.hidden = true;
     const scheduled = controller.scheduleNote(item.itemId, textarea.value);
-    if (!scheduled.ok) showResult(scheduled, generation);
-    else feedback.textContent = 'Saving…';
+    if (!scheduled.ok) {
+      showResult(quantitiesAreValid() ? scheduled : { ok: false, error: 'EDIT_INVALID_QUANTITY' }, generation);
+    } else feedback.textContent = 'Saving…';
   });
   textarea.addEventListener('focusout', () => {
     void controller.flushNote();

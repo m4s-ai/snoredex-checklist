@@ -3,9 +3,9 @@
 > Advisory AST-derived estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (33 production code files).
-Lines: 11,613.
+Lines: 11,614.
 Function-like nodes: 745.
-McCabe estimate: sum 3,373; mean 4.5; median 2; P90 9; P95 16.
+McCabe estimate: sum 3,374; mean 4.5; median 2; P90 9; P95 16.
 Hotspots: 68 functions exceed 10; 33 exceed 20.
 
 The report parses each source file with the bundled TypeScript compiler and counts runtime function-like declarations plus structural decision nodes: if/for/while/do/catch/case statements, conditional expressions and logical (&&/||/??) binary expressions. Type-only function signatures and nested function bodies are excluded from their enclosing function. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
@@ -14,7 +14,7 @@ The report parses each source file with the bundled TypeScript compiler and coun
 | ----------------------------------- | -------------------------------- | ---------: |
 | `src/site/catalogue.ts:223`         | `validateSnapshot`               |         90 |
 | `src/state/storage.ts:705`          | `persistPendingNoteDraft`        |         75 |
-| `src/site/app.ts:1423`              | `renderResults`                  |         58 |
+| `src/site/app.ts:1424`              | `renderResults`                  |         58 |
 | `src/catalogue/validate.ts:235`     | `validateSemantics`              |         56 |
 | `src/state/reconciliation.ts:513`   | `reconcilePrivateState`          |         55 |
 | `src/catalogue/validate.ts:416`     | `validateCatalogueFixture`       |         54 |

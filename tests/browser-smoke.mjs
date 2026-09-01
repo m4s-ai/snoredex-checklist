@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
 import { chromium, firefox, webkit } from '@playwright/test';
 
-import { PRIVATE_STATE_LOCK_NAME } from '../src/state/storage.ts';
+import { PRIVATE_STATE_LOCK_NAME, PRIVATE_STATE_NOTE_DRAFT_KEY } from '../src/state/storage.ts';
 
 const root = resolve(process.env.SNOREDEX_SITE_ROOT ?? 'dist/site');
 const mimeTypes = new Map([
@@ -266,6 +266,7 @@ try {
           'xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " collection-controls ")]',
         );
         const quantityFeedback = collectionControls.locator('.state-feedback');
+        const retrySave = collectionControls.locator('.state-retry');
         const privateNote = collectionControls.getByRole('textbox', { name: /^Private note for /u });
         const secondOwnedQuantity = page.getByRole('spinbutton', { name: 'Owned' }).nth(1);
         assert.equal(await secondOwnedQuantity.count(), 1, `${name}: second trackable card`);
@@ -289,6 +290,41 @@ try {
           beforeInvalidQuantity,
           `${name}: invalid quantity leaves storage unchanged`,
         );
+        await ownedQuantity.focus();
+        await page.evaluate((draftKey) => {
+          const setItem = Storage.prototype.setItem;
+          Storage.prototype.setItem = function failNextDraftWrite(key, value) {
+            if (key.startsWith(`${draftKey}:`)) {
+              Storage.prototype.setItem = setItem;
+              globalThis.__snoredexFailedDraftWrite = true;
+              throw new Error('synthetic draft write failure');
+            }
+            return setItem.call(this, key, value);
+          };
+        }, PRIVATE_STATE_NOTE_DRAFT_KEY);
+        await privateNote.evaluate((textarea) => {
+          textarea.value = 'synthetic unscheduled note';
+          textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        await page.waitForFunction(() => globalThis.__snoredexFailedDraftWrite === true);
+        assert.equal(
+          await quantityFeedback.textContent(),
+          invalidQuantityMessage,
+          `${name}: quantity feedback survives a synchronous note scheduling failure`,
+        );
+        assert.equal(
+          await retrySave.isVisible(),
+          false,
+          `${name}: scheduling failure retry stays hidden while invalid`,
+        );
+        await ownedQuantity.fill('1');
+        await quantityFeedback.filter({ hasText: saveFailedMessage }).waitFor();
+        assert.equal(await retrySave.isVisible(), true, `${name}: scheduling failure becomes recoverable when valid`);
+        await retrySave.evaluate((button) => button.click());
+        await quantityFeedback.filter({ hasText: 'Saved' }).waitFor();
+        await ownedQuantity.fill('10000');
+        await ownedQuantity.blur();
+        await quantityFeedback.filter({ hasText: invalidQuantityMessage }).waitFor();
         await secondCollectionControls.getByRole('radio', { name: 'Have' }).check();
         await secondQuantityFeedback.filter({ hasText: 'Saved' }).waitFor();
         assert.equal(await ownedQuantity.inputValue(), '1', `${name}: another card resets the invalid draft`);
@@ -367,7 +403,6 @@ try {
         );
         await ownedQuantity.fill('1');
         await page.getByText(saveFailedMessage, { exact: true }).waitFor();
-        const retrySave = collectionControls.locator('.state-retry');
         assert.equal(
           await retrySave.isVisible(),
           true,
