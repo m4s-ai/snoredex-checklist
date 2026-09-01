@@ -380,6 +380,9 @@ test('keeps stylesheet links and CSS imports inside the artifact', async () => {
 test('rejects external JavaScript module dependencies', async () => {
   for (const source of [
     "import('/outside.js');\n",
+    'import.source("/outside.wasm");\n',
+    'import.source(`/outside.wasm`);\n',
+    'const sourceModule = "/outside.wasm"; import.source(sourceModule);\n',
     'import/**/("/outside.js");\n',
     'import/**/"/outside.js";\n',
     'const expression = `${import/**/("/outside.js")}`;\n',
@@ -445,6 +448,7 @@ test('accepts AST-recognized module dependencies that stay inside the artifact',
   try {
     await writeValidArtifact(directory);
     await writeFile(join(directory, 'dependency.js'), 'export default true; export const value = true;\n');
+    await writeFile(join(directory, 'dependency.wasm'), 'synthetic wasm fixture');
     await writeFile(
       join(directory, 'theme.js'),
       [
@@ -454,6 +458,8 @@ test('accepts AST-recognized module dependencies that stay inside the artifact',
         'export { value } from "./dependency.js";',
         'void import(`./dependency.js`);',
         'void import("./\\u0064ependency.js");',
+        'void import.source("./dependency.wasm");',
+        'void import.meta.url;',
       ].join('\n'),
     );
     const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });

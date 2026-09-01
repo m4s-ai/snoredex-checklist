@@ -469,7 +469,13 @@ function moduleDependencySources(sourceFile) {
       dependencies.push(literalModuleSource(node.moduleSpecifier));
     } else if (node.kind === SyntaxKind.ExportDeclaration && node.moduleSpecifier) {
       dependencies.push(literalModuleSource(node.moduleSpecifier));
-    } else if (node.kind === SyntaxKind.CallExpression && node.expression.kind === SyntaxKind.ImportKeyword) {
+    } else if (
+      node.kind === SyntaxKind.CallExpression &&
+      (node.expression.kind === SyntaxKind.ImportKeyword ||
+        (node.expression.kind === SyntaxKind.MetaProperty &&
+          node.expression.keywordToken === SyntaxKind.ImportKeyword &&
+          node.expression.name.text === 'source'))
+    ) {
       dependencies.push(literalModuleSource(node.arguments[0]));
     }
     node.forEachChild(visit);
