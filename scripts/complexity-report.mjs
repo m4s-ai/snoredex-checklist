@@ -87,6 +87,7 @@ function collectFunctions(sourceFile, filePath) {
       path: relative(root, filePath).split('\\').join('/'),
       name: functionName(node, sourceFile),
       line: line + 1,
+      parameters: node.parameters ?? [],
       body: node.body,
       complexity: 1,
     });
@@ -107,6 +108,9 @@ function countDecisions(functionEntry) {
     node.forEachChild(visit);
   }
   visit(functionEntry.body);
+  for (const parameter of functionEntry.parameters) {
+    if (parameter.initializer) visit(parameter.initializer);
+  }
   return decisions;
 }
 
@@ -201,6 +205,11 @@ async function selfTest() {
       source:
         'function typed({ enabled }: { enabled: boolean }): { ok: boolean } { if (enabled) return { ok: true }; return { ok: false }; }',
       expected: [{ name: 'typed', complexity: 2 }],
+    },
+    {
+      name: 'default-parameter.ts',
+      source: 'function select(value = ready ? yes : no) { return value; }',
+      expected: [{ name: 'select', complexity: 2 }],
     },
     {
       name: 'logical.ts',
