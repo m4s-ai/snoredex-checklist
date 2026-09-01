@@ -347,6 +347,32 @@ test('latches an uncertain recovery adoption until reload', async () => {
   assert.equal(immediateSaves.length, 1);
 });
 
+test('latches synchronous note staging uncertainty before any flush or retry', async () => {
+  const { controller, immediateSaves, noteSaves, submittedStates } = makeHarness({
+    scheduleResults: [{ ok: false, error: 'STORAGE_COMMIT_UNCERTAIN' }],
+  });
+  controller.item(ITEM_B);
+  const notifications: Array<string | undefined> = [];
+  controller.onChange((itemId) => notifications.push(itemId));
+
+  assert.deepEqual(controller.scheduleNote(ITEM_A, 'local draft'), {
+    ok: false,
+    error: 'STORAGE_COMMIT_UNCERTAIN',
+  });
+  assert.equal(notifications.at(-1), undefined);
+  assert.equal(controller.item(ITEM_A).note, 'local draft');
+  assert.equal(controller.item(ITEM_A).save.phase, 'conflict');
+  assert.equal(controller.item(ITEM_B).save.phase, 'conflict');
+  assert.deepEqual(await controller.flushNote(), { ok: false, error: 'STORAGE_COMMIT_UNCERTAIN' });
+  assert.deepEqual(await controller.setStatus(ITEM_B, 'ordered'), {
+    ok: false,
+    error: 'STORAGE_COMMIT_UNCERTAIN',
+  });
+  assert.equal(immediateSaves.length, 0);
+  assert.equal(noteSaves.length, 0);
+  assert.equal(submittedStates.length, 1);
+});
+
 test('treats commit uncertainty as reload-only recovery', async () => {
   const { controller, immediateSaves, submittedStates } = makeHarness();
   controller.item(ITEM_B);

@@ -409,13 +409,12 @@ export class BrowserCollectionStateController implements CollectionStateControll
     const scheduled = this.store.scheduleNoteSave(pending.state, false);
     this.pendingNote = { ...pending, scheduled: scheduled.ok };
     if (!scheduled.ok) {
-      this.setFailure(
-        itemId,
-        'note',
-        scheduled.error ?? 'STORAGE_WRITE_FAILED',
-        meta.versions.note,
-        ++this.nextOperationId,
-      );
+      const error = scheduled.error ?? 'STORAGE_WRITE_FAILED';
+      if (this.latchCommitUncertain(error)) {
+        this.notify();
+        return failure(error);
+      }
+      this.setFailure(itemId, 'note', error, meta.versions.note, ++this.nextOperationId);
     }
     this.scheduleNoteFlush();
     this.notifyAffected(pending.affected);
