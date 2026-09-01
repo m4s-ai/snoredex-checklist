@@ -899,6 +899,13 @@ function renderCollectionControls(
       showResult({ ok: false, error: 'EDIT_INVALID_QUANTITY' });
       return;
     }
+    const latest = controller.record(item.itemId);
+    if (
+      Number(owned.value) === (latest?.quantityOwned ?? 0) &&
+      Number(ordered.value) === (latest?.quantityOrdered ?? 0) &&
+      (showPendingSaveFailure() || restoreRetryAfterQuantityValidation())
+    )
+      return;
     if (feedback.textContent === invalidQuantityFeedback) feedback.textContent = '';
   };
   owned.addEventListener('input', revalidateQuantities);

@@ -479,6 +479,19 @@ try {
           `${name}: hidden status retry is inert while the quantity is invalid`,
         );
         await ownedQuantity.fill('0');
+        assert.equal(
+          await quantityFeedback.textContent(),
+          saveFailedMessage,
+          `${name}: reverting to the persisted quantity restores failed status feedback`,
+        );
+        assert.equal(
+          await retrySave.isVisible(),
+          true,
+          `${name}: reverting to the persisted quantity restores the status retry`,
+        );
+        await ownedQuantity.fill('10000');
+        await quantityFeedback.filter({ hasText: invalidQuantityMessage }).waitFor();
+        await ownedQuantity.fill('2');
         assert.equal(await retrySave.isVisible(), false, `${name}: corrected input keeps the old status retry hidden`);
         await retrySave.evaluate((button) => button.click());
         await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))));
@@ -502,7 +515,7 @@ try {
               )?.quantityOwned,
             synthetic.itemId,
           ),
-          0,
+          2,
           `${name}: corrected quantity commits the failed status state`,
         );
         await page.evaluate(async (lockName) => {
@@ -579,10 +592,12 @@ try {
         await page.evaluate(() => globalThis.__snoredexReleaseOverlappingLock?.());
         await page.waitForFunction(() => globalThis.__snoredexFailedOverlappingWrite === true);
         await ownedQuantity.fill('4');
-        assert.equal(await retrySave.isVisible(), false, `${name}: overlapping retry stays hidden before change`);
-        await retrySave.evaluate((button) => button.click());
-        await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))));
-        await ownedQuantity.dispatchEvent('change');
+        assert.equal(
+          await retrySave.isVisible(),
+          true,
+          `${name}: overlapping retry returns for the controller quantity`,
+        );
+        await retrySave.click();
         await quantityFeedback.filter({ hasText: 'Saved' }).waitFor();
         assert.equal(
           await page.evaluate(
