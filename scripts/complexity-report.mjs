@@ -1570,6 +1570,8 @@ function isConditionalTypeAssertionPrefix(tokens, index) {
       SyntaxKind.DeleteKeyword,
       SyntaxKind.EqualsGreaterThanToken,
       SyntaxKind.DotDotDotToken,
+      SyntaxKind.CaseKeyword,
+      SyntaxKind.OfKeyword,
       SyntaxKind.OpenBraceToken,
       SyntaxKind.CloseBraceToken,
       SyntaxKind.SemicolonToken,
@@ -2954,6 +2956,21 @@ if (process.argv.includes('--self-test')) {
         return [...<T extends unknown[] ? T : never>value];
       }`,
       expected: [{ name: 'spreadAssertion', complexity: 1 }],
+    },
+    {
+      source: `function caseAssertion() {
+        switch (value) {
+          case <T extends U ? A : B>value:
+            break;
+        }
+      }`,
+      expected: [{ name: 'caseAssertion', complexity: 2 }],
+    },
+    {
+      source: `function forOfAssertion() {
+        for (const item of <T extends U ? A[] : B[]>items) use(item);
+      }`,
+      expected: [{ name: 'forOfAssertion', complexity: 2 }],
     },
   ];
   for (const sample of samples) {
