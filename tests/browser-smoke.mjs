@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
 import { chromium, firefox, webkit } from '@playwright/test';
 
+import { PRIVATE_STATE_LOCK_NAME } from '../src/state/storage.ts';
+
 const root = resolve(process.env.SNOREDEX_SITE_ROOT ?? 'dist/site');
 const mimeTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -260,17 +262,17 @@ try {
           waitUntil: 'networkidle',
         });
         const ownedQuantity = page.getByRole('spinbutton', { name: 'Owned' }).first();
+        const quantityFeedback = ownedQuantity
+          .locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " collection-controls ")]')
+          .locator('.state-feedback');
+        const invalidQuantityMessage =
+          'Quantity is invalid. Enter a whole number from 0 through 9999. This draft was not saved, and the previous collection value remains unchanged. Error code: EDIT_INVALID_QUANTITY';
         const beforeInvalidQuantity = await page.evaluate(() =>
           localStorage.getItem('snoredex-checklist.private-state'),
         );
         await ownedQuantity.fill('10000');
         await ownedQuantity.blur();
-        await page
-          .getByText(
-            'Quantity is invalid. Enter a whole number from 0 through 9999. This draft was not saved, and the previous collection value remains unchanged. Error code: EDIT_INVALID_QUANTITY',
-            { exact: true },
-          )
-          .waitFor();
+        await page.getByText(invalidQuantityMessage, { exact: true }).waitFor();
         assert.equal(await ownedQuantity.getAttribute('aria-invalid'), 'true', `${name}: invalid quantity marked`);
         assert.equal(await page.locator('.state-retry:visible').count(), 0, `${name}: invalid input has no retry`);
         assert.equal(
@@ -278,7 +280,36 @@ try {
           beforeInvalidQuantity,
           `${name}: invalid quantity leaves storage unchanged`,
         );
+        await page.evaluate(async (lockName) => {
+          let lockAcquired;
+          const acquired = new Promise((resolve) => {
+            lockAcquired = resolve;
+          });
+          void navigator.locks.request(lockName, async () => {
+            await new Promise((resolve) => {
+              globalThis.__snoredexReleaseQuantityLock = resolve;
+              lockAcquired();
+            });
+          });
+          await acquired;
+        }, PRIVATE_STATE_LOCK_NAME);
         await ownedQuantity.fill('2');
+        await ownedQuantity.blur();
+        await page.getByText('Saving…', { exact: true }).first().waitFor();
+        await ownedQuantity.fill('10000');
+        await ownedQuantity.blur();
+        await page.getByText(invalidQuantityMessage, { exact: true }).waitFor();
+        await page.evaluate(() => globalThis.__snoredexReleaseQuantityLock?.());
+        await page.waitForFunction(
+          (previous) => localStorage.getItem('snoredex-checklist.private-state') !== previous,
+          beforeInvalidQuantity,
+        );
+        assert.equal(
+          await quantityFeedback.textContent(),
+          invalidQuantityMessage,
+          `${name}: newer invalid feedback survives older save completion`,
+        );
+        await ownedQuantity.fill('3');
         await ownedQuantity.blur();
         await page.getByText('Saved', { exact: true }).first().waitFor();
         assert.equal(await ownedQuantity.getAttribute('aria-invalid'), null, `${name}: corrected quantity is valid`);

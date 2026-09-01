@@ -719,8 +719,10 @@ function renderCollectionControls(
   retry.type = 'button';
   retry.hidden = true;
   let retryAction: (() => Promise<CollectionEditResult>) | undefined;
-  const showResult = (result: CollectionEditResult): void => {
-    if (result.deferred) return;
+  let feedbackGeneration = 0;
+  let pendingSaveCount = 0;
+  const showResult = (result: CollectionEditResult, generation = ++feedbackGeneration): void => {
+    if (generation !== feedbackGeneration || result.deferred) return;
     retry.textContent = 'Retry save';
     if (result.ok && !result.skipped) {
       feedback.textContent = 'Saved';
@@ -747,16 +749,21 @@ function renderCollectionControls(
     }
   };
   const runSave = (action: () => Promise<CollectionEditResult>): void => {
+    const generation = ++feedbackGeneration;
+    pendingSaveCount += 1;
     retryAction = action;
     retry.hidden = true;
     feedback.textContent = 'Saving…';
-    void action().then(showResult);
+    void action().then((result) => {
+      pendingSaveCount -= 1;
+      showResult(result, generation);
+    });
   };
   retry.addEventListener('click', () => {
     if (retryAction !== undefined) runSave(retryAction);
   });
   const stopSaveListener = controller.onSave((itemId, result) => {
-    if (itemId === item.itemId) showResult(result);
+    if (itemId === item.itemId && pendingSaveCount === 0) showResult(result);
   });
   registerCleanup?.(stopSaveListener);
 
@@ -848,12 +855,13 @@ function renderCollectionControls(
   };
   noteButton.addEventListener('click', openNote);
   textarea.addEventListener('input', () => {
+    const generation = ++feedbackGeneration;
     const codePoints = [...textarea.value];
     if (codePoints.length > MAX_NOTE_CODE_POINTS) textarea.value = codePoints.slice(0, MAX_NOTE_CODE_POINTS).join('');
     retryAction = () => controller.flushNote();
     retry.hidden = true;
     const scheduled = controller.scheduleNote(item.itemId, textarea.value);
-    if (!scheduled.ok) showResult(scheduled);
+    if (!scheduled.ok) showResult(scheduled, generation);
     else feedback.textContent = 'Saving…';
   });
   textarea.addEventListener('focusout', () => {
