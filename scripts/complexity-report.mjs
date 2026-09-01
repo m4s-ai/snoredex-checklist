@@ -128,6 +128,11 @@ function countDecisions(functionEntry) {
     for (const modifier of node.modifiers ?? []) {
       if (modifier.kind === SyntaxKind.Decorator) visit(modifier);
     }
+    for (const parameter of node.parameters ?? []) {
+      for (const modifier of parameter.modifiers ?? []) {
+        if (modifier.kind === SyntaxKind.Decorator) visit(modifier);
+      }
+    }
   }
   for (const parameter of functionEntry.parameters) {
     if (parameter.initializer) visit(parameter.initializer);
@@ -310,6 +315,14 @@ async function selfTest() {
       name: 'class-field-decorator.ts',
       source: 'function make() { return class { @(ready ? yes : no) value = deferred; }; }',
       expected: [{ name: 'make', complexity: 2 }],
+    },
+    {
+      name: 'class-parameter-decorator.ts',
+      source: 'function make() { return class { method(@(ready ? yes : no) value) {} }; }',
+      expected: [
+        { name: 'make', complexity: 2 },
+        { name: 'method', complexity: 1 },
+      ],
     },
     {
       name: 'jsx.tsx',
