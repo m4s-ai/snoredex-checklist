@@ -101,9 +101,11 @@ and collector-facing finish family remain distinct.
 Commands belong in the README and workflows once they exist. Non-trivial logic leaves a runnable
 regression check; trust-boundary and migration checks are never optional.
 
-Source analysis that depends on grammar, nesting, execution boundaries or control-flow semantics
-uses the repository-pinned language parser/compiler AST. Token scans are only for lexical checks;
-repeated syntax-shape exceptions require replacing the heuristic at the semantic boundary.
+New source analysis that depends on grammar, nesting, execution boundaries or control-flow
+semantics uses the repository-pinned language parser/compiler AST. Token scans are only for
+lexical checks. Existing heuristic analyzers stay within their documented behavior and regression
+coverage; do not extend them with syntax-shape exceptions. Replace the heuristic at the semantic
+boundary through an owning migration issue.
 
 ## Repository and publication
 
