@@ -546,11 +546,12 @@ export class BrowserCollectionStateController implements CollectionStateControll
     return this.recoveryDraft === undefined ? undefined : 'RECOVERY_DECISION_REQUIRED';
   }
 
-  private latchCommitUncertain(error: string): void {
-    if (error !== 'STORAGE_COMMIT_UNCERTAIN') return;
+  private latchCommitUncertain(error: string): boolean {
+    if (error !== 'STORAGE_COMMIT_UNCERTAIN' || this.commitUncertain) return false;
     this.commitUncertain = true;
     this.cancelNoteTimer();
     this.pendingNote = undefined;
+    return true;
   }
 
   private setFailure(itemId: string, field: EditField, error: string, revision: number, operationId: number): void {
@@ -614,7 +615,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
       return;
     }
     this.lastSettledOperationId = operation.id;
-    if (!result.ok) this.latchCommitUncertain(result.error);
+    const globallyChanged = !result.ok && this.latchCommitUncertain(result.error);
     if (result.ok && !result.skipped && operation.id > this.lastConfirmedOperationId) {
       this.lastConfirmedOperationId = operation.id;
       for (const itemId of this.confirmedRecords.keys()) touched.add(itemId);
@@ -644,7 +645,8 @@ export class BrowserCollectionStateController implements CollectionStateControll
         }
       }
     }
-    for (const itemId of touched) this.notify(itemId);
+    if (globallyChanged) this.notify();
+    else for (const itemId of touched) this.notify(itemId);
   }
 
   private isSaving(itemId: string, meta: ItemEditMeta): boolean {

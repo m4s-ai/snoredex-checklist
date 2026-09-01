@@ -349,9 +349,13 @@ test('latches an uncertain recovery adoption until reload', async () => {
 
 test('treats commit uncertainty as reload-only recovery', async () => {
   const { controller, immediateSaves, submittedStates } = makeHarness();
+  controller.item(ITEM_B);
+  const notifications: Array<string | undefined> = [];
+  controller.onChange((itemId) => notifications.push(itemId));
   const save = controller.setStatus(ITEM_A, 'have');
   immediateSaves[0].resolve({ ok: false, error: 'STORAGE_COMMIT_UNCERTAIN' });
   await save;
+  assert.equal(notifications.at(-1), undefined);
 
   const snapshot = controller.item(ITEM_A);
   assert.equal(snapshot.save.phase, 'conflict');
