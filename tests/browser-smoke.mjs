@@ -187,6 +187,7 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
     const page = await collectionScenarioPage(browser, synthetic, [initial]);
     try {
       const firstOwned = page.getByRole('spinbutton', { name: 'Owned' }).first();
+      const firstOrdered = page.getByRole('spinbutton', { name: 'Ordered' }).first();
       const firstControls = controlsForOwnedInput(firstOwned);
       const secondOwned = page.getByRole('spinbutton', { name: 'Owned' }).nth(1);
       const secondControls = controlsForOwnedInput(secondOwned);
@@ -215,10 +216,24 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
         '1123123123',
         `${name}: status save preserves invalid quantity draft`,
       );
+      assert.equal(await firstOrdered.inputValue(), '1', `${name}: status save refreshes the valid quantity sibling`);
       assert.equal(
         await firstControls.locator('.state-feedback').textContent(),
         INVALID_QUANTITY_MESSAGE,
         `${name}: status save leaves specific validation feedback`,
+      );
+
+      await firstOwned.fill('0');
+      await firstOwned.blur();
+      await firstControls.locator('.state-feedback').filter({ hasText: 'Saved' }).waitFor();
+      assert.equal(
+        await page.evaluate(
+          ({ key, itemId }) =>
+            JSON.parse(localStorage.getItem(key) ?? '{}').items?.find((item) => item.itemId === itemId)?.status,
+          { key: PRIVATE_STATE_KEY, itemId: synthetic.itemId },
+        ),
+        'ordered',
+        `${name}: correcting the invalid field preserves the selected status`,
       );
     } finally {
       await page.close();

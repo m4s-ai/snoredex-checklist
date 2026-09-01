@@ -200,6 +200,10 @@ function sameCollection(left: PrivateItemState, right: PrivateItemState): boolea
   );
 }
 
+function sameEditField(field: EditField, left: PrivateItemState, right: PrivateItemState): boolean {
+  return field === 'collection' ? sameCollection(left, right) : left.note === right.note;
+}
+
 function parseQuantity(value: string): number | undefined {
   if (value.trim() === '') return undefined;
   const parsed = Number(value);
@@ -331,11 +335,9 @@ export class BrowserCollectionStateController implements CollectionStateControll
     this.setRecord(itemId, result.value);
     meta.versions.collection = ++this.nextRevision;
     this.clearFailureAfterEdit(meta, 'collection');
-    if (meta.invalidQuantityFields.length === 0) {
-      const record = expandedRecord(itemId, result.value);
-      meta.quantityOwned = String(record.quantityOwned);
-      meta.quantityOrdered = String(record.quantityOrdered);
-    }
+    const record = expandedRecord(itemId, result.value);
+    if (!meta.invalidQuantityFields.includes('owned')) meta.quantityOwned = String(record.quantityOwned);
+    if (!meta.invalidQuantityFields.includes('ordered')) meta.quantityOrdered = String(record.quantityOrdered);
     return this.saveImmediate();
   }
 
@@ -384,7 +386,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     meta.invalidQuantityFields = [];
     if (!sameCollection(previous, next)) meta.versions.collection = ++this.nextRevision;
     const confirmed = expandedRecord(itemId, this.confirmedRecords.get(itemId));
-    if (!this.collectionNeedsPersistence(itemId, next, confirmed, meta)) {
+    if (!this.fieldNeedsPersistence(itemId, 'collection', next, confirmed, meta)) {
       this.clearFailureAfterEdit(meta, 'collection');
       this.notify(itemId);
       return { ok: true, skipped: true };
@@ -597,24 +599,29 @@ export class BrowserCollectionStateController implements CollectionStateControll
       const desired = expandedRecord(itemId, records.get(itemId));
       const confirmed = expandedRecord(itemId, this.confirmedRecords.get(itemId));
       const meta = this.editMeta(itemId);
-      if (this.collectionNeedsPersistence(itemId, desired, confirmed, meta)) fields.add('collection');
-      if (desired.note !== confirmed.note || meta.noteDraft !== desired.note || meta.failures.note !== undefined) {
-        fields.add('note');
-      }
+      if (this.fieldNeedsPersistence(itemId, 'collection', desired, confirmed, meta)) fields.add('collection');
+      if (this.fieldNeedsPersistence(itemId, 'note', desired, confirmed, meta)) fields.add('note');
       if (fields.size > 0) affected.set(itemId, fields);
     }
     return affected;
   }
 
-  private collectionNeedsPersistence(
+  private fieldNeedsPersistence(
     itemId: string,
+    field: EditField,
     desired: PrivateItemState,
     confirmed: PrivateItemState,
     meta: ItemEditMeta,
   ): boolean {
-    if (!sameCollection(desired, confirmed) || meta.failures.collection !== undefined) return true;
+    if (
+      !sameEditField(field, desired, confirmed) ||
+      meta.failures[field] !== undefined ||
+      (field === 'note' && meta.noteDraft !== desired.note)
+    ) {
+      return true;
+    }
     for (const operation of this.activeOperations.values()) {
-      if (!sameCollection(desired, expandedRecord(itemId, operation.records.get(itemId)))) return true;
+      if (!sameEditField(field, desired, expandedRecord(itemId, operation.records.get(itemId)))) return true;
     }
     return false;
   }

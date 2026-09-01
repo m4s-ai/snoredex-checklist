@@ -212,21 +212,43 @@ test('persists quantity reverts that supersede running or failed saves', async (
   assert.equal(failed.controller.item(ITEM_A).save.error, undefined);
 });
 
-test('keeps an invalid quantity visible while an independent status save succeeds', async () => {
-  const { controller, immediateSaves } = makeHarness();
+test('keeps invalid quantity fields while status changes refresh their valid siblings', async () => {
+  const { controller, immediateSaves } = makeHarness({
+    active: [{ itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],
+  });
   controller.setQuantityDraft(ITEM_A, '1123123123', '0');
 
-  const status = controller.setStatus(ITEM_A, 'have');
+  const status = controller.setStatus(ITEM_A, 'ordered');
   immediateSaves[0].resolve(saved);
   await status;
 
-  const snapshot = controller.item(ITEM_A);
+  let snapshot = controller.item(ITEM_A);
   assert.equal(snapshot.quantityOwned, '1123123123');
+  assert.equal(snapshot.quantityOrdered, '1');
   assert.equal(snapshot.validationError, 'EDIT_INVALID_QUANTITY');
-  assert.equal(snapshot.status, 'have');
-  assert.equal(snapshot.confirmed?.status, 'have');
-  assert.equal(snapshot.confirmed?.quantityOwned, 1);
+  assert.equal(snapshot.status, 'ordered');
+  assert.equal(snapshot.confirmed?.status, 'ordered');
+  assert.equal(snapshot.confirmed?.quantityOwned, 0);
+  assert.equal(snapshot.confirmed?.quantityOrdered, 1);
   assert.equal(snapshot.save.phase, 'dirty');
+
+  controller.setQuantityDraft(ITEM_A, '0', snapshot.quantityOrdered);
+  assert.deepEqual(await controller.commitQuantities(ITEM_A), { ok: true, skipped: true });
+  snapshot = controller.item(ITEM_A);
+  assert.equal(snapshot.status, 'ordered');
+  assert.equal(snapshot.save.phase, 'saved');
+  assert.equal(immediateSaves.length, 1);
+
+  const sibling = makeHarness({
+    active: [{ itemId: ITEM_A, status: 'ordered', quantityOwned: 0, quantityOrdered: 1 }],
+  });
+  sibling.controller.setQuantityDraft(ITEM_A, '0', '10000');
+  const have = sibling.controller.setStatus(ITEM_A, 'have');
+  sibling.immediateSaves[0].resolve(saved);
+  await have;
+  assert.equal(sibling.controller.item(ITEM_A).quantityOwned, '1');
+  assert.equal(sibling.controller.item(ITEM_A).quantityOrdered, '10000');
+  assert.deepEqual(sibling.controller.item(ITEM_A).invalidQuantityFields, ['ordered']);
 });
 
 test('preserves a failed draft and retries the current complete state', async () => {
@@ -363,6 +385,36 @@ test('does not resurrect an older note failure after a newer note succeeds', asy
   const snapshot = controller.item(ITEM_A);
   assert.equal(snapshot.note, 'second');
   assert.equal(snapshot.confirmed?.note, 'second');
+  assert.equal(snapshot.save.phase, 'saved');
+});
+
+test('keeps a failed note revert recoverable after an older flush succeeds', async () => {
+  const { controller, immediateSaves, noteSaves, submittedStates } = makeHarness({
+    active: [{ itemId: ITEM_A, status: 'need', quantityOwned: 0, quantityOrdered: 0, note: 'old' }],
+  });
+  controller.scheduleNote(ITEM_A, 'obsolete');
+  const obsolete = controller.flushNote();
+  controller.scheduleNote(ITEM_A, 'old');
+  const compensation = controller.flushNote();
+
+  assert.equal(controller.item(ITEM_A).save.phase, 'saving');
+  noteSaves[0].resolve(saved);
+  await obsolete;
+  noteSaves[1].resolve({ ok: false, error: 'STORAGE_WRITE_FAILED' });
+  await compensation;
+
+  let snapshot = controller.item(ITEM_A);
+  assert.equal(snapshot.note, 'old');
+  assert.equal(snapshot.confirmed?.note, 'obsolete');
+  assert.equal(snapshot.save.phase, 'failed');
+  assert.equal(snapshot.save.retryable, true);
+
+  const retry = controller.retry(ITEM_A);
+  assert.equal(submittedStates.at(-1)?.find((record) => record.itemId === ITEM_A)?.note, 'old');
+  immediateSaves[0].resolve(saved);
+  await retry;
+  snapshot = controller.item(ITEM_A);
+  assert.equal(snapshot.confirmed?.note, 'old');
   assert.equal(snapshot.save.phase, 'saved');
 });
 
