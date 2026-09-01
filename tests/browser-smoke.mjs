@@ -197,6 +197,11 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
         before,
         `${name}: invalid quantity does not mutate storage`,
       );
+      await controls.getByRole('radio', { name: 'Need' }).check();
+      await quantity.waitFor({ state: 'visible' });
+      await controls.getByRole('radio', { name: 'Skip' }).check();
+      await quantity.waitFor({ state: 'visible' });
+      assert.equal(await owned.isVisible(), true, `${name}: invalid quantity input remains reachable`);
 
       await owned.fill('2');
       await owned.blur();

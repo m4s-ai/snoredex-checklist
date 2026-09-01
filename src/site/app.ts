@@ -829,7 +829,8 @@ function renderCollectionControls(
     for (const [value, input] of statusInputs) input.checked = value === snapshot.status;
     if (owned.value !== snapshot.quantityOwned) owned.value = snapshot.quantityOwned;
     if (ordered.value !== snapshot.quantityOrdered) ordered.value = snapshot.quantityOrdered;
-    quantity.hidden = snapshot.status === 'need' || snapshot.status === 'skip';
+    quantity.hidden =
+      (snapshot.status === 'need' || snapshot.status === 'skip') && snapshot.invalidQuantityFields.length === 0;
     quantitySummary.textContent = `Quantities · Owned ${snapshot.quantityOwned} · Ordered ${snapshot.quantityOrdered}`;
     if (textarea.value !== (snapshot.note ?? '')) textarea.value = snapshot.note ?? '';
     if (snapshot.note !== undefined) noteOpened = true;
