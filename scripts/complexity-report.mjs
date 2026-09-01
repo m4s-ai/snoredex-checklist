@@ -1478,6 +1478,23 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
   return false;
 }
 
+function isObjectMethodName(tokens, index) {
+  if (tokens[index + 1]?.kind !== SyntaxKind.OpenParenToken) return false;
+  const modifiers = [
+    SyntaxKind.GetKeyword,
+    SyntaxKind.SetKeyword,
+    SyntaxKind.AsyncKeyword,
+    SyntaxKind.AsteriskToken,
+    SyntaxKind.StaticKeyword,
+    SyntaxKind.PublicKeyword,
+    SyntaxKind.PrivateKeyword,
+    SyntaxKind.ProtectedKeyword,
+  ];
+  let cursor = index - 1;
+  while (modifiers.includes(tokens[cursor]?.kind)) cursor -= 1;
+  return [SyntaxKind.OpenBraceToken, SyntaxKind.CommaToken, SyntaxKind.SemicolonToken].includes(tokens[cursor]?.kind);
+}
+
 function isConditionalTypeAngleStart(tokens, index) {
   const assertionPrefix = isConditionalTypeAssertionPrefix(tokens, index);
   if (!identifierLike(tokens[index - 1]) && !assertionPrefix) return false;
@@ -1512,11 +1529,8 @@ function isConditionalTypeAngleStart(tokens, index) {
     for (let cursor = index + 2; cursor < close; cursor += 1) {
       const kind = tokens[cursor].kind;
       if (kind === SyntaxKind.ExtendsKeyword) {
-        const previousKind = tokens[cursor - 1]?.kind;
-        const isObjectMethodName =
-          tokens[cursor + 1]?.kind === SyntaxKind.OpenParenToken &&
-          [SyntaxKind.OpenBraceToken, SyntaxKind.CommaToken, SyntaxKind.SemicolonToken].includes(previousKind);
-        if (!isObjectMethodName && tokens[cursor + 1]?.kind !== SyntaxKind.ColonToken) sawExtends = true;
+        if (!isObjectMethodName(tokens, cursor) && tokens[cursor + 1]?.kind !== SyntaxKind.ColonToken)
+          sawExtends = true;
       } else if (sawExtends && kind === SyntaxKind.QuestionToken) sawQuestion = true;
       else if (sawQuestion && kind === SyntaxKind.ColonToken) return true;
     }
@@ -3014,6 +3028,14 @@ if (process.argv.includes('--self-test')) {
         'function parenthesizedMethodComparison() { return factory < ({ extends() {}, value: ready } ? A : B) > (value); }',
       expected: [
         { name: 'parenthesizedMethodComparison', complexity: 2 },
+        { name: 'extends', complexity: 1 },
+      ],
+    },
+    {
+      source:
+        'function parenthesizedAccessorComparison() { return factory < ({ get extends() {}, value: ready } ? A : B) > (value); }',
+      expected: [
+        { name: 'parenthesizedAccessorComparison', complexity: 2 },
         { name: 'extends', complexity: 1 },
       ],
     },
