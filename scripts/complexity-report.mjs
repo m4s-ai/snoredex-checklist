@@ -1436,6 +1436,10 @@ function hasTopLevelCommaBetween(tokens, start, end) {
             [SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[context]?.kind)
           )
             context -= 1;
+          if (tokens[context]?.kind === SyntaxKind.CloseParenToken) {
+            const importOpen = matchingOpen(tokens, context, SyntaxKind.OpenParenToken, SyntaxKind.CloseParenToken);
+            if (tokens[importOpen - 1]?.kind === SyntaxKind.ImportKeyword) context = importOpen - 2;
+          }
           return [
             SyntaxKind.AsKeyword,
             SyntaxKind.SatisfiesKeyword,
@@ -3193,6 +3197,11 @@ if (process.argv.includes('--self-test')) {
     {
       source: 'function typeOperatorGenericAssertion() { return value as keyof Wrapper<A, B> extends U ? A : B; }',
       expected: [{ name: 'typeOperatorGenericAssertion', complexity: 1 }],
+    },
+    {
+      source:
+        "function importQualifiedGenericAssertion() { return value as keyof import('./m').Wrapper<A, B> extends U ? A : B; }",
+      expected: [{ name: 'importQualifiedGenericAssertion', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
