@@ -314,6 +314,31 @@ test('rejects stale completion after a newer revision settles', async () => {
   assert.equal(snapshot.save.error, undefined);
 });
 
+test('latches stale commit uncertainty before discarding its field result', async () => {
+  const { controller, immediateSaves } = makeHarness();
+  controller.item(ITEM_B);
+  const notifications: Array<string | undefined> = [];
+  controller.onChange((itemId) => notifications.push(itemId));
+  const older = controller.setStatus(ITEM_A, 'have');
+  const newer = controller.setStatus(ITEM_A, 'skip');
+
+  immediateSaves[1].resolve({ ok: false, error: 'STORAGE_WRITE_FAILED' });
+  await newer;
+  assert.equal(controller.item(ITEM_A).save.phase, 'failed');
+  immediateSaves[0].resolve({ ok: false, error: 'STORAGE_COMMIT_UNCERTAIN' });
+  await older;
+
+  assert.equal(notifications.at(-1), undefined);
+  assert.equal(controller.item(ITEM_A).save.phase, 'conflict');
+  assert.equal(controller.item(ITEM_A).save.retryable, false);
+  assert.equal(controller.item(ITEM_B).save.phase, 'conflict');
+  assert.deepEqual(await controller.setStatus(ITEM_B, 'ordered'), {
+    ok: false,
+    error: 'STORAGE_COMMIT_UNCERTAIN',
+  });
+  assert.equal(immediateSaves.length, 2);
+});
+
 test('lets one encompassing save settle failed owners across cards', async () => {
   const { controller, immediateSaves } = makeHarness();
   const first = controller.setStatus(ITEM_A, 'have');

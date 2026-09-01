@@ -636,12 +636,13 @@ export class BrowserCollectionStateController implements CollectionStateControll
   private finishOperation(operation: SaveOperation, result: CollectionEditResult): void {
     this.activeOperations.delete(operation.id);
     const touched = new Set(operation.affected.keys());
+    const globallyChanged = !result.ok && this.latchCommitUncertain(result.error);
     if (operation.id < this.lastSettledOperationId) {
-      for (const itemId of touched) this.notify(itemId);
+      if (globallyChanged) this.notify();
+      else for (const itemId of touched) this.notify(itemId);
       return;
     }
     this.lastSettledOperationId = operation.id;
-    const globallyChanged = !result.ok && this.latchCommitUncertain(result.error);
     if (result.ok && !result.skipped && operation.id > this.lastConfirmedOperationId) {
       this.lastConfirmedOperationId = operation.id;
       for (const itemId of this.confirmedRecords.keys()) touched.add(itemId);
