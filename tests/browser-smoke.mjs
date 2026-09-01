@@ -105,6 +105,254 @@ async function assertCspBlocksInlineEvaluation(browser, name) {
   }
 }
 
+const PRIVATE_STATE_KEY = 'snoredex-checklist.private-state';
+const INVALID_QUANTITY_MESSAGE =
+  'Quantity is invalid. Enter a whole number from 0 through 9999. This draft was not saved, and the previous collection value remains unchanged. Error code: EDIT_INVALID_QUANTITY';
+
+async function collectionScenarioPage(browser, synthetic, items) {
+  const page = await browser.newPage();
+  await page.goto(`${baseUrl}/collection/`, { waitUntil: 'networkidle' });
+  await page.evaluate(
+    ({ fingerprint, records }) => {
+      localStorage.setItem(
+        'snoredex-checklist.private-state',
+        JSON.stringify({
+          schema: 'snoredex-collection-state',
+          schemaVersion: '1.0.0',
+          datasetId: 'snoredex-data/snorlax-current-known',
+          catalogueFingerprint: fingerprint,
+          items: records,
+        }),
+      );
+    },
+    { fingerprint: synthetic.fingerprint, records: items },
+  );
+  await page.goto(`${baseUrl}/collection/?localization=${encodeURIComponent(synthetic.localizationId)}`, {
+    waitUntil: 'networkidle',
+  });
+  return page;
+}
+
+function controlsForOwnedInput(owned) {
+  return owned.locator(
+    'xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " collection-controls ")]',
+  );
+}
+
+async function assertCollectionEditStateMachine(browser, name, synthetic) {
+  const initial = {
+    itemId: synthetic.itemId,
+    status: 'have',
+    quantityOwned: 1,
+    quantityOrdered: 0,
+  };
+
+  {
+    const page = await collectionScenarioPage(browser, synthetic, [initial]);
+    try {
+      const owned = page.getByRole('spinbutton', { name: 'Owned' }).first();
+      const controls = controlsForOwnedInput(owned);
+      const before = await page.evaluate((key) => localStorage.getItem(key), PRIVATE_STATE_KEY);
+      await owned.fill('1123123123');
+      await owned.blur();
+      await controls.getByText(INVALID_QUANTITY_MESSAGE, { exact: true }).waitFor();
+      assert.equal(await owned.getAttribute('aria-invalid'), 'true', `${name}: invalid quantity is field-attached`);
+      assert.equal(await controls.locator('.state-retry').isVisible(), false, `${name}: validation has no fake retry`);
+      assert.equal(
+        await page.evaluate((key) => localStorage.getItem(key), PRIVATE_STATE_KEY),
+        before,
+        `${name}: invalid quantity does not mutate storage`,
+      );
+
+      await owned.fill('2');
+      await owned.blur();
+      await controls.locator('.state-feedback').filter({ hasText: 'Saved' }).waitFor();
+      assert.equal(await owned.getAttribute('aria-invalid'), null, `${name}: correction clears invalid state`);
+      assert.equal(
+        await page.evaluate(
+          ({ key, itemId }) =>
+            JSON.parse(localStorage.getItem(key) ?? '{}').items?.find((item) => item.itemId === itemId)?.quantityOwned,
+          { key: PRIVATE_STATE_KEY, itemId: synthetic.itemId },
+        ),
+        2,
+        `${name}: corrected quantity is persisted`,
+      );
+    } finally {
+      await page.close();
+    }
+  }
+
+  {
+    assert.ok(synthetic.secondItemId, `${name}: localization has two trackable items`);
+    const page = await collectionScenarioPage(browser, synthetic, [initial]);
+    try {
+      const firstOwned = page.getByRole('spinbutton', { name: 'Owned' }).first();
+      const firstOrdered = page.getByRole('spinbutton', { name: 'Ordered' }).first();
+      const firstControls = controlsForOwnedInput(firstOwned);
+      const secondOwned = page.getByRole('spinbutton', { name: 'Owned' }).nth(1);
+      const secondControls = controlsForOwnedInput(secondOwned);
+      await firstOwned.fill('1123123123');
+      await firstOwned.blur();
+      await firstControls.getByText(INVALID_QUANTITY_MESSAGE, { exact: true }).waitFor();
+
+      await secondControls.getByRole('radio', { name: 'Have' }).check();
+      await secondControls.locator('.state-feedback').filter({ hasText: 'Saved' }).waitFor();
+      assert.equal(await firstOwned.inputValue(), '1123123123', `${name}: cross-card save preserves invalid draft`);
+      assert.equal(
+        await firstOwned.getAttribute('aria-invalid'),
+        'true',
+        `${name}: cross-card save preserves validation`,
+      );
+
+      await firstControls.getByRole('radio', { name: 'Ordered' }).check();
+      await page.waitForFunction(
+        ({ key, itemId }) =>
+          JSON.parse(localStorage.getItem(key) ?? '{}').items?.find((item) => item.itemId === itemId)?.status ===
+          'ordered',
+        { key: PRIVATE_STATE_KEY, itemId: synthetic.itemId },
+      );
+      assert.equal(
+        await firstOwned.inputValue(),
+        '1123123123',
+        `${name}: status save preserves invalid quantity draft`,
+      );
+      assert.equal(await firstOrdered.inputValue(), '1', `${name}: status save refreshes the valid quantity sibling`);
+      assert.equal(
+        await firstControls.locator('.state-feedback').textContent(),
+        INVALID_QUANTITY_MESSAGE,
+        `${name}: status save leaves specific validation feedback`,
+      );
+
+      await firstOwned.fill('0');
+      await firstOwned.blur();
+      await firstControls.locator('.state-feedback').filter({ hasText: 'Saved' }).waitFor();
+      assert.equal(
+        await page.evaluate(
+          ({ key, itemId }) =>
+            JSON.parse(localStorage.getItem(key) ?? '{}').items?.find((item) => item.itemId === itemId)?.status,
+          { key: PRIVATE_STATE_KEY, itemId: synthetic.itemId },
+        ),
+        'ordered',
+        `${name}: correcting the invalid field preserves the selected status`,
+      );
+    } finally {
+      await page.close();
+    }
+  }
+
+  {
+    const page = await collectionScenarioPage(browser, synthetic, [initial]);
+    try {
+      const owned = page.getByRole('spinbutton', { name: 'Owned' }).first();
+      const controls = controlsForOwnedInput(owned);
+      await page.evaluate((key) => {
+        const setItem = Storage.prototype.setItem;
+        globalThis.__snoredexFailNextStateWrite = true;
+        Storage.prototype.setItem = function failOneCanonicalWrite(candidate, value) {
+          if (candidate === key && globalThis.__snoredexFailNextStateWrite) {
+            globalThis.__snoredexFailNextStateWrite = false;
+            globalThis.__snoredexFailedStateWrite = true;
+            throw new Error('synthetic state write failure');
+          }
+          return setItem.call(this, candidate, value);
+        };
+      }, PRIVATE_STATE_KEY);
+      await controls.getByRole('radio', { name: 'Ordered' }).check();
+      await page.waitForFunction(() => globalThis.__snoredexFailedStateWrite === true);
+      await controls.locator('.state-feedback').filter({ hasText: 'Save failed.' }).waitFor();
+
+      await owned.fill('1123123123');
+      assert.match(await controls.locator('.state-feedback').textContent(), /Quantity is invalid.*Save failed/u);
+      const retry = controls.locator('.state-retry');
+      assert.equal(await retry.isVisible(), true, `${name}: validation does not erase an independent save failure`);
+      await retry.click();
+      await page.waitForFunction(
+        ({ key, itemId }) =>
+          JSON.parse(localStorage.getItem(key) ?? '{}').items?.find((item) => item.itemId === itemId)?.status ===
+          'ordered',
+        { key: PRIVATE_STATE_KEY, itemId: synthetic.itemId },
+      );
+      assert.equal(await owned.inputValue(), '1123123123', `${name}: retry preserves the invalid field draft`);
+      assert.equal(await retry.isVisible(), false, `${name}: encompassing success clears the stale retry`);
+    } finally {
+      await page.close();
+    }
+  }
+
+  {
+    const page = await collectionScenarioPage(browser, synthetic, [{ ...initial, note: 'old note' }]);
+    try {
+      const note = page.getByRole('textbox', { name: /Private note for/u }).first();
+      const controls = note.locator(
+        'xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " collection-controls ")]',
+      );
+      await note.fill('');
+      await note.pressSequentially('  first');
+      await note.press('Enter');
+      await note.pressSequentially('second');
+      assert.equal(await note.inputValue(), '  first\nsecond', `${name}: note composition preserves leading spaces`);
+      await note.blur();
+      await controls.locator('.state-feedback').filter({ hasText: 'Saved' }).waitFor();
+      assert.equal(
+        await page.evaluate(
+          ({ key, itemId }) =>
+            JSON.parse(localStorage.getItem(key) ?? '{}').items?.find((item) => item.itemId === itemId)?.note,
+          { key: PRIVATE_STATE_KEY, itemId: synthetic.itemId },
+        ),
+        '  first\nsecond',
+        `${name}: note save preserves leading spaces`,
+      );
+    } finally {
+      await page.close();
+    }
+  }
+
+  {
+    const page = await collectionScenarioPage(browser, synthetic, [initial]);
+    try {
+      await page.getByRole('button', { name: 'Add note' }).first().click();
+      const note = page.getByRole('textbox', { name: /Private note for/u }).first();
+      await note.fill('recovered browser draft');
+      await page.waitForFunction(() =>
+        Object.keys(localStorage).some(
+          (key) =>
+            key.startsWith('snoredex-checklist.private-state.note-draft:') &&
+            localStorage.getItem(key)?.includes('recovered browser draft'),
+        ),
+      );
+      await page.reload({ waitUntil: 'networkidle' });
+
+      await page.getByRole('heading', { name: 'Recovered unsaved collection changes' }).waitFor();
+      assert.equal(
+        await page.getByRole('spinbutton', { name: 'Owned' }).count(),
+        0,
+        `${name}: unresolved recovery withholds quantity controls`,
+      );
+      assert.equal(
+        await page.getByRole('radio', { name: 'Have' }).count(),
+        0,
+        `${name}: unresolved recovery withholds status controls`,
+      );
+
+      await page.getByRole('button', { name: 'Adopt recovered changes' }).click();
+      await page.getByRole('heading', { name: 'Recovered unsaved collection changes' }).waitFor({ state: 'detached' });
+      const owned = page.getByRole('spinbutton', { name: 'Owned' }).first();
+      assert.equal(await owned.isEnabled(), true, `${name}: successful adoption re-enables collection edits`);
+      assert.equal(
+        await page.evaluate(
+          ({ key, itemId }) =>
+            JSON.parse(localStorage.getItem(key) ?? '{}').items?.find((item) => item.itemId === itemId)?.note,
+          { key: PRIVATE_STATE_KEY, itemId: synthetic.itemId },
+        ),
+        'recovered browser draft',
+        `${name}: adoption commits the recovered draft`,
+      );
+    } finally {
+      await page.close();
+    }
+  }
+}
+
 try {
   for (const [name, engine] of [
     ['chromium', chromium],
@@ -159,13 +407,21 @@ try {
       const synthetic = await page.evaluate(async () => {
         const module = await import('/assets/snapshot.js');
         const catalogue = module.default;
-        const item = catalogue.items.find(
+        const trackable = catalogue.items.filter(
           (candidate) => candidate.active && candidate.progressClass === 'current-known',
         );
+        const item =
+          trackable.find(
+            (candidate) => trackable.filter((other) => other.localizationId === candidate.localizationId).length > 1,
+          ) ?? trackable[0];
         if (!item) return null;
         return {
           fingerprint: catalogue.meta.catalogueFingerprint,
           itemId: item.itemId,
+          localizationId: item.localizationId,
+          secondItemId: trackable.find(
+            (candidate) => candidate.localizationId === item.localizationId && candidate.itemId !== item.itemId,
+          )?.itemId,
           research: catalogue.items.find(
             (candidate) =>
               candidate.active &&
@@ -255,6 +511,7 @@ try {
           `${name}: confirmation name`,
         );
         await confirmation.getByRole('button', { name: 'Cancel' }).click();
+        await assertCollectionEditStateMachine(browser, name, synthetic);
         assert.notEqual(synthetic.research, undefined, `${name}: synthetic research item`);
         if (synthetic.research?.setEditionId) {
           await page.goto(
