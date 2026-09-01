@@ -1415,6 +1415,7 @@ function isKeywordNamedProperty(tokens, index) {
 function isConditionalTypeQuestion(tokens, index, start = 0) {
   if (tokens[index]?.kind !== SyntaxKind.QuestionToken) return false;
   let sawExtends = false;
+  let sawAs = false;
   let extendsIndex;
   for (let cursor = index - 1; cursor >= start; cursor -= 1) {
     const kind = tokens[cursor].kind;
@@ -1422,6 +1423,10 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
       if ([SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[cursor - 1]?.kind)) return false;
       sawExtends = true;
       extendsIndex = cursor;
+      continue;
+    }
+    if (kind === SyntaxKind.AsKeyword) {
+      sawAs = true;
       continue;
     }
     if (kind === SyntaxKind.TypeKeyword) return sawExtends;
@@ -1473,7 +1478,10 @@ function isConditionalTypeQuestion(tokens, index, start = 0) {
         }
       }
     }
-    if ([SyntaxKind.ReturnKeyword, SyntaxKind.SemicolonToken].includes(kind)) return false;
+    if (kind === SyntaxKind.ReturnKeyword) {
+      return sawExtends && sawAs;
+    }
+    if (kind === SyntaxKind.SemicolonToken) return false;
   }
   return false;
 }
@@ -3116,6 +3124,10 @@ if (process.argv.includes('--self-test')) {
         return ready ? yes : no;
       }`,
       expected: [{ name: 'semicolonlessTypeAlias', complexity: 2 }],
+    },
+    {
+      source: 'function returnAnnotatedAssertion(): unknown { return value as T extends U ? A : B; }',
+      expected: [{ name: 'returnAnnotatedAssertion', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
