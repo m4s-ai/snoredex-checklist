@@ -30,10 +30,13 @@ test('production adoption validates the reviewed target migration without requir
   assert.match(workflow, /new Set\(sources\)\.size !== sources\.length \|\|\s+!sameCatalogueDeployment/u);
   assert.match(workflow, /!digest\.test\(current\.catalogueFingerprint \?\? ''\)/u);
   assert.match(workflow, /push:\s+branches:\s+- main/u);
+  assert.match(workflow, /name: Trigger independent catalogue intake/u);
+  assert.match(workflow, /gh workflow run catalogue-release\.yml --ref main/u);
+  assert.match(workflow, /actions: write/u);
+  assert.doesNotMatch(workflow, /uses: \.\/\.github\/workflows\/catalogue-release\.yml/u);
   assert.match(workflow, /run-name: Deploy Pages \/ \$\{\{/u);
   assert.match(workflow, /group: pages-\$\{\{/u);
   assert.match(workflow, /deployment-lane:/u);
-  assert.match(workflow, /actions: read/u);
   assert.match(workflow, /automatic adoption deferred while a rollback run is queued or active/u);
   assert.match(workflow, /activeStatuses = new Set\(\['queued', 'in_progress', 'waiting', 'pending'\]\)/u);
   assert.match(workflow, /const isRollbackRun = \(run\) => run\.event === 'workflow_dispatch'/u);
