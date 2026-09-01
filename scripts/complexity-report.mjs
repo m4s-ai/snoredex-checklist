@@ -1574,6 +1574,7 @@ function isConditionalTypeAssertionPrefix(tokens, index) {
       SyntaxKind.OfKeyword,
       SyntaxKind.TemplateHead,
       SyntaxKind.TemplateMiddle,
+      SyntaxKind.CommaToken,
       SyntaxKind.OpenBraceToken,
       SyntaxKind.CloseBraceToken,
       SyntaxKind.SemicolonToken,
@@ -2978,6 +2979,12 @@ if (process.argv.includes('--self-test')) {
       source:
         'function templateAssertion() {\n  return `${<T extends U ? A : B>value}${<T extends U ? A : B>value}`;\n}',
       expected: [{ name: 'templateAssertion', complexity: 1 }],
+    },
+    {
+      source: `function commaAssertion() {
+        return [first, <T extends U ? A : B>value];
+      }`,
+      expected: [{ name: 'commaAssertion', complexity: 1 }],
     },
   ];
   for (const sample of samples) {
