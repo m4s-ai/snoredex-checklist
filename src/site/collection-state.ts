@@ -94,6 +94,7 @@ export type CollectionSavePhase = 'clean' | 'dirty' | 'saving' | 'saved' | 'fail
 export interface CollectionItemEditSnapshot {
   readonly itemId: string;
   readonly revision: number;
+  readonly editingBlocked: boolean;
   readonly confirmed: PrivateItemState | undefined;
   readonly status: CollectionStatus;
   readonly quantityOwned: string;
@@ -233,6 +234,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
   private lastConfirmedOperationId = 0;
   private lastSettledOperationId = 0;
   private commitUncertain = false;
+  private recoveryActionPending = false;
 
   public constructor(
     store: OrderedStateStoreLike,
@@ -300,6 +302,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     return {
       itemId,
       revision: Math.max(meta.versions.collection, meta.versions.note),
+      editingBlocked: this.editBlockError() !== undefined,
       confirmed: this.confirmedRecords.get(itemId),
       status: record.status,
       quantityOwned: meta.quantityOwned,
@@ -317,6 +320,11 @@ export class BrowserCollectionStateController implements CollectionStateControll
   }
 
   public async setStatus(itemId: string, status: CollectionStatus): Promise<CollectionEditResult> {
+    const blocked = this.editBlockError();
+    if (blocked !== undefined) {
+      this.notify(itemId);
+      return failure(blocked);
+    }
     const result = this.domain.applyStatusCommand(itemId, this.records.get(itemId), status);
     if (!result.ok) return failure(result.error ?? 'IMPORT_INVALID_STATE_DATA');
     const meta = this.editMeta(itemId);
@@ -332,6 +340,11 @@ export class BrowserCollectionStateController implements CollectionStateControll
   }
 
   public setQuantityDraft(itemId: string, quantityOwned: string, quantityOrdered: string): CollectionEditResult {
+    const blocked = this.editBlockError();
+    if (blocked !== undefined) {
+      this.notify(itemId);
+      return failure(blocked);
+    }
     const meta = this.editMeta(itemId);
     if (meta.quantityOwned === quantityOwned && meta.quantityOrdered === quantityOrdered) {
       return meta.invalidQuantityFields.length === 0 ? { ok: true, skipped: true } : failure('EDIT_INVALID_QUANTITY');
@@ -345,6 +358,11 @@ export class BrowserCollectionStateController implements CollectionStateControll
   }
 
   public async commitQuantities(itemId: string): Promise<CollectionEditResult> {
+    const blocked = this.editBlockError();
+    if (blocked !== undefined) {
+      this.notify(itemId);
+      return failure(blocked);
+    }
     const meta = this.editMeta(itemId);
     const quantityOwned = parseQuantity(meta.quantityOwned);
     const quantityOrdered = parseQuantity(meta.quantityOrdered);
@@ -372,6 +390,11 @@ export class BrowserCollectionStateController implements CollectionStateControll
   }
 
   public scheduleNote(itemId: string, note: string): CollectionEditResult {
+    const blocked = this.editBlockError();
+    if (blocked !== undefined) {
+      this.notify(itemId);
+      return failure(blocked);
+    }
     const result = this.domain.applyNoteEdit(itemId, this.records.get(itemId), note);
     if (!result.ok) return failure(result.error ?? 'EDIT_INVALID_NOTE');
     const previousNote = this.records.get(itemId)?.note;
@@ -382,10 +405,6 @@ export class BrowserCollectionStateController implements CollectionStateControll
       meta.versions.note = ++this.nextRevision;
     }
     this.clearFailureAfterEdit(meta, 'note');
-    if (this.commitUncertain) {
-      this.notify(itemId);
-      return failure('STORAGE_COMMIT_UNCERTAIN');
-    }
     const pending = this.pendingSnapshot();
     const scheduled = this.store.scheduleNoteSave(pending.state, false);
     this.pendingNote = { ...pending, scheduled: scheduled.ok };
@@ -405,10 +424,11 @@ export class BrowserCollectionStateController implements CollectionStateControll
 
   public async flushNote(): Promise<CollectionEditResult> {
     this.cancelNoteTimer();
-    if (this.commitUncertain) {
+    const blocked = this.editBlockError();
+    if (blocked !== undefined) {
       this.pendingNote = undefined;
       this.notify();
-      return failure('STORAGE_COMMIT_UNCERTAIN');
+      return failure(blocked);
     }
     const pending = this.pendingNote;
     if (pending === undefined) return { ok: true, skipped: true };
@@ -428,10 +448,12 @@ export class BrowserCollectionStateController implements CollectionStateControll
   }
 
   public retry(itemId: string): Promise<CollectionEditResult> {
-    const snapshot = this.item(itemId);
-    if (snapshot.save.error === 'STORAGE_COMMIT_UNCERTAIN') {
-      return Promise.resolve(failure('STORAGE_COMMIT_UNCERTAIN'));
+    const blocked = this.editBlockError();
+    if (blocked !== undefined) {
+      this.notify(itemId);
+      return Promise.resolve(failure(blocked));
     }
+    const snapshot = this.item(itemId);
     if (!snapshot.save.retryable) return Promise.resolve({ ok: true, skipped: true });
     const meta = this.editMeta(itemId);
     const quantityOwned = parseQuantity(meta.quantityOwned);
@@ -449,27 +471,43 @@ export class BrowserCollectionStateController implements CollectionStateControll
 
   public async adoptRecovery(): Promise<CollectionEditResult> {
     if (this.commitUncertain) return failure('STORAGE_COMMIT_UNCERTAIN');
+    if (this.recoveryActionPending) return failure('RECOVERY_ACTION_PENDING');
     const current = this.recoveryDraft;
     if (current === undefined) return { ok: true, skipped: true };
-    const adopted = this.store.adoptUnsavedDraft();
-    if (!adopted.ok) return failure(adopted.error ?? 'LOCAL_STATE_UNREADABLE');
-    const draft = adopted.value ?? current;
-    const outcome = persistenceResult(await this.store.saveImmediate(draft));
-    if (!outcome.ok) return outcome;
-    this.cancelNoteTimer();
-    this.pendingNote = undefined;
-    this.activeOperations.clear();
-    this.records = new Map(draft.items.map((record) => [record.itemId, record]));
-    this.confirmedRecords = new Map(this.records);
-    this.edits.clear();
-    this.hasActiveState = true;
-    this.recoveryDraft = undefined;
-    this.notify();
-    return outcome;
+    this.recoveryActionPending = true;
+    try {
+      const adopted = this.store.adoptUnsavedDraft();
+      if (!adopted.ok) {
+        const error = adopted.error ?? 'LOCAL_STATE_UNREADABLE';
+        this.latchCommitUncertain(error);
+        this.notify();
+        return failure(error);
+      }
+      const draft = adopted.value ?? current;
+      const outcome = persistenceResult(await this.store.saveImmediate(draft));
+      if (!outcome.ok) {
+        this.latchCommitUncertain(outcome.error);
+        this.notify();
+        return outcome;
+      }
+      this.cancelNoteTimer();
+      this.pendingNote = undefined;
+      this.activeOperations.clear();
+      this.records = new Map(draft.items.map((record) => [record.itemId, record]));
+      this.confirmedRecords = new Map(this.records);
+      this.edits.clear();
+      this.hasActiveState = true;
+      this.recoveryDraft = undefined;
+      this.notify();
+      return outcome;
+    } finally {
+      this.recoveryActionPending = false;
+    }
   }
 
   public discardRecovery(): CollectionEditResult {
     if (this.commitUncertain) return failure('STORAGE_COMMIT_UNCERTAIN');
+    if (this.recoveryActionPending) return failure('RECOVERY_ACTION_PENDING');
     if (this.recoveryDraft === undefined) return { ok: true, skipped: true };
     this.store.discardUnsavedDraft();
     if (this.store.unsaved() !== undefined) return failure('STORAGE_WRITE_FAILED');
@@ -501,6 +539,18 @@ export class BrowserCollectionStateController implements CollectionStateControll
 
   private clearFailureAfterEdit(meta: ItemEditMeta, field: EditField): void {
     if (meta.failures[field]?.error !== 'STORAGE_COMMIT_UNCERTAIN') delete meta.failures[field];
+  }
+
+  private editBlockError(): string | undefined {
+    if (this.commitUncertain) return 'STORAGE_COMMIT_UNCERTAIN';
+    return this.recoveryDraft === undefined ? undefined : 'RECOVERY_DECISION_REQUIRED';
+  }
+
+  private latchCommitUncertain(error: string): void {
+    if (error !== 'STORAGE_COMMIT_UNCERTAIN') return;
+    this.commitUncertain = true;
+    this.cancelNoteTimer();
+    this.pendingNote = undefined;
   }
 
   private setFailure(itemId: string, field: EditField, error: string, revision: number, operationId: number): void {
@@ -564,11 +614,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
       return;
     }
     this.lastSettledOperationId = operation.id;
-    if (!result.ok && result.error === 'STORAGE_COMMIT_UNCERTAIN') {
-      this.commitUncertain = true;
-      this.cancelNoteTimer();
-      this.pendingNote = undefined;
-    }
+    if (!result.ok) this.latchCommitUncertain(result.error);
     if (result.ok && !result.skipped && operation.id > this.lastConfirmedOperationId) {
       this.lastConfirmedOperationId = operation.id;
       for (const itemId of this.confirmedRecords.keys()) touched.add(itemId);

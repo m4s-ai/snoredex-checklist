@@ -31,18 +31,31 @@ interface Harness {
 
 function makeHarness(options?: {
   readonly active?: readonly PrivateItemState[];
+  readonly recovery?: readonly PrivateItemState[];
   readonly scheduleResults?: Array<{ readonly ok: boolean; readonly error?: string }>;
 }): Harness {
   const immediateSaves: Array<ReturnType<typeof deferred<SaveOutcome>>> = [];
   const noteSaves: Array<ReturnType<typeof deferred<SaveOutcome>>> = [];
   const submittedStates: Array<readonly PrivateItemState[]> = [];
   let pendingNote = false;
+  let recovery = options?.recovery;
   const scheduleResults = [...(options?.scheduleResults ?? [])];
   const store = {
     read: () => ({ ok: true, value: undefined }),
-    unsaved: () => undefined,
-    adoptUnsavedDraft: () => ({ ok: true, value: undefined }),
-    discardUnsavedDraft: () => undefined,
+    unsaved: () =>
+      recovery === undefined
+        ? undefined
+        : {
+            schema: 'snoredex-collection-state' as const,
+            schemaVersion: '1.0.0' as const,
+            datasetId: 'snoredex-data/snorlax-current-known' as const,
+            catalogueFingerprint: FINGERPRINT,
+            items: recovery,
+          },
+    adoptUnsavedDraft: () => ({ ok: true, value: store.unsaved() }),
+    discardUnsavedDraft: () => {
+      recovery = undefined;
+    },
     hasPendingNote: () => pendingNote,
     saveImmediate: (state: { readonly items: readonly PrivateItemState[] }) => {
       pendingNote = false;
@@ -284,6 +297,56 @@ test('keeps a raw note draft until its normalized value is saved', async () => {
   assert.equal(snapshot.save.phase, 'saved');
 });
 
+test('serializes normal edits behind a pending recovery decision and adoption', async () => {
+  const recovered = { itemId: ITEM_A, status: 'have' as const, quantityOwned: 2, quantityOrdered: 0 };
+  const { controller, immediateSaves } = makeHarness({ recovery: [recovered] });
+
+  assert.equal(controller.item(ITEM_A).editingBlocked, true);
+  assert.deepEqual(await controller.setStatus(ITEM_B, 'ordered'), {
+    ok: false,
+    error: 'RECOVERY_DECISION_REQUIRED',
+  });
+  assert.equal(immediateSaves.length, 0);
+
+  const adoption = controller.adoptRecovery();
+  assert.deepEqual(await controller.setStatus(ITEM_B, 'ordered'), {
+    ok: false,
+    error: 'RECOVERY_DECISION_REQUIRED',
+  });
+  assert.deepEqual(controller.discardRecovery(), { ok: false, error: 'RECOVERY_ACTION_PENDING' });
+  assert.deepEqual(await controller.adoptRecovery(), { ok: false, error: 'RECOVERY_ACTION_PENDING' });
+  assert.equal(immediateSaves.length, 1);
+  immediateSaves[0].resolve(saved);
+  await adoption;
+
+  assert.equal(controller.recovery, undefined);
+  assert.equal(controller.item(ITEM_A).editingBlocked, false);
+  assert.deepEqual(controller.item(ITEM_A).confirmed, recovered);
+  const edit = controller.setStatus(ITEM_B, 'ordered');
+  assert.equal(immediateSaves.length, 2);
+  immediateSaves[1].resolve(saved);
+  await edit;
+  assert.equal(controller.item(ITEM_B).confirmed?.status, 'ordered');
+});
+
+test('latches an uncertain recovery adoption until reload', async () => {
+  const recovered = { itemId: ITEM_A, status: 'have' as const, quantityOwned: 2, quantityOrdered: 0 };
+  const { controller, immediateSaves } = makeHarness({ recovery: [recovered] });
+
+  const adoption = controller.adoptRecovery();
+  immediateSaves[0].resolve({ ok: false, error: 'STORAGE_COMMIT_UNCERTAIN' });
+  assert.deepEqual(await adoption, { ok: false, error: 'STORAGE_COMMIT_UNCERTAIN' });
+
+  assert.equal(controller.item(ITEM_A).save.phase, 'conflict');
+  assert.equal(controller.item(ITEM_A).editingBlocked, true);
+  assert.deepEqual(controller.discardRecovery(), { ok: false, error: 'STORAGE_COMMIT_UNCERTAIN' });
+  assert.deepEqual(await controller.setStatus(ITEM_B, 'ordered'), {
+    ok: false,
+    error: 'STORAGE_COMMIT_UNCERTAIN',
+  });
+  assert.equal(immediateSaves.length, 1);
+});
+
 test('treats commit uncertainty as reload-only recovery', async () => {
   const { controller, immediateSaves, submittedStates } = makeHarness();
   const save = controller.setStatus(ITEM_A, 'have');
@@ -302,8 +365,8 @@ test('treats commit uncertainty as reload-only recovery', async () => {
     ok: false,
     error: 'STORAGE_COMMIT_UNCERTAIN',
   });
-  assert.equal(controller.item(ITEM_A).note, 'local draft');
-  assert.equal(controller.item(ITEM_B).status, 'ordered');
+  assert.equal(controller.item(ITEM_A).note, undefined);
+  assert.equal(controller.item(ITEM_B).status, 'need');
   assert.equal(controller.item(ITEM_B).save.phase, 'conflict');
   assert.equal(immediateSaves.length, 1);
   assert.equal(submittedStates.length, 1);

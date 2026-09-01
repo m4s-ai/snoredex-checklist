@@ -291,6 +291,51 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
       await page.close();
     }
   }
+
+  {
+    const page = await collectionScenarioPage(browser, synthetic, [initial]);
+    try {
+      await page.getByRole('button', { name: 'Add note' }).first().click();
+      const note = page.getByRole('textbox', { name: /Private note for/u }).first();
+      await note.fill('recovered browser draft');
+      await page.waitForFunction(() =>
+        Object.keys(localStorage).some(
+          (key) =>
+            key.startsWith('snoredex-checklist.private-state.note-draft:') &&
+            localStorage.getItem(key)?.includes('recovered browser draft'),
+        ),
+      );
+      await page.reload({ waitUntil: 'networkidle' });
+
+      await page.getByRole('heading', { name: 'Recovered unsaved collection changes' }).waitFor();
+      assert.equal(
+        await page.getByRole('spinbutton', { name: 'Owned' }).count(),
+        0,
+        `${name}: unresolved recovery withholds quantity controls`,
+      );
+      assert.equal(
+        await page.getByRole('radio', { name: 'Have' }).count(),
+        0,
+        `${name}: unresolved recovery withholds status controls`,
+      );
+
+      await page.getByRole('button', { name: 'Adopt recovered changes' }).click();
+      await page.getByRole('heading', { name: 'Recovered unsaved collection changes' }).waitFor({ state: 'detached' });
+      const owned = page.getByRole('spinbutton', { name: 'Owned' }).first();
+      assert.equal(await owned.isEnabled(), true, `${name}: successful adoption re-enables collection edits`);
+      assert.equal(
+        await page.evaluate(
+          ({ key, itemId }) =>
+            JSON.parse(localStorage.getItem(key) ?? '{}').items?.find((item) => item.itemId === itemId)?.note,
+          { key: PRIVATE_STATE_KEY, itemId: synthetic.itemId },
+        ),
+        'recovered browser draft',
+        `${name}: adoption commits the recovered draft`,
+      );
+    } finally {
+      await page.close();
+    }
+  }
 }
 
 try {

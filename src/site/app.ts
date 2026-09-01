@@ -793,6 +793,11 @@ function renderCollectionControls(
 
   const renderSnapshot = (): void => {
     const snapshot = controller.item(item.itemId);
+    fieldset.disabled = snapshot.editingBlocked;
+    owned.disabled = snapshot.editingBlocked;
+    ordered.disabled = snapshot.editingBlocked;
+    noteButton.disabled = snapshot.editingBlocked;
+    textarea.disabled = snapshot.editingBlocked;
     for (const [value, input] of statusInputs) input.checked = value === snapshot.status;
     if (owned.value !== snapshot.quantityOwned) owned.value = snapshot.quantityOwned;
     if (ordered.value !== snapshot.quantityOrdered) ordered.value = snapshot.quantityOrdered;
@@ -881,6 +886,7 @@ function renderRecoveryPanel(
         if (result.error === 'STORAGE_COMMIT_UNCERTAIN') {
           feedback.textContent = 'Recovery conflict detected. Reload to reconcile your collection.';
           reload.hidden = false;
+          return;
         } else {
           feedback.textContent = 'Recovery action failed. The recovered draft is still available; retry when ready.';
         }
