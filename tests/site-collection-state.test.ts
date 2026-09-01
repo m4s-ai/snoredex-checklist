@@ -269,6 +269,42 @@ test('preserves a failed draft and retries the current complete state', async ()
   assert.equal(submittedStates.at(-1)?.find((record) => record.itemId === ITEM_A)?.status, 'have');
 });
 
+test('keeps in-flight collection failures retryable across raw quantity drafts', async () => {
+  for (const entry of [
+    { quantityOwned: '10000', expectedPersisted: 1, expectedPhase: 'dirty' },
+    { quantityOwned: '2', expectedPersisted: 2, expectedPhase: 'saved' },
+  ] as const) {
+    const { controller, immediateSaves, submittedStates } = makeHarness();
+    const save = controller.setStatus(ITEM_A, 'have');
+    const operationRevision = controller.item(ITEM_A).revision;
+
+    controller.setQuantityDraft(ITEM_A, entry.quantityOwned, '0');
+    assert.ok(controller.item(ITEM_A).revision > operationRevision);
+    immediateSaves[0].resolve({ ok: false, error: 'STORAGE_WRITE_FAILED' });
+    await save;
+
+    let snapshot = controller.item(ITEM_A);
+    assert.equal(snapshot.quantityOwned, entry.quantityOwned);
+    assert.equal(snapshot.save.phase, 'failed');
+    assert.equal(snapshot.save.retryable, true);
+
+    const retry = controller.retry(ITEM_A);
+    assert.equal(submittedStates.at(-1)?.find((record) => record.itemId === ITEM_A)?.status, 'have');
+    assert.equal(
+      submittedStates.at(-1)?.find((record) => record.itemId === ITEM_A)?.quantityOwned,
+      entry.expectedPersisted,
+    );
+    immediateSaves[1].resolve(saved);
+    await retry;
+
+    snapshot = controller.item(ITEM_A);
+    assert.equal(snapshot.quantityOwned, entry.quantityOwned);
+    assert.equal(snapshot.confirmed?.quantityOwned, entry.expectedPersisted);
+    assert.equal(snapshot.save.phase, entry.expectedPhase);
+    assert.equal(snapshot.save.retryable, false);
+  }
+});
+
 test('retries the current status unless a quantity draft changed', async () => {
   const unchanged = makeHarness();
   const skipped = unchanged.controller.setStatus(ITEM_A, 'skip');

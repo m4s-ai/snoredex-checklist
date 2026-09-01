@@ -149,6 +149,7 @@ interface ItemEditMeta {
   quantityOrdered: string;
   noteDraft?: string;
   invalidQuantityFields: readonly ('owned' | 'ordered')[];
+  draftRevision: number;
   versions: ItemVersions;
   failures: Partial<Record<EditField, FieldFailure>>;
   lastSavedOperation?: number;
@@ -305,7 +306,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     const error = conflict ?? latestFailure?.error;
     return {
       itemId,
-      revision: Math.max(meta.versions.collection, meta.versions.note),
+      revision: Math.max(meta.draftRevision, meta.versions.collection, meta.versions.note),
       editingBlocked: this.editBlockError() !== undefined,
       confirmed: this.confirmedRecords.get(itemId),
       status: record.status,
@@ -354,7 +355,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     meta.quantityOwned = quantityOwned;
     meta.quantityOrdered = quantityOrdered;
     meta.invalidQuantityFields = invalidQuantityFields(quantityOwned, quantityOrdered);
-    meta.versions.collection = ++this.nextRevision;
+    meta.draftRevision = ++this.nextRevision;
     this.notify(itemId);
     return meta.invalidQuantityFields.length === 0 ? { ok: true } : failure('EDIT_INVALID_QUANTITY');
   }
@@ -533,6 +534,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
       quantityOrdered: String(record.quantityOrdered),
       ...(record.note === undefined ? {} : { noteDraft: record.note }),
       invalidQuantityFields: [],
+      draftRevision: 0,
       versions: { collection: 0, note: 0 },
       failures: {},
     };
