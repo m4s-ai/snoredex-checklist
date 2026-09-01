@@ -380,6 +380,9 @@ test('keeps stylesheet links and CSS imports inside the artifact', async () => {
 test('rejects external JavaScript module dependencies', async () => {
   for (const source of [
     "import('/outside.js');\n",
+    'import.source("/outside.wasm");\n',
+    'import.source(`/outside.wasm`);\n',
+    'const sourceModule = "/outside.wasm"; import.source(sourceModule);\n',
     'import/**/("/outside.js");\n',
     'import/**/"/outside.js";\n',
     'const expression = `${import/**/("/outside.js")}`;\n',
@@ -434,6 +437,64 @@ test('rejects external JavaScript module dependencies', async () => {
       const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
       assert.notEqual(result.status, 0);
       assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_EXTERNAL_MODULE_PRESENT: theme\.js/u);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test('accepts AST-recognized module dependencies that stay inside the artifact', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-internal-module-test-'));
+  try {
+    await writeValidArtifact(directory);
+    await writeFile(join(directory, 'dependency.js'), 'export default true; export const value = true;\n');
+    await writeFile(join(directory, 'dependency.wasm'), 'synthetic wasm fixture');
+    await writeFile(
+      join(directory, 'theme.js'),
+      [
+        'import "./dependency.js";',
+        'import value from "./dependency.js";',
+        'export * from "./dependency.js";',
+        'export { value } from "./dependency.js";',
+        'void import(`./dependency.js`);',
+        'void import("./\\u0064ependency.js");',
+        'void import.source("./dependency.wasm");',
+        'void import.meta.url;',
+      ].join('\n'),
+    );
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.equal(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /artifact ok:/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects computed dynamic-import template targets', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-computed-module-test-'));
+  try {
+    await writeValidArtifact(directory);
+    await writeFile(join(directory, 'theme.js'), 'const name = "dependency"; import(`./${name}.js`);\n');
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_EXTERNAL_MODULE_PRESENT: theme\.js/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects syntactically invalid emitted JavaScript', async () => {
+  for (const [name, source] of [
+    ['missing-expression', 'const broken = ;\n'],
+    ['semicolonless-field-before-generator', 'class C { x=1\n*import() {} }\n'],
+  ]) {
+    const directory = await mkdtemp(join(tmpdir(), `snoredex-artifact-invalid-${name}-test-`));
+    try {
+      await writeValidArtifact(directory);
+      await writeFile(join(directory, 'theme.js'), source);
+      const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+      assert.notEqual(result.status, 0);
+      assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_JAVASCRIPT_INVALID: theme\.js/u);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -651,13 +712,13 @@ test('recognizes modified methods after semicolonless class fields', async () =>
   }
 });
 
-test('recognizes generator methods after semicolonless class fields', async () => {
+test('recognizes generator methods named import after class fields', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-generator-class-method-test-'));
   try {
     await writeValidArtifact(directory);
-    await writeFile(join(directory, 'theme.js'), 'class C { x=1\n*import() {} }\n');
+    await writeFile(join(directory, 'theme.js'), 'class C { x=1;\n*import() {} }\n');
     const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
-    assert.equal(result.status, 0);
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
     assert.match(`${result.stdout}${result.stderr}`, /artifact ok:/u);
   } finally {
     await rm(directory, { recursive: true, force: true });
