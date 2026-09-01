@@ -1425,8 +1425,26 @@ function hasTopLevelCommaBetween(tokens, start, end) {
     else if (kind === SyntaxKind.CloseBracketToken) brackets = Math.max(0, brackets - 1);
     else if (kind === SyntaxKind.OpenBraceToken) braces += 1;
     else if (kind === SyntaxKind.CloseBraceToken) braces = Math.max(0, braces - 1);
-    else if (kind === SyntaxKind.LessThanToken) angles += 1;
-    else if (kind === SyntaxKind.GreaterThanToken) angles = Math.max(0, angles - 1);
+    else if (kind === SyntaxKind.LessThanToken) {
+      const close = matchingAngleClose(tokens, cursor);
+      const qualifiedType =
+        identifierLike(tokens[cursor - 1]) &&
+        (() => {
+          let context = cursor - 2;
+          while (
+            identifierLike(tokens[context]) ||
+            [SyntaxKind.DotToken, SyntaxKind.QuestionDotToken].includes(tokens[context]?.kind)
+          )
+            context -= 1;
+          return [SyntaxKind.AsKeyword, SyntaxKind.SatisfiesKeyword].includes(tokens[context]?.kind);
+        })();
+      if (
+        close !== undefined &&
+        close < end &&
+        (isGenericOpen(tokens, cursor) || qualifiedType || isCallTypeArgumentOpen(tokens, cursor))
+      )
+        angles += 1;
+    } else if (kind === SyntaxKind.GreaterThanToken) angles = Math.max(0, angles - 1);
     else if (kind === SyntaxKind.GreaterThanGreaterThanToken) angles = Math.max(0, angles - 2);
     else if (kind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken) angles = Math.max(0, angles - 3);
     else if (kind === SyntaxKind.CommaToken && parens === 0 && brackets === 0 && braces === 0 && angles === 0)
@@ -3158,6 +3176,11 @@ if (process.argv.includes('--self-test')) {
       source:
         'function unrelatedExtendsInReturn() { return (value as unknown, class X extends Base {}, ready) ? yes : no; }',
       expected: [{ name: 'unrelatedExtendsInReturn', complexity: 2 }],
+    },
+    {
+      source:
+        'function comparisonBeforeExtendsInReturn() { return (value as any < other, class X extends Base {}, true) ? yes : no; }',
+      expected: [{ name: 'comparisonBeforeExtendsInReturn', complexity: 2 }],
     },
   ];
   for (const sample of samples) {
