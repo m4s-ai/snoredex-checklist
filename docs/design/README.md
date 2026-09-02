@@ -62,8 +62,10 @@ The index uses the approved hero copy, “Your Snorlax collection. One checklist
 private local state, current-known scope and catalogue provenance without claiming universal
 completeness or official affiliation. Navigation contains no general GitHub link; Snoredex Data is
 linked as a visibly external site. The production index now moves from that short persuasive
-section into a grouped locality/language directory and does not load the full catalogue or
-migration payload.
+section into a grouped locality/language directory. Its normal path loads only the bounded
+directory projection; the compatibility path loads and validates the full catalogue snapshot when
+an older shell has no directory digest or the directory modules are unavailable. The index does
+not load the migration payload.
 
 The collection promotes search and uses native localization and set selectors for progressive
 browsing; it no longer renders the reference's always-expanded left catalogue tree. Advanced
