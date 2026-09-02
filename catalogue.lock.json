@@ -2,17 +2,17 @@
   "schema": "snoredex-checklist-catalogue-lock",
   "schemaVersion": "1.0.0",
   "sourceRepository": "https://github.com/m4s-ai/snoredex-data",
-  "producerRevision": "44d72b0a33125efc595309592afbf24d4eb210c1",
-  "artifactUrl": "https://raw.githubusercontent.com/m4s-ai/snoredex-data/44d72b0a33125efc595309592afbf24d4eb210c1/collector_catalogue.json",
+  "producerRevision": "98700119700523ee4939b7539103f7ba61ab03e6",
+  "artifactUrl": "https://raw.githubusercontent.com/m4s-ai/snoredex-data/98700119700523ee4939b7539103f7ba61ab03e6/collector_catalogue.json",
   "contractVersion": "1.0.0",
-  "catalogueFingerprint": "sha256:c9b59276dadaf321b39ada5d17eaea74c4beecd00f8dc0cae0a46fc37afb8f15",
-  "catalogueByteSha256": "sha256:e3dd0b1826c705744f3a7aca232f62b28a4aa30a78c060bd855be083f98f7e0f",
-  "catalogueByteLength": 3220347,
-  "migrationArtifactUrl": "https://raw.githubusercontent.com/m4s-ai/snoredex-data/44d72b0a33125efc595309592afbf24d4eb210c1/collector_migrations.json",
-  "migrationByteSha256": "sha256:94028e0629639bed8614810690b31aa179c7f69c740c888b526f3ee6bd258a79",
-  "migrationByteLength": 927504,
+  "catalogueFingerprint": "sha256:7f88c3c6dffc4b1fe73c868cd6be1baaa36116129b5217eaa1f17d590bd47d81",
+  "catalogueByteSha256": "sha256:5887db812354eaca90ae496af2bac82b4b8eceb9529c0919072d1ede03220da7",
+  "catalogueByteLength": 3830653,
+  "migrationArtifactUrl": "https://raw.githubusercontent.com/m4s-ai/snoredex-data/98700119700523ee4939b7539103f7ba61ab03e6/collector_migrations.json",
+  "migrationByteSha256": "sha256:505509e697b93800902a6bd771c12d84541a400509fc6a2a805a976513938e44",
+  "migrationByteLength": 1591310,
   "issueUrls": [
-    "https://github.com/m4s-ai/snoredex-checklist/issues/25",
-    "https://github.com/m4s-ai/snoredex-data/issues/304"
+    "https://github.com/m4s-ai/snoredex-checklist/issues/29",
+    "https://github.com/m4s-ai/snoredex-data/issues/332"
   ]
 }
