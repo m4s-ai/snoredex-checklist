@@ -101,7 +101,7 @@ jobs:
         if: steps.lane.outputs.proceed == 'true' && (github.event_name == 'push' || inputs.deployment_mode == 'adopt')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run catalogue-release.yml --ref main
+        run: gh workflow run catalogue-release.yml --repo "$GITHUB_REPOSITORY" --ref main
 
   deploy:
     name: deploy
