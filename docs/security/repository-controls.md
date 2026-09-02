@@ -20,9 +20,11 @@ or second policy.
   suffix or private-value canaries from tracked/build outputs.
 - The static entry pages carry the first-applicable default-deny meta CSP. The browser smoke gate
   verifies its directives and the absence of inline executable scripts.
-- The build and deployment checks bind each HTML shell to an immutable runtime manifest, verify
-  exact module membership and byte digests, and validate both the active and retained rollback
-  generations before publication.
+- The build, artifact, and deployment-manifest checks bind each HTML shell to an immutable runtime
+  manifest, verify exact module membership and byte digests, and validate both the active and
+  retained rollback generations before publication. The post-deploy smoke re-fetches the live
+  manifests and declared bytes after Pages publication; a mismatch fails the workflow but requires
+  an explicit operator rollback rather than automatically restoring the prior site.
 
 ## Verified GitHub-hosted controls
 

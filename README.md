@@ -56,8 +56,10 @@ to those issues instead of copying changing decisions into a second source of tr
   private sidecar so older deployed revisions can still read the active collection during rollback.
 - Research remains read-only and outside Owned/Secured progress.
 - Unknown, retired, split, merged, or re-keyed identities never cause silent state loss.
-- Catalogue adoption and deployment fail closed whenever the contract, migrations, artifact,
-  lock, runtime manifests, or published bytes disagree.
+- Catalogue adoption and pre-publication artifact validation fail closed when the contract,
+  migrations, lock, runtime manifests, or built bytes disagree. Post-deploy smoke detects live-byte
+  discrepancies and fails the workflow, but does not automatically restore the prior deployment;
+  an operator must select the validated rollback target.
 
 ## Development
 
@@ -201,6 +203,8 @@ must still contain the recoverable deployment-manifest tooling and npm commands 
 workflow. An older commit without them is not an eligible rollback target.
 Do not edit browser-local collection state or rewrite a lock in place. Verify the deployed
 `deployment.json` and `provenance.json` tuple before considering the rollback complete.
+The HTTPS smoke runs after GitHub Pages publication. A smoke failure marks the workflow failed and
+requires investigation plus an explicit rollback; it does not itself republish the previous site.
 
 ## Licensing
 

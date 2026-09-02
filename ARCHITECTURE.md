@@ -82,7 +82,9 @@ generation. `provenance.json` records the built tuple used to evaluate that publ
 validation checks both retained generations, rejects undeclared or changed modules, and keeps the
 active and rollback asset sets together. Post-deploy smoke derives the expected tuple from the
 built provenance even when the workflow later checks out recovery tooling, then verifies the live
-manifests and all declared module bytes.
+manifests and all declared module bytes. Because that smoke runs after Pages publication, a live
+failure marks the workflow failed but does not automatically restore the prior deployment; recovery
+uses the validated manual rollback path.
 
 The index normally consumes only the lightweight, public directory projection required for its
 grouped browse links. Its tested compatibility path loads and validates the full catalogue snapshot
