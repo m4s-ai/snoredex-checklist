@@ -210,6 +210,8 @@ try {
   const directoryModule = await import(pathToFileURL(resolve(assets, 'directory.js')));
   const directoryProjectionSha256 = await directoryModule.directoryProjectionDigest(directorySnapshot);
   if (typeof directoryProjectionSha256 !== 'string') throw new Error('site directory digest failed');
+  const directoryEnvelopeSha256 = await directoryModule.directoryEnvelopeDigest(directorySnapshot, provenance);
+  if (typeof directoryEnvelopeSha256 !== 'string') throw new Error('site directory envelope digest failed');
   await writeFile(
     resolve(assets, 'directory-snapshot.js'),
     `export const provenance = Object.freeze(${JSON.stringify(provenance)});\nexport default Object.freeze(${JSON.stringify(directorySnapshot)});\n`,
@@ -276,7 +278,7 @@ try {
   }
 
   await copyRevisionShell(resolve(root, 'site-src/index.html'), resolve(staging, 'index.html'), {
-    __SNOREDEX_DIRECTORY_SHA256__: directoryProjectionSha256,
+    __SNOREDEX_DIRECTORY_ENVELOPE_SHA256__: directoryEnvelopeSha256,
   });
   await copyRevisionScript(resolve(root, 'site-src/theme.js'), resolve(staging, 'theme.js'));
   await mkdir(resolve(staging, 'collection'), { recursive: true });

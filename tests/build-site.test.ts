@@ -103,7 +103,8 @@ test('stamps the exact app revision into served shells and module', async () => 
     assert.match(stylesheet, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     assert.match(app, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     assert.match(directorySnapshot, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
-    assert.match(home, /name="snoredex-directory-sha256" content="sha256:[0-9a-f]{64}"/u);
+    assert.match(home, /name="snoredex-directory-envelope-sha256" content="sha256:[0-9a-f]{64}"/u);
+    assert.doesNotMatch(home, /name="snoredex-directory-sha256"/u);
     assert.match(home, /<script type="module" src="assets\/app\.js"><\/script>/u);
     assert.match(collection, /<script type="module" src="\.\.\/assets\/app\.js"><\/script>/u);
     assert.doesNotMatch(app, /from ['"]\.\/(?:snapshot|migrations)\.js['"]/u);
@@ -111,7 +112,11 @@ test('stamps the exact app revision into served shells and module', async () => 
     assert.match(app, /import\(['"]\.\/migrations\.js['"]\)/u);
     assert.match(app, /import\(['"]\.\/directory-snapshot\.js['"]\)/u);
     assert.match(app, /crypto\.subtle\.digest\(['"]SHA-256['"]/u);
-    assert.match(app, /matchesPinnedDirectoryDigest\(snapshotModule\.default, expectedDigest\)/u);
+    assert.match(
+      app,
+      /matchesPinnedDirectoryEnvelopeDigest\(snapshotModule\.default, snapshotModule\.provenance, expectedDigest\)/u,
+    );
+    assert.match(app, /validateDirectorySnapshot\(snapshotModule\.default, projectionDigest\)/u);
     assert.match(theme, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     assert.match(collectionTheme, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     assert.deepEqual(font400, sourceFont400);

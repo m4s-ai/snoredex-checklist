@@ -46,6 +46,15 @@ assert.notEqual(
   directorySnapshotSource,
   'directory fixture corruption must change a digest-bound value',
 );
+const staleProvenanceDirectorySnapshotSource = directorySnapshotSource.replace(
+  /"catalogueByteSha256":"sha256:[0-9a-f]{64}"/gu,
+  `"catalogueByteSha256":"sha256:${'e'.repeat(64)}"`,
+);
+assert.notEqual(
+  staleProvenanceDirectorySnapshotSource,
+  directorySnapshotSource,
+  'directory fixture provenance must change a digest-bound value',
+);
 const expectedCsp =
   "default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'self'; media-src 'none'; manifest-src 'none'";
 
@@ -507,6 +516,28 @@ try {
         `${name}: digest mismatch fails closed instead of accepting or falling back`,
       );
       await staleValidatorPage.close();
+      const staleProvenancePage = await browser.newPage();
+      const staleProvenanceRequests = [];
+      staleProvenancePage.on('request', (request) => staleProvenanceRequests.push(new URL(request.url()).pathname));
+      await staleProvenancePage.route('**/assets/directory-snapshot.js', (route) =>
+        route.fulfill({
+          contentType: 'text/javascript; charset=utf-8',
+          body: staleProvenanceDirectorySnapshotSource,
+        }),
+      );
+      const staleProvenanceHome = await staleProvenancePage.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
+      assert.equal(staleProvenanceHome?.status(), 200, `${name}: stale provenance home status`);
+      assert.equal(
+        await staleProvenancePage.locator('[data-view] h2').textContent(),
+        'Invalid checklist link',
+        `${name}: directory envelope rejects internally consistent stale provenance`,
+      );
+      assert.equal(
+        staleProvenanceRequests.some((path) => path.endsWith('/snapshot.js')),
+        false,
+        `${name}: stale provenance fails closed instead of accepting or falling back`,
+      );
+      await staleProvenancePage.close();
       await page.locator("a[href='collection/']").first().click();
       await page.waitForLoadState('networkidle');
       assert.match(page.url(), /\/collection\/$/u, `${name}: collection URL`);

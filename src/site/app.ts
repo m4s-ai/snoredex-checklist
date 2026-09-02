@@ -1711,22 +1711,29 @@ function canonicalizeDirectoryValue(value: unknown): unknown {
   );
 }
 
-async function matchesPinnedDirectoryDigest(value: unknown, expectedDigest: string): Promise<boolean> {
-  if (!/^sha256:[0-9a-f]{64}$/u.test(expectedDigest)) return false;
+async function canonicalDirectoryDigest(value: unknown): Promise<string | undefined> {
   try {
     const bytes = new TextEncoder().encode(JSON.stringify(canonicalizeDirectoryValue(value)));
     const digest = await crypto.subtle.digest('SHA-256', bytes);
-    const actualDigest = `sha256:${Array.from(new Uint8Array(digest), (byte) =>
-      byte.toString(16).padStart(2, '0'),
-    ).join('')}`;
-    return actualDigest === expectedDigest;
+    return `sha256:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
+async function matchesPinnedDirectoryEnvelopeDigest(
+  value: unknown,
+  provenance: unknown,
+  expectedDigest: string,
+): Promise<boolean> {
+  if (!/^sha256:[0-9a-f]{64}$/u.test(expectedDigest)) return false;
+  return (await canonicalDirectoryDigest({ directory: value, provenance })) === expectedDigest;
+}
+
 async function renderHome(): Promise<void> {
-  const expectedDigest = document.querySelector<HTMLMetaElement>('meta[name="snoredex-directory-sha256"]')?.content;
+  const expectedDigest = document.querySelector<HTMLMetaElement>(
+    'meta[name="snoredex-directory-envelope-sha256"]',
+  )?.content;
   if (!expectedDigest) {
     await renderFullSnapshotHome();
     return;
@@ -1742,9 +1749,11 @@ async function renderHome(): Promise<void> {
     await renderFullSnapshotHome();
     return;
   }
+  const projectionDigest = await canonicalDirectoryDigest(snapshotModule.default);
   if (
-    !(await matchesPinnedDirectoryDigest(snapshotModule.default, expectedDigest)) ||
-    !(await directoryModule.validateDirectorySnapshot(snapshotModule.default, expectedDigest)) ||
+    !projectionDigest ||
+    !(await matchesPinnedDirectoryEnvelopeDigest(snapshotModule.default, snapshotModule.provenance, expectedDigest)) ||
+    !(await directoryModule.validateDirectorySnapshot(snapshotModule.default, projectionDigest)) ||
     !validateProvenance(snapshotModule.provenance, snapshotModule.default)
   ) {
     renderInvalid($('[data-view]'), undefined, true);

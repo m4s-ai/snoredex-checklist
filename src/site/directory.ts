@@ -23,7 +23,7 @@ function canonicalize(value: unknown): unknown {
   );
 }
 
-export async function directoryProjectionDigest(value: unknown): Promise<string | undefined> {
+async function canonicalDigest(value: unknown): Promise<string | undefined> {
   try {
     const bytes = new TextEncoder().encode(JSON.stringify(canonicalize(value)));
     const digest = await crypto.subtle.digest('SHA-256', bytes);
@@ -31,6 +31,14 @@ export async function directoryProjectionDigest(value: unknown): Promise<string 
   } catch {
     return undefined;
   }
+}
+
+export function directoryProjectionDigest(value: unknown): Promise<string | undefined> {
+  return canonicalDigest(value);
+}
+
+export function directoryEnvelopeDigest(value: unknown, provenance: unknown): Promise<string | undefined> {
+  return canonicalDigest({ directory: value, provenance });
 }
 
 export async function validateDirectorySnapshot(value: unknown, expectedDigest: string): Promise<boolean> {

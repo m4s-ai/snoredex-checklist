@@ -4,7 +4,11 @@ import test from 'node:test';
 import fixture from './fixtures/collector-catalogue.fixture.json' with { type: 'json' };
 import { semanticFingerprint } from '../src/catalogue/validate.ts';
 import { localizationLabel, validateProvenance, validateSnapshot } from '../src/site/catalogue.ts';
-import { directoryProjectionDigest, validateDirectorySnapshot } from '../src/site/directory.ts';
+import {
+  directoryEnvelopeDigest,
+  directoryProjectionDigest,
+  validateDirectorySnapshot,
+} from '../src/site/directory.ts';
 import { matchesResearch } from '../src/site/filter.ts';
 import { buildBrowseHierarchy, buildProgressViewModel, buildResultViewModel } from '../src/site/results.ts';
 
@@ -28,8 +32,23 @@ test('validates the bounded homepage directory projection and its pinned content
     },
     localizations: fixture.catalogue.localizations,
   };
+  const provenance = {
+    mode: 'synthetic-fixture',
+    sourceCommit: 'synthetic-fixture',
+    appRevision: 'synthetic-fixture',
+    contractVersion: fixture.catalogue.meta.schemaVersion,
+    sourceRepository: fixture.catalogue.meta.sourceRepository,
+    catalogueFingerprint: fixture.catalogue.meta.catalogueFingerprint,
+    lock: null,
+  };
   const digest = await directoryProjectionDigest(directory);
+  const envelopeDigest = await directoryEnvelopeDigest(directory, provenance);
   assert.equal(typeof digest, 'string');
+  assert.equal(typeof envelopeDigest, 'string');
+  assert.notEqual(
+    await directoryEnvelopeDigest(directory, { ...provenance, appRevision: 'stale-fixture' }),
+    envelopeDigest,
+  );
   assert.equal(await validateDirectorySnapshot(directory, digest ?? ''), true);
   assert.equal(
     await validateDirectorySnapshot(
