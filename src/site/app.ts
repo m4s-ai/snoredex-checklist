@@ -1385,6 +1385,7 @@ function renderResults(
     return;
   }
   const hasFilter = Boolean(criteria.edition || criteria.q || criteria.kind || criteria.research || criteria.status);
+  const retainEmptyBrowseStructure = Boolean(criteria.localization && !hasFilter);
   if (!criteria.localization && !hasFilter) {
     const summary = text('section', undefined, 'empty-state');
     summary.append(
@@ -1535,7 +1536,7 @@ function renderResults(
             editionHasItems = true;
           }
         }
-        if (editionHasItems) {
+        if (editionHasItems || retainEmptyBrowseStructure) {
           setSection.append(editionSection);
           setHasItems = true;
         }
@@ -1547,7 +1548,7 @@ function renderResults(
     }
     if (localizationHasItems) grouped.append(localizationSection);
   }
-  if (items.length > 0) content.push(grouped);
+  if (items.length > 0 || (retainEmptyBrowseStructure && grouped.childElementCount > 0)) content.push(grouped);
   else if (inactiveItems.length === 0)
     content.push(text('p', 'No public catalogue items match these criteria.', 'empty-state'));
   if (inactiveItems.length > 0) {

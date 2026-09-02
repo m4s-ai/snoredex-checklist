@@ -628,6 +628,15 @@ try {
             (candidate) => trackable.filter((other) => other.localizationId === candidate.localizationId).length > 1,
           ) ?? trackable[0];
         if (!item) return null;
+        const activeEditionIds = new Set(
+          catalogue.items
+            .filter((candidate) => candidate.active && candidate.setEditionId)
+            .map((candidate) => candidate.setEditionId),
+        );
+        const emptyEdition = catalogue.setEditions.find((edition) => !activeEditionIds.has(edition.setEditionId));
+        const emptyBrowseEditions = emptyEdition
+          ? catalogue.setEditions.filter((edition) => edition.localizationId === emptyEdition.localizationId)
+          : [];
         return {
           fingerprint: catalogue.meta.catalogueFingerprint,
           itemId: item.itemId,
@@ -638,6 +647,15 @@ try {
           secondItemId: trackable.find(
             (candidate) => candidate.localizationId === item.localizationId && candidate.itemId !== item.itemId,
           )?.itemId,
+          emptyBrowse: emptyEdition
+            ? {
+                localizationId: emptyEdition.localizationId,
+                editionCount: emptyBrowseEditions.length,
+                setCount: new Set(emptyBrowseEditions.map((edition) => edition.localSetId)).size,
+                emptyEditionCount: emptyBrowseEditions.filter((edition) => !activeEditionIds.has(edition.setEditionId))
+                  .length,
+              }
+            : undefined,
           research: catalogue.items.find(
             (candidate) =>
               candidate.active &&
@@ -650,6 +668,24 @@ try {
       });
       assert.notEqual(synthetic, null, `${name}: synthetic trackable item`);
       if (synthetic !== null) {
+        assert.notEqual(synthetic.emptyBrowse, undefined, `${name}: localization with an empty edition`);
+        if (synthetic.emptyBrowse !== undefined) {
+          assert.ok(synthetic.emptyBrowse.emptyEditionCount > 0, `${name}: empty edition regression fixture`);
+          await page.goto(
+            `${baseUrl}/collection/?localization=${encodeURIComponent(synthetic.emptyBrowse.localizationId)}`,
+            { waitUntil: 'networkidle' },
+          );
+          assert.equal(
+            await page.locator('[data-view] .result-edition').count(),
+            synthetic.emptyBrowse.editionCount,
+            `${name}: plain localization browse retains every producer-known edition`,
+          );
+          assert.equal(
+            await page.locator('[data-view] .result-set').count(),
+            synthetic.emptyBrowse.setCount,
+            `${name}: plain localization browse retains every producer-known set`,
+          );
+        }
         await page.evaluate(({ fingerprint, itemId }) => {
           localStorage.setItem(
             'snoredex-checklist.private-state',
