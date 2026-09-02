@@ -46,8 +46,9 @@ export interface ReconciliationContext {
   readonly knownSourceItemIds?: ReadonlySet<string>;
   /** Source membership keyed by the exact source catalogue fingerprint. */
   readonly knownSourceItemIdsByFingerprint?: ReadonlyMap<string, ReadonlySet<string>>;
-  /** Optional final-catalogue membership. If supplied, every mapped target must be present. */
+  /** Trackable final-catalogue membership applied to private records. */
   readonly knownTargetItemIds?: ReadonlySet<string>;
+  /** Full active final-catalogue membership and progress classification. */
   readonly targetItemClasses?: ReadonlyMap<string, 'current-known' | 'research'>;
 }
 
@@ -284,14 +285,15 @@ function migrationChainLinksAreValid(
       }
       if (isFinalStep) {
         if (
-          context.knownTargetItemIds !== undefined &&
-          transition.toItemIds.some((itemId) => !context.knownTargetItemIds?.has(itemId))
+          context.targetItemClasses !== undefined &&
+          transition.toItemIds.some((itemId) => !context.targetItemClasses?.has(itemId))
         ) {
           return false;
         }
         if (
-          context.targetItemClasses !== undefined &&
-          transition.toItemIds.some((itemId) => !isCurrentKnownTarget(context.targetItemClasses!, itemId))
+          context.targetItemClasses === undefined &&
+          context.knownTargetItemIds !== undefined &&
+          transition.toItemIds.some((itemId) => !context.knownTargetItemIds?.has(itemId))
         ) {
           return false;
         }
@@ -673,6 +675,14 @@ export function reconcilePrivateState(
       if (kind === 'active') {
         const targetId = transition.toItemIds[0];
         if (isFinalStep && context.knownTargetItemIds !== undefined && !context.knownTargetItemIds.has(targetId)) {
+          blocked = true;
+          continue;
+        }
+        if (
+          isFinalStep &&
+          context.targetItemClasses !== undefined &&
+          !isCurrentKnownTarget(context.targetItemClasses, targetId)
+        ) {
           blocked = true;
           continue;
         }
