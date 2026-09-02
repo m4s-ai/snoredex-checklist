@@ -26,8 +26,10 @@ or shared-rollout change is documented before merge in both repositories. Each p
 PR comments, review threads, chat, CI output, labels, and edited issue bodies do not replace the
 issue history.
 
-Every later shared change opens a new paired producer/consumer issue or explicitly linked release
-ledger. Completed v1 issues remain immutable evidence and are not reused as a changing backlog.
+Every later shared change opens new reciprocally linked producer and consumer issues. A release
+ledger may supplement those paired issues when useful, but never replaces either side of the
+cross-repository record. Completed v1 issues remain immutable evidence and are not reused as a
+changing backlog.
 
 ## Lifecycle
 
