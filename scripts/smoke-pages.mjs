@@ -38,6 +38,7 @@ if (
   moduleManifest.modules.length === 0 ||
   moduleManifest.modules.length > 256 ||
   !moduleManifest.modules.includes('app.js') ||
+  !moduleManifest.modules.includes('collection.js') ||
   !moduleManifest.modules.includes('index.js') ||
   !moduleManifest.modules.includes('directory-snapshot.js') ||
   new Set(moduleManifest.modules).size !== moduleManifest.modules.length ||
@@ -68,7 +69,7 @@ const [themeText, collectionThemeText] = await Promise.all([theme.text(), collec
 if (
   !homeText.includes('Snoredex Checklist') ||
   !collectionText.includes('<body data-page="collection">') ||
-  !homeText.includes('<script type="module" src="assets/index.js"></script>') ||
+  !homeText.includes('<script type="module" src="assets/app.js"></script>') ||
   !collectionText.includes('<script type="module" src="../assets/app.js"></script>') ||
   !homeText.includes(`name="snoredex-app-revision" content="${expected.appRevision}"`) ||
   !collectionText.includes(`name="snoredex-app-revision" content="${expected.appRevision}"`) ||
