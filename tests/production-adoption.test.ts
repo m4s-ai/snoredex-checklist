@@ -31,7 +31,7 @@ test('production adoption validates the reviewed target migration without requir
   assert.match(workflow, /!digest\.test\(current\.catalogueFingerprint \?\? ''\)/u);
   assert.match(workflow, /push:\s+branches:\s+- main/u);
   assert.match(workflow, /name: Trigger independent catalogue intake/u);
-  assert.match(workflow, /gh workflow run catalogue-release\.yml --ref main/u);
+  assert.match(workflow, /gh workflow run catalogue-release\.yml --repo "\$GITHUB_REPOSITORY" --ref main/u);
   assert.match(workflow, /actions: write/u);
   assert.doesNotMatch(workflow, /uses: \.\/\.github\/workflows\/catalogue-release\.yml/u);
   assert.match(workflow, /run-name: Deploy Pages \/ \$\{\{/u);
