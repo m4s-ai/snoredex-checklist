@@ -1,10 +1,10 @@
-import type { CatalogueSnapshot, SnapshotItem } from "./catalogue.js";
+import type { CatalogueSnapshot, SnapshotItem } from './catalogue.js';
 
 /**
  * A placeholder scope is deliberately narrower than the producer's full image-scope enum.
  * Unknown and legacy-product records can therefore fall back without implying an identity.
  */
-export type PlaceholderScope = "exact-printing" | "card-release";
+export type PlaceholderScope = 'exact-printing' | 'card-release';
 
 export interface SiteImageAsset {
   readonly assetId: string;
@@ -22,50 +22,56 @@ export interface SiteImageAsset {
 }
 
 const PLACEHOLDER_ASSET_VALUES = {
-  "placeholder-exact-printing": {
-    assetId: "placeholder-exact-printing",
-    path: "images/placeholders/exact-printing.svg",
-    mimeType: "image/svg+xml",
-    imageScope: "exact-printing",
-    altTextBasis: "Authored placeholder; no real card image is implied.",
+  'placeholder-exact-printing': {
+    assetId: 'placeholder-exact-printing',
+    path: 'images/placeholders/exact-printing.svg',
+    mimeType: 'image/svg+xml',
+    imageScope: 'exact-printing',
+    altTextBasis: 'Authored placeholder; no real card image is implied.',
     attribution: {
-      rightsStatus: "project-authored-placeholder",
-      licenceRef: "LICENSE.md",
-      noticeRef: "THIRD_PARTY_NOTICES.md",
+      rightsStatus: 'project-authored-placeholder',
+      licenceRef: 'LICENSE.md',
+      noticeRef: 'THIRD_PARTY_NOTICES.md',
     },
     placeholder: true,
-    sha256: "sha256:f1cd90092b389f1f6ebaa7ebadc4fbefbb4175063558caf6897d2e409dc9793c",
+    sha256: 'sha256:f1cd90092b389f1f6ebaa7ebadc4fbefbb4175063558caf6897d2e409dc9793c',
   },
-  "placeholder-card-release": {
-    assetId: "placeholder-card-release",
-    path: "images/placeholders/card-release.svg",
-    mimeType: "image/svg+xml",
-    imageScope: "card-release",
-    altTextBasis: "Authored placeholder; no real card image is implied.",
+  'placeholder-card-release': {
+    assetId: 'placeholder-card-release',
+    path: 'images/placeholders/card-release.svg',
+    mimeType: 'image/svg+xml',
+    imageScope: 'card-release',
+    altTextBasis: 'Authored placeholder; no real card image is implied.',
     attribution: {
-      rightsStatus: "project-authored-placeholder",
-      licenceRef: "LICENSE.md",
-      noticeRef: "THIRD_PARTY_NOTICES.md",
+      rightsStatus: 'project-authored-placeholder',
+      licenceRef: 'LICENSE.md',
+      noticeRef: 'THIRD_PARTY_NOTICES.md',
     },
     placeholder: true,
-    sha256: "sha256:2f8946e15556ef72df8a7fdc610e80bbea47545e3086e90b7293aea5ec947e41",
+    sha256: 'sha256:2f8946e15556ef72df8a7fdc610e80bbea47545e3086e90b7293aea5ec947e41',
   },
 } as const satisfies Record<string, SiteImageAsset>;
 
 export const PLACEHOLDER_ASSETS = Object.freeze(PLACEHOLDER_ASSET_VALUES);
 
 function isString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
+  return typeof value === 'string' && value.length > 0;
 }
 
 function isSafeLocalPath(value: unknown): value is string {
-  return isString(value) && value.startsWith("images/") && !value.startsWith("/") &&
-    !value.includes("\\") && !value.split("/").includes("..") && !value.includes("//") &&
-    !/%(?:2e|2f|5c)/i.test(value);
+  return (
+    isString(value) &&
+    value.startsWith('images/') &&
+    !value.startsWith('/') &&
+    !value.includes('\\') &&
+    !value.split('/').includes('..') &&
+    !value.includes('//') &&
+    !/%(?:2e|2f|5c)/i.test(value)
+  );
 }
 
 function placeholderScope(item: SnapshotItem): PlaceholderScope {
-  return item.imageScope === "exact-printing" ? "exact-printing" : "card-release";
+  return item.imageScope === 'exact-printing' ? 'exact-printing' : 'card-release';
 }
 
 function placeholderFor(item: SnapshotItem): SiteImageAsset {
@@ -83,11 +89,18 @@ export function resolveImageAsset(_catalogue: CatalogueSnapshot, item: SnapshotI
 }
 
 /** Resolve an asset path relative to the compiled site module, preserving Pages subpaths. */
-export function imageAssetUrl(asset: Pick<SiteImageAsset, "path">, moduleUrl: string = import.meta.url): string {
-  const fallbackPath = PLACEHOLDER_ASSETS["placeholder-card-release"].path;
+export function imageAssetUrl(asset: Pick<SiteImageAsset, 'path'>, moduleUrl: string = import.meta.url): string {
+  const fallbackPath = PLACEHOLDER_ASSETS['placeholder-card-release'].path;
   const path = isSafeLocalPath(asset.path) ? asset.path : fallbackPath;
   try {
-    return new URL(path, moduleUrl).href;
+    const url = new URL(moduleUrl);
+    const marker = '/assets/';
+    const assetsIndex = url.pathname.lastIndexOf(marker);
+    if (assetsIndex < 0) return new URL(path, url).href;
+    url.pathname = `${url.pathname.slice(0, assetsIndex + marker.length)}${path}`;
+    url.search = '';
+    url.hash = '';
+    return url.href;
   } catch {
     return fallbackPath;
   }

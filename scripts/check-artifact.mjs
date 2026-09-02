@@ -4,6 +4,11 @@ import { join, resolve, relative, posix } from 'node:path';
 import process from 'node:process';
 import { SyntaxKind } from 'typescript/unstable/ast';
 import { API } from 'typescript/unstable/sync';
+import {
+  runtimeTupleFromProvenance,
+  validateRuntimeAssetSetDirectory,
+  validateRuntimeAssetSetPointer,
+} from './runtime-assets.mjs';
 
 const root = resolve(process.cwd(), process.argv[2] ?? 'dist/site');
 const fontAssets = new Map([
@@ -741,6 +746,11 @@ try {
     catalogue.catalogueFingerprint === lock?.catalogueFingerprint &&
     catalogue.catalogueByteSha256 === lock?.catalogueByteSha256 &&
     catalogue.catalogueByteLength === lock?.catalogueByteLength &&
+    /^sha256:[0-9a-f]{64}$/u.test(catalogue.migrationByteSha256) &&
+    Number.isSafeInteger(catalogue.migrationByteLength) &&
+    catalogue.migrationByteLength > 0 &&
+    catalogue.migrationByteSha256 === lock?.migrationByteSha256 &&
+    catalogue.migrationByteLength === lock?.migrationByteLength &&
     lock?.schema === 'snoredex-checklist-catalogue-lock' &&
     lock?.schemaVersion === '1.0.0' &&
     lock?.sourceRepository === catalogue.sourceRepository &&
@@ -752,6 +762,47 @@ try {
     lock.issueUrls.every((url) => typeof url === 'string');
   if (!syntheticCatalogue && !pinnedCatalogue) {
     throw new Error('ARTIFACT_CATALOGUE_PROVENANCE_INVALID');
+  }
+  let moduleManifest;
+  let runtime;
+  const runtimeSetTuples = new Map();
+  if (pinnedCatalogue) {
+    try {
+      moduleManifest = JSON.parse(await readFile(join(root, 'assets/module-manifest.json'), 'utf8'));
+      runtime = runtimeTupleFromProvenance(provenance);
+    } catch {
+      throw new Error('ARTIFACT_RUNTIME_MANIFEST_INVALID');
+    }
+    if (
+      moduleManifest?.schema !== 'snoredex-site-module-manifest' ||
+      moduleManifest?.schemaVersion !== '2.0.0' ||
+      moduleManifest.appRevision !== provenance.appRevision ||
+      !validateRuntimeAssetSetPointer(moduleManifest.runtimeAssetSet, provenance.appRevision) ||
+      !Array.isArray(moduleManifest.retainedRuntimeAssetSets) ||
+      moduleManifest.retainedRuntimeAssetSets.length > 1
+    ) {
+      throw new Error('ARTIFACT_RUNTIME_MANIFEST_INVALID');
+    }
+    const pointers = [moduleManifest.runtimeAssetSet, ...moduleManifest.retainedRuntimeAssetSets];
+    if (new Set(pointers.map((pointer) => pointer.appRevision)).size !== pointers.length) {
+      throw new Error('ARTIFACT_RUNTIME_MANIFEST_INVALID');
+    }
+    for (const pointer of pointers) {
+      const expectedTuple = pointer.appRevision === runtime.appRevision ? runtime : undefined;
+      if (
+        !validateRuntimeAssetSetPointer(pointer) ||
+        !(await validateRuntimeAssetSetDirectory(join(root, 'assets'), pointer, expectedTuple))
+      ) {
+        throw new Error('ARTIFACT_RUNTIME_SET_INVALID');
+      }
+      const directory = join(root, 'assets', ...pointer.path.split('/'));
+      const setManifest = JSON.parse(await readFile(join(directory, 'manifest.json'), 'utf8'));
+      runtimeSetTuples.set(pointer.appRevision, setManifest.runtime);
+      const actual = (await filesIn(directory)).map((path) => relative(directory, path).replaceAll('\\', '/')).sort();
+      const declared = ['manifest.json', ...setManifest.modules.map((module) => module.path)].sort();
+      if (JSON.stringify(actual) !== JSON.stringify(declared))
+        throw new Error('ARTIFACT_RUNTIME_SET_MEMBERSHIP_INVALID');
+    }
   }
   if (relativeFiles.includes('deployment.json')) {
     let deployment;
@@ -770,9 +821,39 @@ try {
       deployment.contractVersion !== catalogue.contractVersion ||
       deployment.catalogueFingerprint !== catalogue.catalogueFingerprint ||
       deployment.catalogueByteSha256 !== catalogue.catalogueByteSha256 ||
-      deployment.catalogueByteLength !== catalogue.catalogueByteLength
+      deployment.catalogueByteLength !== catalogue.catalogueByteLength ||
+      deployment.migrationByteSha256 !== catalogue.migrationByteSha256 ||
+      deployment.migrationByteLength !== catalogue.migrationByteLength ||
+      JSON.stringify(deployment.runtimeAssetSet) !== JSON.stringify(moduleManifest?.runtimeAssetSet)
     ) {
       throw new Error('ARTIFACT_DEPLOYMENT_MANIFEST_INVALID');
+    }
+    const retained = moduleManifest.retainedRuntimeAssetSets;
+    if (
+      (deployment.rollback === undefined && retained.length !== 0) ||
+      (deployment.rollback !== undefined &&
+        (retained.length !== 1 ||
+          deployment.rollback.appRevision !== retained[0].appRevision ||
+          JSON.stringify(deployment.rollback.runtimeAssetSet) !== JSON.stringify(retained[0])))
+    ) {
+      throw new Error('ARTIFACT_DEPLOYMENT_ROLLBACK_INVALID');
+    }
+    if (deployment.rollback !== undefined) {
+      const retainedRuntime = runtimeSetTuples.get(deployment.rollback.appRevision);
+      for (const key of [
+        'appRevision',
+        'producerRevision',
+        'contractVersion',
+        'catalogueFingerprint',
+        'catalogueByteSha256',
+        'catalogueByteLength',
+        'migrationByteSha256',
+        'migrationByteLength',
+      ]) {
+        if (deployment.rollback[key] !== retainedRuntime?.[key]) {
+          throw new Error('ARTIFACT_DEPLOYMENT_ROLLBACK_INVALID');
+        }
+      }
     }
   }
 
@@ -788,6 +869,13 @@ try {
     if (hasMetaRefresh(withoutComments)) throw new Error(`ARTIFACT_META_REFRESH_PRESENT: ${page}`);
     if (/\b(?:unsafe-inline|unsafe-eval)\b/iu.test(html)) throw new Error(`ARTIFACT_CSP_UNSAFE_DIRECTIVE: ${page}`);
     if (/[\s/]on[a-z]+\s*=/iu.test(html)) throw new Error(`ARTIFACT_INLINE_HANDLER_PRESENT: ${page}`);
+    if (pinnedCatalogue) {
+      const prefix = page === 'index.html' ? '' : '../';
+      const expectedSource = `${prefix}assets/${moduleManifest.runtimeAssetSet.path}/app.js`;
+      if (!html.includes(`<script type="module" src="${expectedSource}"></script>`)) {
+        throw new Error(`ARTIFACT_RUNTIME_SCRIPT_INVALID: ${page}`);
+      }
+    }
     for (const match of stripHtmlComments(html).matchAll(/<script\b[^>]*>/giu)) {
       const encodedSource = readAttribute(match[0], 'src');
       if (encodedSource === undefined) throw new Error(`ARTIFACT_INLINE_SCRIPT_PRESENT: ${page}`);

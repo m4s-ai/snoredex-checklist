@@ -1,5 +1,10 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import {
+  runtimeTupleFromProvenance,
+  validateRuntimeAssetSetDirectory,
+  validateRuntimeAssetSetPointer,
+} from './runtime-assets.mjs';
 
 const root = resolve(process.cwd(), process.argv[2] ?? 'dist/site');
 const pageUrl = process.env.SNOREDEX_PAGE_URL;
@@ -26,7 +31,9 @@ if (
   !/^sha256:[0-9a-f]{64}$/u.test(catalogue.catalogueFingerprint ?? '') ||
   catalogue.catalogueFingerprint !== lock?.catalogueFingerprint ||
   catalogue.catalogueByteSha256 !== lock?.catalogueByteSha256 ||
-  catalogue.catalogueByteLength !== lock?.catalogueByteLength
+  catalogue.catalogueByteLength !== lock?.catalogueByteLength ||
+  catalogue.migrationByteSha256 !== lock?.migrationByteSha256 ||
+  catalogue.migrationByteLength !== lock?.migrationByteLength
 ) {
   throw new Error('DEPLOYMENT_PROVENANCE_INVALID');
 }
@@ -35,18 +42,42 @@ const isCommit = (value) => typeof value === 'string' && /^[0-9a-f]{40}$/u.test(
 const isDigest = (value) => typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value);
 const isByteLength = (value) => Number.isSafeInteger(value) && value > 0;
 
-function deploymentTuple(value) {
+const runtime = runtimeTupleFromProvenance(provenance);
+let moduleManifest;
+try {
+  moduleManifest = JSON.parse(await readFile(join(root, 'assets/module-manifest.json'), 'utf8'));
+} catch {
+  throw new Error('DEPLOYMENT_RUNTIME_ASSETS_INVALID');
+}
+if (
+  moduleManifest?.schema !== 'snoredex-site-module-manifest' ||
+  moduleManifest?.schemaVersion !== '2.0.0' ||
+  moduleManifest?.appRevision !== provenance.appRevision ||
+  !validateRuntimeAssetSetPointer(moduleManifest.runtimeAssetSet, provenance.appRevision) ||
+  !(await validateRuntimeAssetSetDirectory(join(root, 'assets'), moduleManifest.runtimeAssetSet, runtime)) ||
+  !Array.isArray(moduleManifest.retainedRuntimeAssetSets) ||
+  moduleManifest.retainedRuntimeAssetSets.length > 1
+) {
+  throw new Error('DEPLOYMENT_RUNTIME_ASSETS_INVALID');
+}
+
+function deploymentTuple(value, fallbackRuntime, embedded = false) {
+  const migrationByteSha256 = value?.migrationByteSha256 ?? fallbackRuntime?.migrationByteSha256;
+  const migrationByteLength = value?.migrationByteLength ?? fallbackRuntime?.migrationByteLength;
   if (
-    value?.schema !== 'snoredex-checklist-deployment' ||
-    value?.schemaVersion !== '1.0.0' ||
-    value?.pageUrl !== pageUrl ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value?.publishedAt ?? '') ||
+    (!embedded &&
+      (value?.schema !== 'snoredex-checklist-deployment' ||
+        value?.schemaVersion !== '1.0.0' ||
+        value?.pageUrl !== pageUrl ||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value?.publishedAt ?? ''))) ||
     !isCommit(value?.appRevision) ||
     !isCommit(value?.producerRevision) ||
     value?.contractVersion !== '1.0.0' ||
     !isDigest(value?.catalogueFingerprint) ||
     !isDigest(value?.catalogueByteSha256) ||
-    !isByteLength(value?.catalogueByteLength)
+    !isByteLength(value?.catalogueByteLength) ||
+    !isDigest(migrationByteSha256) ||
+    !isByteLength(migrationByteLength)
   ) {
     throw new Error('DEPLOYMENT_PREVIOUS_INVALID');
   }
@@ -57,6 +88,8 @@ function deploymentTuple(value) {
     catalogueFingerprint: value.catalogueFingerprint,
     catalogueByteSha256: value.catalogueByteSha256,
     catalogueByteLength: value.catalogueByteLength,
+    migrationByteSha256,
+    migrationByteLength,
   };
 }
 
@@ -68,7 +101,7 @@ if (previousPath) {
   } catch {
     throw new Error('DEPLOYMENT_PREVIOUS_INVALID');
   }
-  deploymentTuple(previous);
+  deploymentTuple(previous, runtime);
   if (previous.sourceFingerprints !== undefined) {
     if (
       !Array.isArray(previous.sourceFingerprints) ||
@@ -94,10 +127,21 @@ const manifest = {
   catalogueFingerprint: lock.catalogueFingerprint,
   catalogueByteSha256: lock.catalogueByteSha256,
   catalogueByteLength: lock.catalogueByteLength,
+  migrationByteSha256: lock.migrationByteSha256,
+  migrationByteLength: lock.migrationByteLength,
+  runtimeAssetSet: moduleManifest.runtimeAssetSet,
   sourceFingerprints,
 };
-if (previous && lock.catalogueFingerprint === previous.catalogueFingerprint) {
-  manifest.rollback = deploymentTuple(previous);
+const rollbackSource = previous?.appRevision === provenance.appRevision ? previous.rollback : previous;
+if (rollbackSource && lock.catalogueFingerprint === rollbackSource.catalogueFingerprint) {
+  const rollback = deploymentTuple(rollbackSource, runtime, rollbackSource !== previous);
+  const retained = moduleManifest.retainedRuntimeAssetSets.find(
+    (pointer) => pointer?.appRevision === rollback.appRevision,
+  );
+  if (!validateRuntimeAssetSetPointer(retained, rollback.appRevision)) {
+    throw new Error('DEPLOYMENT_ROLLBACK_RUNTIME_ASSETS_INVALID');
+  }
+  manifest.rollback = { ...rollback, runtimeAssetSet: retained };
 }
 await writeFile(join(root, 'deployment.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 console.log('deployment manifest created');
