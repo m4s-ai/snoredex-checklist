@@ -1731,9 +1731,7 @@ async function matchesPinnedDirectoryEnvelopeDigest(
 }
 
 async function renderHome(): Promise<void> {
-  const expectedDigest = document.querySelector<HTMLMetaElement>(
-    'meta[name="snoredex-directory-envelope-sha256"]',
-  )?.content;
+  const expectedDigest = document.querySelector<HTMLMetaElement>('meta[name="snoredex-directory-sha256"]')?.content;
   if (!expectedDigest) {
     await renderFullSnapshotHome();
     return;

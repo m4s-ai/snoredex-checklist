@@ -538,6 +538,30 @@ try {
         `${name}: stale provenance fails closed instead of accepting or falling back`,
       );
       await staleProvenancePage.close();
+      const legacyBootstrapPage = await browser.newPage();
+      await legacyBootstrapPage.route('**/assets/app.js', (route) =>
+        route.fulfill({
+          contentType: 'text/javascript; charset=utf-8',
+          body: `
+            const expectedDigest = document.querySelector('meta[name="snoredex-directory-sha256"]')?.content;
+            const [directoryModule, snapshotModule] = await Promise.all([
+              import('./directory.js'),
+              import('./directory-snapshot.js'),
+            ]);
+            document.body.dataset.legacyDigestResult = String(
+              await directoryModule.validateDirectorySnapshot(snapshotModule.default, expectedDigest),
+            );
+          `,
+        }),
+      );
+      const legacyBootstrapHome = await legacyBootstrapPage.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
+      assert.equal(legacyBootstrapHome?.status(), 200, `${name}: legacy bootstrap home status`);
+      assert.equal(
+        await legacyBootstrapPage.locator('body').getAttribute('data-legacy-digest-result'),
+        'false',
+        `${name}: preceding bootstrap fails closed against the stable marker's envelope digest`,
+      );
+      await legacyBootstrapPage.close();
       await page.locator("a[href='collection/']").first().click();
       await page.waitForLoadState('networkidle');
       assert.match(page.url(), /\/collection\/$/u, `${name}: collection URL`);

@@ -103,8 +103,7 @@ test('stamps the exact app revision into served shells and module', async () => 
     assert.match(stylesheet, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     assert.match(app, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     assert.match(directorySnapshot, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
-    assert.match(home, /name="snoredex-directory-envelope-sha256" content="sha256:[0-9a-f]{64}"/u);
-    assert.doesNotMatch(home, /name="snoredex-directory-sha256"/u);
+    assert.match(home, /name="snoredex-directory-sha256" content="sha256:[0-9a-f]{64}"/u);
     assert.match(home, /<script type="module" src="assets\/app\.js"><\/script>/u);
     assert.match(collection, /<script type="module" src="\.\.\/assets\/app\.js"><\/script>/u);
     assert.doesNotMatch(app, /from ['"]\.\/(?:snapshot|migrations)\.js['"]/u);

@@ -3,7 +3,7 @@
 > Advisory AST-derived estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (35 production code files).
-Lines: 12,206.
+Lines: 12,204.
 Function-like nodes: 768.
 McCabe estimate: sum 3,519; mean 4.6; median 2; P90 10; P95 19.
 Hotspots: 71 functions exceed 10; 36 exceed 20.

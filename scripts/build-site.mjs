@@ -278,7 +278,7 @@ try {
   }
 
   await copyRevisionShell(resolve(root, 'site-src/index.html'), resolve(staging, 'index.html'), {
-    __SNOREDEX_DIRECTORY_ENVELOPE_SHA256__: directoryEnvelopeSha256,
+    __SNOREDEX_DIRECTORY_SHA256__: directoryEnvelopeSha256,
   });
   await copyRevisionScript(resolve(root, 'site-src/theme.js'), resolve(staging, 'theme.js'));
   await mkdir(resolve(staging, 'collection'), { recursive: true });

@@ -45,6 +45,7 @@ test('validates the bounded homepage directory projection and its pinned content
   const envelopeDigest = await directoryEnvelopeDigest(directory, provenance);
   assert.equal(typeof digest, 'string');
   assert.equal(typeof envelopeDigest, 'string');
+  assert.notEqual(envelopeDigest, digest);
   assert.notEqual(
     await directoryEnvelopeDigest(directory, { ...provenance, appRevision: 'stale-fixture' }),
     envelopeDigest,
