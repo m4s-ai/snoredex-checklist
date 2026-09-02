@@ -232,7 +232,7 @@ for scripts outside the Latin subset.
 
 ### Hierarchy
 
-- **Display** (`typography.display`): the marketing index hero only; bold, fluid, and tightly tracked.
+- **Display** (`typography.display`): the marketing index hero only; large, fluid, and tightly tracked.
 - **Collection title** (`typography.collection-title`): a calmer page-level title for the work view.
 - **Headline** (`typography.headline`): section hierarchy and meaningful collection milestones.
 - **Body** (`typography.body`): catalogue explanation, metadata, and task copy.

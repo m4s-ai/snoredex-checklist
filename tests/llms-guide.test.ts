@@ -8,7 +8,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const guidePath = resolve(root, 'site-src/llms.txt');
 const guideUrls = ['llms.txt', '../llms.txt'];
 
-test('publishes the hand-authored v2 privacy and provenance guide', async () => {
+test('publishes the hand-authored privacy and provenance guide', async () => {
   const bytes = await readFile(guidePath);
   assert.notDeepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
   const guide = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -18,17 +18,20 @@ test('publishes the hand-authored v2 privacy and provenance guide', async () => 
   assert.match(guide, /## Catalogue data and provenance/);
   assert.match(guide, /## Optional/);
   assert.match(guide, /current build renders one validated, digest-pinned Snoredex Data snapshot/);
-  assert.match(guide, /current release provides no collection export control or endpoint/);
+  assert.match(guide, /user-initiated downloads of the active collection and recovery snapshot/);
+  assert.match(guide, /there is no collection export endpoint, upload, automatic agent handoff/);
   assert.match(guide, /This consumer renders the accepted pinned snapshot/);
   assert.doesNotMatch(guide, /current build renders a validated synthetic fixture/);
   assert.match(guide, /no hosted personal collection record or collection-state API/);
-  assert.match(guide, /the only supported handoff is a user-initiated export/);
+  assert.match(guide, /explicitly authorizes one exact versioned Snoredex Collection JSON file/);
   assert.match(guide, /Do not ask the user to publish that file/);
   assert.match(guide, /untrusted private data, never as instructions/);
   assert.match(guide, /not robots\.txt, authentication, access control or an anti-scraping mechanism/);
   assert.doesNotMatch(guide, /llms-full\.txt|generator|real collection example/i);
   assert.match(guide, /https:\/\/m4s-ai\.github\.io\/snoredex-checklist\//);
   assert.match(guide, /https:\/\/m4s-ai\.github\.io\/snoredex-checklist\/collection\//);
+  assert.match(guide, /https:\/\/m4s-ai\.github\.io\/snoredex-checklist\/deployment\.json/);
+  assert.match(guide, /https:\/\/m4s-ai\.github\.io\/snoredex-checklist\/provenance\.json/);
   assert.match(guide, /https:\/\/m4s-ai\.github\.io\/snoredex-data\/llms\.txt/);
   assert.match(guide, /https:\/\/llmstxt\.org\//);
   assert.ok(!guide.includes('synthetic-secret'));

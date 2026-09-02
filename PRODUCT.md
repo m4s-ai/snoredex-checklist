@@ -31,9 +31,11 @@ inferring missing catalogue truth.
 
 Collectors use the public site to browse by locality, language, set edition, and physical or
 candidate variation; search and filter the catalogue; review evidence and provenance; and maintain
-Need, Ordered, Have, or Skip state. Research entries remain visible but read-only. Collection state
-is saved locally in the current browser, with deterministic export, import, backup, and recovery
-flows for user-controlled portability.
+Need, Ordered, Have, or Skip state. Search is the primary direct path. Native locality and set
+selectors provide progressive browsing without an always-expanded catalogue tree. Status changes
+remain one tap away, while quantities and notes appear only when they are relevant. Research
+entries remain visible but read-only. Collection state is saved locally in the current browser,
+with deterministic export, import, backup, and recovery flows for user-controlled portability.
 
 The public site has a compact project index at `/` and the collection application at
 `/collection/`. Public URLs may carry catalogue navigation and filter criteria, but never private
@@ -47,6 +49,9 @@ statuses, quantities, notes, recovery records, or collection identities.
   private-state network edge.
 - Normal builds use one committed, validated, digest-pinned vendor snapshot and do not fetch
   mutable producer data.
+- Every published HTML shell is bound to one immutable, digest-checked runtime-module set. Active
+  and one-slot rollback generations are retained and verified together; mixed or incomplete assets
+  fail before catalogue rendering or private-state access.
 - Current-known progress is derived from producer-assigned classes. Research stays outside Owned
   and Secured denominators and is never presented as an ordinary collection status.
 - Catalogue changes conserve every old private-state identity. Ambiguous splits, merges, missing
@@ -55,6 +60,9 @@ statuses, quantities, notes, recovery records, or collection identities.
   sync, service worker, browser database, UI framework, or catalogue editing in v1.
 - Unknown catalogue values remain visibly unknown. The consumer never guesses or cross-products
   localities, languages, editions, finishes, identities, or completeness.
+- The public index leads with a short product explanation and grouped human-readable directory.
+  Dense catalogue, recovery, and technical provenance detail stays in the collection route or an
+  explicit disclosure.
 
 ## Brand Commitments
 

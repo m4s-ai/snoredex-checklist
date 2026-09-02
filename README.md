@@ -8,15 +8,19 @@ belongs only to this consumer and stays in the browser.
 
 ## Project status
 
-Current implementation, contract, and deployment status lives in
-[`snoredex-checklist#2`](https://github.com/m4s-ai/snoredex-checklist/issues/2),
-[`snoredex-checklist#29`](https://github.com/m4s-ai/snoredex-checklist/issues/29), and
-[`snoredex-data#332`](https://github.com/m4s-ai/snoredex-data/issues/332). The current branch
-adopts the accepted producer publication `98700119700523ee4939b7539103f7ba61ab03e6` under
-contract `1.0.0`, semantic fingerprint
-`sha256:7f88c3c6dffc4b1fe73c868cd6be1baaa36116129b5217eaa1f17d590bd47d81`, and byte digest
-`sha256:5887db812354eaca90ae496af2bac82b4b8eceb9529c0919072d1ede03220da7`.
-The exact immutable URL and all identity fields are recorded in [`catalogue.lock.json`](catalogue.lock.json).
+The v1 product and cross-repository acceptance record is complete in
+[`snoredex-checklist#2`](https://github.com/m4s-ai/snoredex-checklist/issues/2). The initial
+catalogue-update lifecycle is recorded in
+[`snoredex-checklist#29`](https://github.com/m4s-ai/snoredex-checklist/issues/29) and
+[`snoredex-data#332`](https://github.com/m4s-ai/snoredex-data/issues/332). Runtime-asset coherence,
+publication, and rollback follow-up is recorded in
+[`snoredex-checklist#81`](https://github.com/m4s-ai/snoredex-checklist/issues/81).
+
+[`catalogue.lock.json`](catalogue.lock.json) is the repository authority for the accepted producer
+revision, immutable artifact URLs, contract version, semantic fingerprint, and byte digests used by
+normal builds. The live site's [`deployment.json`](https://m4s-ai.github.io/snoredex-checklist/deployment.json)
+and [`provenance.json`](https://m4s-ai.github.io/snoredex-checklist/provenance.json) identify the
+deployed application and catalogue tuple; do not copy those changing values into stable prose.
 
 Do not use `analysis_checklist.json` as a production API and do not reconstruct producer truth from
 its internal stores. Normal builds consume only the committed vendor snapshot and lock; they never
@@ -30,11 +34,15 @@ fetch mutable producer data. Synthetic fixtures remain limited to validator and 
 | [`snoredex-data#254`](https://github.com/m4s-ai/snoredex-data/issues/254)       | Canonical producer-contract semantics and deliverables                                                                                           |
 | [`snoredex-data#229`](https://github.com/m4s-ai/snoredex-data/issues/229)       | Historical owner decision selecting the standalone site                                                                                          |
 | [`AGENTS.md`](AGENTS.md)                                                        | Stable working rules and safety invariants                                                                                                       |
+| [`PRODUCT.md`](PRODUCT.md)                                                      | Product purpose, users, capabilities, constraints, and principles                                                                                |
 | [`SPECIFICATIONS.md`](SPECIFICATIONS.md)                                        | How issue-driven specification work becomes executable evidence                                                                                  |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md)                                            | Stable system boundaries and data flow                                                                                                           |
 | [`CROSS_REPO_PROTOCOL.md`](CROSS_REPO_PROTOCOL.md)                              | Cross-repository lifecycle and traceability                                                                                                      |
+| [`DESIGN.md`](DESIGN.md)                                                        | Current production design system and interaction rules                                                                                           |
 | [`docs/design/README.md`](docs/design/README.md)                                | Owner-approved visual baseline and interactive synthetic reference ([issue #30](https://github.com/m4s-ai/snoredex-checklist/issues/30))         |
 | [`docs/accessibility/evidence.md`](docs/accessibility/evidence.md)              | Automated accessibility/responsive evidence and manual release-gate record ([issue #27](https://github.com/m4s-ai/snoredex-checklist/issues/27)) |
+| [`SECURITY.md`](SECURITY.md)                                                    | Security, privacy, and supported-release policy                                                                                                  |
+| [`docs/security/repository-controls.md`](docs/security/repository-controls.md)  | Verified repository and GitHub-hosted security controls                                                                                          |
 
 GitHub issues are the living specifications. Repository documents explain stable operation and link
 to those issues instead of copying changing decisions into a second source of truth.
@@ -48,7 +56,8 @@ to those issues instead of copying changing decisions into a second source of tr
   private sidecar so older deployed revisions can still read the active collection during rollback.
 - Research remains read-only and outside Owned/Secured progress.
 - Unknown, retired, split, merged, or re-keyed identities never cause silent state loss.
-- Production integration fails closed until the contract, migrations, artifact, and lock agree.
+- Catalogue adoption and deployment fail closed whenever the contract, migrations, artifact,
+  lock, runtime manifests, or published bytes disagree.
 
 ## Development
 
@@ -70,7 +79,7 @@ an explicit full lowercase SHA is still required for rollback. The workflow vali
 the exact resolved consumer revision before building, and the smoke test verifies the same SHA.
 Deployment also fails closed until the pinned producer migration
 manifest is reviewed, complete and targets the accepted catalogue fingerprint. On the first
-deployment (when no production manifest exists), no source fingerprint is required; later
+deployment of a repository with no production manifest, no source fingerprint is required; later
 deployments must provide a reviewed route from the currently published fingerprint. A synthetic
 fixture that was never production is not treated as a migration source, and no consumer-side
 identity mapping is inferred.
@@ -170,7 +179,7 @@ and `catalogue.lock.json` together. The migration artifact must declare the targ
 fingerprint and is never inferred by the consumer. Do not run it against mutable branches or bytes
 that were not sealed by the Checklist catalogue-release workflow and its linked issues.
 
-### Manual Pages deployment and rollback
+### Pages deployment and rollback
 
 Every push to `main` automatically runs the protected **Deploy Pages** workflow in `adopt` mode
 using that push's full commit SHA; no SHA input is needed for normal publication. Use the

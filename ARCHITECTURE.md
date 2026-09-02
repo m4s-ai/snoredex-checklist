@@ -1,4 +1,5 @@
 <!-- doc: role=stable architecture boundaries; stage=stable -->
+
 # Architecture
 
 ## Status
@@ -14,16 +15,22 @@ contract details, fixtures, and lifecycle status remain owned by
 snoredex-data reviewed truth
         |
         v
-versioned collector artifact + migrations + deployment manifest
+versioned collector artifact + migrations
         |
         v
 validated committed vendor snapshot <--- catalogue.lock.json
         |
         v
-static checklist app <----------> versioned browser-local state
+exact consumer build ---> immutable runtime set + deployment/provenance manifests
         |                                      |
         v                                      v
-GitHub Pages                         deterministic JSON backup/restore
+GitHub Pages HTML ---> pinned runtime modules ---> catalogue projection
+                                                   |
+                                                   v
+                                      versioned browser-local state
+                                                   |
+                                                   v
+                                      deterministic JSON backup/restore
 ```
 
 Normal builds and the running app do not fetch mutable producer data. Only an issue-backed sync
@@ -42,16 +49,37 @@ digest pass validation.
 There is no write-back edge from the checklist to the producer. Private state must never enter
 source, build artifacts, URLs, analytics, logs, or public issues.
 
-## Planned boundaries
+## Implemented boundaries
 
-| Boundary | Responsibility | Failure mode |
-| --- | --- | --- |
-| Ingestion | Validate supported contract, digest, fingerprint, uniqueness, and references | Keep the last known-good snapshot |
-| Catalogue projection | Present producer-assigned item and progress classes without inference | Show unsupported/stale state; do not render guessed truth |
-| State | Normalize and atomically persist one logical local authority with a legacy-readable active key and one recovery sidecar | Preserve rollback readability, reject stale operations and keep private export/recovery available |
-| Reconciliation | Conserve every old item ID across catalogue transitions | Stop on missing, ambiguous, 1:N, or N:1 transitions |
-| UI | Render untrusted producer text safely and expose accessible collection controls | Fail visibly; never leak private values |
-| Publication | Build a static artifact from the committed snapshot only | Do not deploy when provenance or gates disagree |
+| Boundary             | Responsibility                                                                                                          | Failure mode                                                                                                            |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Ingestion            | Validate supported contract, digest, fingerprint, uniqueness, and references                                            | Keep the last known-good snapshot                                                                                       |
+| Catalogue projection | Present producer-assigned item and progress classes without inference                                                   | Show unsupported/stale state; do not render guessed truth                                                               |
+| State                | Normalize and atomically persist one logical local authority with a legacy-readable active key and one recovery sidecar | Preserve rollback readability, reject stale operations and keep private export/recovery available                       |
+| Reconciliation       | Conserve every old item ID across catalogue transitions                                                                 | Stop on missing, ambiguous, 1:N, or N:1 transitions                                                                     |
+| UI                   | Render untrusted producer text safely and expose accessible collection controls                                         | Fail visibly; never leak private values                                                                                 |
+| Runtime publication  | Bind each HTML shell to one immutable module set and verify every declared byte                                         | Stop before catalogue rendering or private-state access when files are missing, mixed, additional, or digest-mismatched |
+| Publication          | Build a static artifact from the committed snapshot and exact consumer revision only                                    | Do not deploy when provenance, compatibility, runtime, or gates disagree                                                |
+
+## Revision-coherent publication
+
+Each build emits an immutable `assets/runtime/<app-revision>/` directory. Its manifest binds the
+application revision to the producer revision, contract version, semantic fingerprint, catalogue
+and migration byte identities, and the exact runtime-module membership and digest of every module.
+The HTML shell loads only that revision's entry module. A mixed browser or CDN cache therefore
+cannot silently combine an old shell, a new module graph, or different catalogue bytes: bootstrap
+validation fails visibly before catalogue rendering, private-state reads, or reconciliation.
+
+The root `deployment.json` is the active publication pointer and may name one retained rollback
+generation. `provenance.json` records the built tuple used to evaluate that publication. Deploy
+validation checks both retained generations, rejects undeclared or changed modules, and keeps the
+active and rollback asset sets together. Post-deploy smoke derives the expected tuple from the
+built provenance even when the workflow later checks out recovery tooling, then verifies the live
+manifests and all declared module bytes.
+
+The index consumes only the lightweight, public directory projection required for its grouped
+browse links. The collection route consumes the full validated catalogue and migration snapshot.
+Neither route fetches mutable producer data at runtime.
 
 ## State-conservation invariant
 
