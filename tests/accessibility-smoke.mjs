@@ -128,6 +128,9 @@ try {
         `${engineName}: system dark theme`,
       );
       const systemThemeToggle = themePage.getByRole('button', { name: 'Dark theme' });
+      await themePage.waitForFunction(
+        () => document.querySelector('[data-theme-toggle]')?.getAttribute('aria-pressed') === 'true',
+      );
       assert.equal(await systemThemeToggle.getAttribute('aria-pressed'), 'true', `${engineName}: system theme state`);
       await systemThemeToggle.click();
       assert.equal(
@@ -244,6 +247,14 @@ try {
             .first()
             .evaluate((image) => Number.parseFloat(getComputedStyle(image).transitionDuration))) <= 0.01,
           `${engineName}/${viewportName}: reduced motion transition`,
+        );
+        assert.equal(
+          await page
+            .locator('.image-button img')
+            .first()
+            .evaluate((image) => getComputedStyle(image).transform),
+          'none',
+          `${engineName}/${viewportName}: reduced motion transform`,
         );
         await page.evaluate(() => {
           document.documentElement.style.fontSize = '200%';

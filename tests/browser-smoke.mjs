@@ -36,6 +36,25 @@ await new Promise((resolveServer) => server.listen(0, '127.0.0.1', resolveServer
 const address = server.address();
 if (!address || typeof address === 'string') throw new Error('BROWSER_SMOKE_SERVER_UNAVAILABLE');
 const baseUrl = `http://127.0.0.1:${address.port}`;
+const directorySnapshotSource = await readFile(join(root, 'assets/directory-snapshot.js'), 'utf8');
+const corruptedDirectorySnapshotSource = directorySnapshotSource.replace(
+  /"displayName":"[^"]+"/u,
+  '"displayName":"Corrupted directory label"',
+);
+assert.notEqual(
+  corruptedDirectorySnapshotSource,
+  directorySnapshotSource,
+  'directory fixture corruption must change a digest-bound value',
+);
+const staleProvenanceDirectorySnapshotSource = directorySnapshotSource.replace(
+  /"catalogueByteSha256":"sha256:[0-9a-f]{64}"/gu,
+  `"catalogueByteSha256":"sha256:${'e'.repeat(64)}"`,
+);
+assert.notEqual(
+  staleProvenanceDirectorySnapshotSource,
+  directorySnapshotSource,
+  'directory fixture provenance must change a digest-bound value',
+);
 const expectedCsp =
   "default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'self'; media-src 'none'; manifest-src 'none'";
 
@@ -146,6 +165,16 @@ async function collectionScenarioPage(browser, synthetic, items) {
   await page.goto(`${baseUrl}/collection/?localization=${encodeURIComponent(synthetic.localizationId)}`, {
     waitUntil: 'networkidle',
   });
+  const requiredItemIds = [synthetic.itemId, synthetic.secondItemId].filter(Boolean);
+  while (
+    !(await Promise.all(requiredItemIds.map((itemId) => controlsForItem(page, itemId).count()))).every(
+      (count) => count > 0,
+    )
+  ) {
+    const showMore = page.locator('[data-show-more]');
+    assert.equal(await showMore.count(), 1, 'target item remains reachable through progressive results');
+    await showMore.click();
+  }
   return page;
 }
 
@@ -360,6 +389,9 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
         ),
       );
       await page.reload({ waitUntil: 'networkidle' });
+      while ((await page.locator(`[data-item-id="${synthetic.itemId}"]`).count()) === 0) {
+        await page.locator('[data-show-more]').click();
+      }
 
       await page.getByRole('heading', { name: 'Recovered unsaved collection changes' }).waitFor();
       assert.equal(
@@ -412,11 +444,13 @@ try {
       const page = await browser.newPage();
       const failures = [];
       const unexpectedRequests = [];
+      const requestedPaths = [];
       page.on('pageerror', (error) => failures.push(error.message));
       page.on('console', (message) => {
         if (message.type() === 'error') failures.push(message.text());
       });
       page.on('request', (request) => {
+        requestedPaths.push(new URL(request.url()).pathname);
         if (!request.url().startsWith(baseUrl)) unexpectedRequests.push(request.url());
       });
       const home = await page.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
@@ -435,10 +469,113 @@ try {
         `${name}: human catalogue summary`,
       );
       await assertSecurityBoundary(page, `${name}/home`);
+      assert.equal(
+        requestedPaths.some((path) => path.endsWith('/snapshot.js') || path.endsWith('/migrations.js')),
+        false,
+        `${name}: home omits full catalogue payloads`,
+      );
+      const rollbackPage = await browser.newPage();
+      const rollbackRequests = [];
+      rollbackPage.on('request', (request) => rollbackRequests.push(new URL(request.url()).pathname));
+      await rollbackPage.route('**/assets/directory.js', (route) => route.abort());
+      await rollbackPage.route('**/assets/directory-snapshot.js', (route) => route.abort());
+      const rollbackHome = await rollbackPage.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
+      assert.equal(rollbackHome?.status(), 200, `${name}: rollback fallback home status`);
+      await rollbackPage.locator('.localization-group').first().waitFor();
+      assert.equal(
+        rollbackRequests.some((path) => path.endsWith('/snapshot.js')),
+        true,
+        `${name}: rollback fallback uses the compatible full snapshot`,
+      );
+      await rollbackPage.close();
+      const staleValidatorPage = await browser.newPage();
+      const staleValidatorRequests = [];
+      staleValidatorPage.on('request', (request) => staleValidatorRequests.push(new URL(request.url()).pathname));
+      await staleValidatorPage.route('**/assets/directory.js', (route) =>
+        route.fulfill({
+          contentType: 'text/javascript; charset=utf-8',
+          body: 'export async function validateDirectorySnapshot() { return true; }',
+        }),
+      );
+      await staleValidatorPage.route('**/assets/directory-snapshot.js', (route) =>
+        route.fulfill({
+          contentType: 'text/javascript; charset=utf-8',
+          body: corruptedDirectorySnapshotSource,
+        }),
+      );
+      const staleValidatorHome = await staleValidatorPage.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
+      assert.equal(staleValidatorHome?.status(), 200, `${name}: stale validator home status`);
+      assert.equal(
+        await staleValidatorPage.locator('[data-view] h2').textContent(),
+        'Invalid checklist link',
+        `${name}: stable entry point rejects digest mismatch despite a permissive cached validator`,
+      );
+      assert.equal(
+        staleValidatorRequests.some((path) => path.endsWith('/snapshot.js')),
+        false,
+        `${name}: digest mismatch fails closed instead of accepting or falling back`,
+      );
+      await staleValidatorPage.close();
+      const staleProvenancePage = await browser.newPage();
+      const staleProvenanceRequests = [];
+      staleProvenancePage.on('request', (request) => staleProvenanceRequests.push(new URL(request.url()).pathname));
+      await staleProvenancePage.route('**/assets/directory-snapshot.js', (route) =>
+        route.fulfill({
+          contentType: 'text/javascript; charset=utf-8',
+          body: staleProvenanceDirectorySnapshotSource,
+        }),
+      );
+      const staleProvenanceHome = await staleProvenancePage.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
+      assert.equal(staleProvenanceHome?.status(), 200, `${name}: stale provenance home status`);
+      assert.equal(
+        await staleProvenancePage.locator('[data-view] h2').textContent(),
+        'Invalid checklist link',
+        `${name}: directory envelope rejects internally consistent stale provenance`,
+      );
+      assert.equal(
+        staleProvenanceRequests.some((path) => path.endsWith('/snapshot.js')),
+        false,
+        `${name}: stale provenance fails closed instead of accepting or falling back`,
+      );
+      await staleProvenancePage.close();
+      const legacyBootstrapPage = await browser.newPage();
+      await legacyBootstrapPage.route('**/assets/app.js', (route) =>
+        route.fulfill({
+          contentType: 'text/javascript; charset=utf-8',
+          body: `
+            const expectedDigest = document.querySelector('meta[name="snoredex-directory-sha256"]')?.content;
+            const [directoryModule, snapshotModule] = await Promise.all([
+              import('./directory.js'),
+              import('./directory-snapshot.js'),
+            ]);
+            document.body.dataset.legacyDigestResult = String(
+              await directoryModule.validateDirectorySnapshot(snapshotModule.default, expectedDigest),
+            );
+          `,
+        }),
+      );
+      const legacyBootstrapHome = await legacyBootstrapPage.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
+      assert.equal(legacyBootstrapHome?.status(), 200, `${name}: legacy bootstrap home status`);
+      assert.equal(
+        await legacyBootstrapPage.locator('body').getAttribute('data-legacy-digest-result'),
+        'false',
+        `${name}: preceding bootstrap fails closed against the stable marker's envelope digest`,
+      );
+      await legacyBootstrapPage.close();
       await page.locator("a[href='collection/']").first().click();
       await page.waitForLoadState('networkidle');
       assert.match(page.url(), /\/collection\/$/u, `${name}: collection URL`);
       assert.equal(await page.title(), 'Collection · Snoredex Checklist', `${name}: collection title`);
+      assert.equal(
+        requestedPaths.some((path) => path.endsWith('/snapshot.js')),
+        true,
+        `${name}: collection loads full catalogue`,
+      );
+      assert.equal(
+        requestedPaths.some((path) => path.endsWith('/migrations.js')),
+        true,
+        `${name}: collection loads migrations`,
+      );
       await assertSecurityBoundary(page, `${name}/collection`);
       assert.equal(await page.locator('.query-primary input[name="q"]').isVisible(), true, `${name}: primary search`);
       assert.equal(
@@ -447,6 +584,17 @@ try {
         `${name}: advanced filters closed`,
       );
       assert.equal(await page.locator('[data-view] > .empty-state').count(), 1, `${name}: neutral initial state`);
+      assert.equal(await page.locator('[data-view]').getAttribute('aria-live'), null, `${name}: results are not live`);
+      assert.equal(
+        await page.locator('[data-view-status]').getAttribute('role'),
+        'status',
+        `${name}: scoped view status`,
+      );
+      assert.match(
+        await page.locator('[data-view-status]').textContent(),
+        /Collection ready/u,
+        `${name}: concise neutral announcement`,
+      );
       assert.equal(await page.locator('.state-retry:visible').count(), 0, `${name}: no idle retry controls`);
       assert.match(
         await page.locator('.provenance-disclosure > summary').innerText(),
@@ -480,13 +628,34 @@ try {
             (candidate) => trackable.filter((other) => other.localizationId === candidate.localizationId).length > 1,
           ) ?? trackable[0];
         if (!item) return null;
+        const activeEditionIds = new Set(
+          catalogue.items
+            .filter((candidate) => candidate.active && candidate.setEditionId)
+            .map((candidate) => candidate.setEditionId),
+        );
+        const emptyEdition = catalogue.setEditions.find((edition) => !activeEditionIds.has(edition.setEditionId));
+        const emptyBrowseEditions = emptyEdition
+          ? catalogue.setEditions.filter((edition) => edition.localizationId === emptyEdition.localizationId)
+          : [];
         return {
           fingerprint: catalogue.meta.catalogueFingerprint,
           itemId: item.itemId,
           localizationId: item.localizationId,
+          localizationItemCount: catalogue.items.filter(
+            (candidate) => candidate.active && candidate.localizationId === item.localizationId,
+          ).length,
           secondItemId: trackable.find(
             (candidate) => candidate.localizationId === item.localizationId && candidate.itemId !== item.itemId,
           )?.itemId,
+          emptyBrowse: emptyEdition
+            ? {
+                localizationId: emptyEdition.localizationId,
+                editionCount: emptyBrowseEditions.length,
+                setCount: new Set(emptyBrowseEditions.map((edition) => edition.localSetId)).size,
+                emptyEditionCount: emptyBrowseEditions.filter((edition) => !activeEditionIds.has(edition.setEditionId))
+                  .length,
+              }
+            : undefined,
           research: catalogue.items.find(
             (candidate) =>
               candidate.active &&
@@ -499,6 +668,24 @@ try {
       });
       assert.notEqual(synthetic, null, `${name}: synthetic trackable item`);
       if (synthetic !== null) {
+        assert.notEqual(synthetic.emptyBrowse, undefined, `${name}: localization with an empty edition`);
+        if (synthetic.emptyBrowse !== undefined) {
+          assert.ok(synthetic.emptyBrowse.emptyEditionCount > 0, `${name}: empty edition regression fixture`);
+          await page.goto(
+            `${baseUrl}/collection/?localization=${encodeURIComponent(synthetic.emptyBrowse.localizationId)}`,
+            { waitUntil: 'networkidle' },
+          );
+          assert.equal(
+            await page.locator('[data-view] .result-edition').count(),
+            synthetic.emptyBrowse.editionCount,
+            `${name}: plain localization browse retains every producer-known edition`,
+          );
+          assert.equal(
+            await page.locator('[data-view] .result-set').count(),
+            synthetic.emptyBrowse.setCount,
+            `${name}: plain localization browse retains every producer-known set`,
+          );
+        }
         await page.evaluate(({ fingerprint, itemId }) => {
           localStorage.setItem(
             'snoredex-checklist.private-state',
@@ -513,6 +700,59 @@ try {
             }),
           );
         }, synthetic);
+        await page.goto(`${baseUrl}/collection/?localization=${encodeURIComponent(synthetic.localizationId)}`, {
+          waitUntil: 'networkidle',
+        });
+        assert.equal(
+          await page.locator('[data-view] [data-item-id]').count(),
+          Math.min(24, synthetic.localizationItemCount),
+          `${name}: initial result chunk`,
+        );
+        if (synthetic.localizationItemCount > 24) {
+          const showMore = page.locator('[data-show-more]');
+          assert.equal(await showMore.count(), 1, `${name}: progressive result control`);
+          await showMore.click();
+          assert.equal(
+            await page.locator('[data-view] [data-item-id]').count(),
+            Math.min(48, synthetic.localizationItemCount),
+            `${name}: second result chunk`,
+          );
+          if (synthetic.localizationItemCount > 48) {
+            const firstNewItemId = await page
+              .locator('[data-view] [data-item-id]')
+              .nth(24)
+              .getAttribute('data-item-id');
+            assert.equal(
+              await page.evaluate(() =>
+                document.activeElement?.closest('[data-item-id]')?.getAttribute('data-item-id'),
+              ),
+              firstNewItemId,
+              `${name}: non-final reveal focuses the first newly mounted item`,
+            );
+          } else {
+            assert.equal(
+              await page.evaluate(() => document.activeElement?.matches('[data-results-progress]')),
+              true,
+              `${name}: final first reveal focuses the completion target`,
+            );
+          }
+          while ((await showMore.count()) > 0) await showMore.click();
+          assert.equal(
+            await page.locator('[data-view] [data-item-id]').count(),
+            synthetic.localizationItemCount,
+            `${name}: complete progressive results`,
+          );
+          assert.equal(
+            await page.evaluate(() => document.activeElement?.matches('[data-results-progress]')),
+            true,
+            `${name}: final progressive result focus`,
+          );
+          assert.match(
+            await page.locator('[data-results-progress]').innerText(),
+            new RegExp(`Showing all ${synthetic.localizationItemCount} matching catalogue items\\.`, 'u'),
+            `${name}: final progressive result summary`,
+          );
+        }
         await page.reload({ waitUntil: 'networkidle' });
         await page.getByText('Backup and recovery', { exact: true }).click();
         const exportButton = page.getByRole('button', { name: 'Export collection' });

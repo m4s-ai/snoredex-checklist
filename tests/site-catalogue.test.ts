@@ -4,6 +4,11 @@ import test from 'node:test';
 import fixture from './fixtures/collector-catalogue.fixture.json' with { type: 'json' };
 import { semanticFingerprint } from '../src/catalogue/validate.ts';
 import { localizationLabel, validateProvenance, validateSnapshot } from '../src/site/catalogue.ts';
+import {
+  directoryEnvelopeDigest,
+  directoryProjectionDigest,
+  validateDirectorySnapshot,
+} from '../src/site/directory.ts';
 import { matchesResearch } from '../src/site/filter.ts';
 import { buildBrowseHierarchy, buildProgressViewModel, buildResultViewModel } from '../src/site/results.ts';
 
@@ -14,6 +19,58 @@ function reseal(value: any): any {
 
 test('accepts the reviewed browser snapshot shape', async () => {
   assert.equal((await validateSnapshot(fixture.catalogue)).ok, true);
+});
+
+test('validates the bounded homepage directory projection and its pinned contents', async () => {
+  const directory = {
+    meta: {
+      schema: fixture.catalogue.meta.schema,
+      schemaVersion: fixture.catalogue.meta.schemaVersion,
+      catalogueFingerprint: fixture.catalogue.meta.catalogueFingerprint,
+      sourceRepository: fixture.catalogue.meta.sourceRepository,
+      dataAsOf: fixture.catalogue.meta.dataAsOf,
+    },
+    localizations: fixture.catalogue.localizations,
+  };
+  const provenance = {
+    mode: 'synthetic-fixture',
+    sourceCommit: 'synthetic-fixture',
+    appRevision: 'synthetic-fixture',
+    contractVersion: fixture.catalogue.meta.schemaVersion,
+    sourceRepository: fixture.catalogue.meta.sourceRepository,
+    catalogueFingerprint: fixture.catalogue.meta.catalogueFingerprint,
+    lock: null,
+  };
+  const digest = await directoryProjectionDigest(directory);
+  const envelopeDigest = await directoryEnvelopeDigest(directory, provenance);
+  assert.equal(typeof digest, 'string');
+  assert.equal(typeof envelopeDigest, 'string');
+  assert.notEqual(envelopeDigest, digest);
+  assert.notEqual(
+    await directoryEnvelopeDigest(directory, { ...provenance, appRevision: 'stale-fixture' }),
+    envelopeDigest,
+  );
+  assert.equal(await validateDirectorySnapshot(directory, digest ?? ''), true);
+  assert.equal(
+    await validateDirectorySnapshot(
+      {
+        ...directory,
+        localizations: [...directory.localizations, directory.localizations[0]],
+      },
+      digest ?? '',
+    ),
+    false,
+  );
+  assert.equal(
+    await validateDirectorySnapshot(
+      { ...directory, meta: { ...directory.meta, catalogueFingerprint: 'invalid' } },
+      digest ?? '',
+    ),
+    false,
+  );
+  const shapeValidCorruption = structuredClone(directory);
+  shapeValidCorruption.localizations[0].displayName = 'Corrupted directory label';
+  assert.equal(await validateDirectorySnapshot(shapeValidCorruption, digest ?? ''), false);
 });
 
 test('accepts schema-valid empty sort keys', async () => {
