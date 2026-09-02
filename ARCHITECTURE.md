@@ -51,24 +51,31 @@ source, build artifacts, URLs, analytics, logs, or public issues.
 
 ## Implemented boundaries
 
-| Boundary             | Responsibility                                                                                                          | Failure mode                                                                                                            |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Ingestion            | Validate supported contract, digest, fingerprint, uniqueness, and references                                            | Keep the last known-good snapshot                                                                                       |
-| Catalogue projection | Present producer-assigned item and progress classes without inference                                                   | Show unsupported/stale state; do not render guessed truth                                                               |
-| State                | Normalize and atomically persist one logical local authority with a legacy-readable active key and one recovery sidecar | Preserve rollback readability, reject stale operations and keep private export/recovery available                       |
-| Reconciliation       | Conserve every old item ID across catalogue transitions                                                                 | Stop on missing, ambiguous, 1:N, or N:1 transitions                                                                     |
-| UI                   | Render untrusted producer text safely and expose accessible collection controls                                         | Fail visibly; never leak private values                                                                                 |
-| Runtime publication  | Bind each HTML shell to one immutable module set and verify every declared byte                                         | Stop before catalogue rendering or private-state access when files are missing, mixed, additional, or digest-mismatched |
-| Publication          | Build a static artifact from the committed snapshot and exact consumer revision only                                    | Do not deploy when provenance, compatibility, runtime, or gates disagree                                                |
+| Boundary             | Responsibility                                                                                                          | Failure mode                                                                                      |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Ingestion            | Validate supported contract, digest, fingerprint, uniqueness, and references                                            | Keep the last known-good snapshot                                                                 |
+| Catalogue projection | Present producer-assigned item and progress classes without inference                                                   | Show unsupported/stale state; do not render guessed truth                                         |
+| State                | Normalize and atomically persist one logical local authority with a legacy-readable active key and one recovery sidecar | Preserve rollback readability, reject stale operations and keep private export/recovery available |
+| Reconciliation       | Conserve every old item ID across catalogue transitions                                                                 | Stop on missing, ambiguous, 1:N, or N:1 transitions                                               |
+| UI                   | Render untrusted producer text safely and expose accessible collection controls                                         | Fail visibly; never leak private values                                                           |
+| Runtime publication  | Bind each HTML shell to one immutable module set and verify every declared byte                                         | Reject the artifact or deployment when files are missing, mixed, additional, or digest-mismatched |
+| Publication          | Build a static artifact from the committed snapshot and exact consumer revision only                                    | Do not deploy when provenance, compatibility, runtime, or gates disagree                          |
 
 ## Revision-coherent publication
 
 Each build emits an immutable `assets/runtime/<app-revision>/` directory. Its manifest binds the
 application revision to the producer revision, contract version, semantic fingerprint, catalogue
 and migration byte identities, and the exact runtime-module membership and digest of every module.
-The HTML shell loads only that revision's entry module. A mixed browser or CDN cache therefore
-cannot silently combine an old shell, a new module graph, or different catalogue bytes: bootstrap
-validation fails visibly before catalogue rendering, private-state reads, or reconciliation.
+The HTML shell addresses only that revision's entry module, so ordinary browser and CDN cache keys
+do not reuse one module URL across releases. At browser start, the application validates the
+catalogue and migration identities against its built tuple before catalogue rendering,
+private-state reads, or reconciliation.
+
+Runtime-module digests are a publication-time invariant enforced by the build, artifact,
+deployment, and post-deploy smoke checks. The browser does not hash an already executing entry
+module or its complete import graph. A host or CDN that mutates bytes at an immutable revision URL
+is therefore detected by those publication checks, not guaranteed to fail inside the in-page
+bootstrap before any module code executes.
 
 The root `deployment.json` is the active publication pointer and may name one retained rollback
 generation. `provenance.json` records the built tuple used to evaluate that publication. Deploy

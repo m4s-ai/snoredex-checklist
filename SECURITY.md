@@ -27,9 +27,11 @@ Catalogue corrections that are not security-sensitive belong in the producer iss
 - No analytics, telemetry, remote fonts, third-party scripts, or private values in URLs/logs.
 - Validate catalogue, migration, and import data at trust boundaries; unsupported versions and
   integrity failures fail closed.
-- Bind every published HTML shell to one immutable runtime-module manifest. Verify the active and
-  retained rollback module membership and byte digests; missing, mixed, additional, or changed
-  assets fail before catalogue rendering, reconciliation, or private-state access.
+- Bind every published HTML shell to one immutable runtime-module manifest. Build, deployment, and
+  post-deploy checks reject missing, mixed, additional, or changed active and rollback module
+  bytes. The browser separately validates catalogue and migration identities before catalogue
+  rendering, reconciliation, or private-state access; it does not self-hash already executing
+  modules.
 - Render untrusted strings through text APIs and apply a self-first Content Security Policy.
 - Limit import size, quantities, note length, and accepted enums/IDs; never prototype-merge
   untrusted objects.

@@ -49,9 +49,9 @@ statuses, quantities, notes, recovery records, or collection identities.
   private-state network edge.
 - Normal builds use one committed, validated, digest-pinned vendor snapshot and do not fetch
   mutable producer data.
-- Every published HTML shell is bound to one immutable, digest-checked runtime-module set. Active
-  and one-slot rollback generations are retained and verified together; mixed or incomplete assets
-  fail before catalogue rendering or private-state access.
+- Every published HTML shell addresses one immutable runtime-module set. Build, deployment, and
+  post-deploy checks verify the active and one-slot rollback module digests together; the browser
+  validates catalogue and migration identities before catalogue rendering or private-state access.
 - Current-known progress is derived from producer-assigned classes. Research stays outside Owned
   and Secured denominators and is never presented as an ordinary collection status.
 - Catalogue changes conserve every old private-state identity. Ambiguous splits, merges, missing
