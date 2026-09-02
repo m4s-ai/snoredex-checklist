@@ -681,11 +681,25 @@ try {
             Math.min(48, synthetic.localizationItemCount),
             `${name}: second result chunk`,
           );
-          assert.equal(
-            await page.evaluate(() => document.activeElement?.matches('[data-show-more], [data-results-progress]')),
-            true,
-            `${name}: progressive result focus`,
-          );
+          if (synthetic.localizationItemCount > 48) {
+            const firstNewItemId = await page
+              .locator('[data-view] [data-item-id]')
+              .nth(24)
+              .getAttribute('data-item-id');
+            assert.equal(
+              await page.evaluate(() =>
+                document.activeElement?.closest('[data-item-id]')?.getAttribute('data-item-id'),
+              ),
+              firstNewItemId,
+              `${name}: non-final reveal focuses the first newly mounted item`,
+            );
+          } else {
+            assert.equal(
+              await page.evaluate(() => document.activeElement?.matches('[data-results-progress]')),
+              true,
+              `${name}: final first reveal focuses the completion target`,
+            );
+          }
           while ((await showMore.count()) > 0) await showMore.click();
           assert.equal(
             await page.locator('[data-view] [data-item-id]').count(),

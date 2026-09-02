@@ -1615,6 +1615,7 @@ function renderResults(
       reveal.type = 'button';
       reveal.dataset.showMore = '';
       reveal.addEventListener('click', () => {
+        const firstNewItemIndex = mountedItemCount;
         renderResults(
           container,
           criteria,
@@ -1623,10 +1624,15 @@ function renderResults(
           stateController,
           visibleItemLimit + RESULT_CHUNK_SIZE,
         );
-        const nextFocus =
-          container.querySelector<HTMLButtonElement>('[data-show-more]') ??
-          container.querySelector<HTMLElement>('[data-results-progress]');
-        nextFocus?.focus();
+        if (container.querySelector('[data-show-more]')) {
+          const firstNewItem = container.querySelectorAll<HTMLElement>('[data-item-id]').item(firstNewItemIndex);
+          if (firstNewItem) {
+            firstNewItem.tabIndex = -1;
+            firstNewItem.focus();
+            return;
+          }
+        }
+        container.querySelector<HTMLElement>('[data-results-progress]')?.focus();
       });
       more.append(reveal);
     }
