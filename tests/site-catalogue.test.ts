@@ -4,7 +4,7 @@ import test from 'node:test';
 import fixture from './fixtures/collector-catalogue.fixture.json' with { type: 'json' };
 import { semanticFingerprint } from '../src/catalogue/validate.ts';
 import { localizationLabel, validateProvenance, validateSnapshot } from '../src/site/catalogue.ts';
-import { validateDirectorySnapshot } from '../src/site/directory.ts';
+import { directoryProjectionDigest, validateDirectorySnapshot } from '../src/site/directory.ts';
 import { matchesResearch } from '../src/site/filter.ts';
 import { buildBrowseHierarchy, buildProgressViewModel, buildResultViewModel } from '../src/site/results.ts';
 
@@ -17,7 +17,7 @@ test('accepts the reviewed browser snapshot shape', async () => {
   assert.equal((await validateSnapshot(fixture.catalogue)).ok, true);
 });
 
-test('validates the bounded homepage directory projection', () => {
+test('validates the bounded homepage directory projection and its pinned contents', async () => {
   const directory = {
     meta: {
       schema: fixture.catalogue.meta.schema,
@@ -28,18 +28,29 @@ test('validates the bounded homepage directory projection', () => {
     },
     localizations: fixture.catalogue.localizations,
   };
-  assert.equal(validateDirectorySnapshot(directory), true);
+  const digest = await directoryProjectionDigest(directory);
+  assert.equal(typeof digest, 'string');
+  assert.equal(await validateDirectorySnapshot(directory, digest ?? ''), true);
   assert.equal(
-    validateDirectorySnapshot({
-      ...directory,
-      localizations: [...directory.localizations, directory.localizations[0]],
-    }),
+    await validateDirectorySnapshot(
+      {
+        ...directory,
+        localizations: [...directory.localizations, directory.localizations[0]],
+      },
+      digest ?? '',
+    ),
     false,
   );
   assert.equal(
-    validateDirectorySnapshot({ ...directory, meta: { ...directory.meta, catalogueFingerprint: 'invalid' } }),
+    await validateDirectorySnapshot(
+      { ...directory, meta: { ...directory.meta, catalogueFingerprint: 'invalid' } },
+      digest ?? '',
+    ),
     false,
   );
+  const shapeValidCorruption = structuredClone(directory);
+  shapeValidCorruption.localizations[0].displayName = 'Corrupted directory label';
+  assert.equal(await validateDirectorySnapshot(shapeValidCorruption, digest ?? ''), false);
 });
 
 test('accepts schema-valid empty sort keys', async () => {

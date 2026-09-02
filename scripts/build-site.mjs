@@ -82,10 +82,15 @@ const gitResult = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding:
 const gitRevision = requestedAppRevision ?? (gitResult.status === 0 ? gitResult.stdout.trim() : '');
 if (!/^[0-9a-f]{40}$/u.test(gitRevision)) throw new Error('BUILD_APP_REVISION_INVALID');
 provenance.appRevision = gitRevision;
-async function copyRevisionShell(source, destination) {
+async function copyRevisionShell(source, destination, replacements = {}) {
   const shell = await readFile(source, 'utf8');
   if (!shell.includes('__SNOREDEX_APP_REVISION__')) throw new Error('BUILD_APP_REVISION_MARKER_MISSING');
-  await writeFile(destination, shell.replaceAll('__SNOREDEX_APP_REVISION__', gitRevision), 'utf8');
+  let rendered = shell.replaceAll('__SNOREDEX_APP_REVISION__', gitRevision);
+  for (const [marker, value] of Object.entries(replacements)) {
+    if (!rendered.includes(marker)) throw new Error('BUILD_SHELL_MARKER_MISSING');
+    rendered = rendered.replaceAll(marker, value);
+  }
+  await writeFile(destination, rendered, 'utf8');
 }
 async function copyRevisionScript(source, destination) {
   const script = await readFile(source, 'utf8');
@@ -202,6 +207,9 @@ try {
     },
     localizations: catalogue.localizations,
   };
+  const directoryModule = await import(pathToFileURL(resolve(assets, 'directory.js')));
+  const directoryProjectionSha256 = await directoryModule.directoryProjectionDigest(directorySnapshot);
+  if (typeof directoryProjectionSha256 !== 'string') throw new Error('site directory digest failed');
   await writeFile(
     resolve(assets, 'directory-snapshot.js'),
     `export const provenance = Object.freeze(${JSON.stringify(provenance)});\nexport default Object.freeze(${JSON.stringify(directorySnapshot)});\n`,
@@ -257,18 +265,19 @@ try {
   );
   const catalogueModule = await import(pathToFileURL(resolve(assets, 'catalogue.js')));
   const snapshotModule = await import(pathToFileURL(resolve(assets, 'snapshot.js')));
-  const directoryModule = await import(pathToFileURL(resolve(assets, 'directory.js')));
   const directorySnapshotModule = await import(pathToFileURL(resolve(assets, 'directory-snapshot.js')));
   if (!(await catalogueModule.validateSnapshot(snapshotModule.default)).ok)
     throw new Error('site snapshot failed browser boundary validation');
   if (
-    !directoryModule.validateDirectorySnapshot(directorySnapshotModule.default) ||
+    !(await directoryModule.validateDirectorySnapshot(directorySnapshotModule.default, directoryProjectionSha256)) ||
     !catalogueModule.validateProvenance(directorySnapshotModule.provenance, directorySnapshotModule.default)
   ) {
     throw new Error('site directory snapshot failed browser boundary validation');
   }
 
-  await copyRevisionShell(resolve(root, 'site-src/index.html'), resolve(staging, 'index.html'));
+  await copyRevisionShell(resolve(root, 'site-src/index.html'), resolve(staging, 'index.html'), {
+    __SNOREDEX_DIRECTORY_SHA256__: directoryProjectionSha256,
+  });
   await copyRevisionScript(resolve(root, 'site-src/theme.js'), resolve(staging, 'theme.js'));
   await mkdir(resolve(staging, 'collection'), { recursive: true });
   await copyRevisionShell(resolve(root, 'site-src/collection/index.html'), resolve(staging, 'collection/index.html'));

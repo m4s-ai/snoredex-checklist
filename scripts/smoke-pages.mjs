@@ -38,8 +38,7 @@ if (
   moduleManifest.modules.length === 0 ||
   moduleManifest.modules.length > 256 ||
   !moduleManifest.modules.includes('app.js') ||
-  !moduleManifest.modules.includes('collection.js') ||
-  !moduleManifest.modules.includes('index.js') ||
+  !moduleManifest.modules.includes('directory.js') ||
   !moduleManifest.modules.includes('directory-snapshot.js') ||
   new Set(moduleManifest.modules).size !== moduleManifest.modules.length ||
   moduleManifest.modules.some(

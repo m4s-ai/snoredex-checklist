@@ -13,7 +13,28 @@ function isOptionalString(value: unknown): boolean {
   return value === undefined || (typeof value === 'string' && value.length > 0);
 }
 
-export function validateDirectorySnapshot(value: unknown): value is DirectorySnapshot {
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, canonicalize(value[key])]),
+  );
+}
+
+export async function directoryProjectionDigest(value: unknown): Promise<string | undefined> {
+  try {
+    const bytes = new TextEncoder().encode(JSON.stringify(canonicalize(value)));
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return `sha256:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function validateDirectorySnapshot(value: unknown, expectedDigest: string): Promise<boolean> {
+  if (!/^sha256:[0-9a-f]{64}$/u.test(expectedDigest)) return false;
   if (!isRecord(value) || !isRecord(value.meta) || !Array.isArray(value.localizations)) return false;
   const meta = value.meta;
   if (
@@ -43,5 +64,5 @@ export function validateDirectorySnapshot(value: unknown): value is DirectorySna
     }
     ids.add(localization.localizationId);
   }
-  return true;
+  return (await directoryProjectionDigest(value)) === expectedDigest;
 }

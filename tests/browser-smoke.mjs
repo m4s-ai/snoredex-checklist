@@ -455,6 +455,20 @@ try {
         false,
         `${name}: home omits full catalogue payloads`,
       );
+      const rollbackPage = await browser.newPage();
+      const rollbackRequests = [];
+      rollbackPage.on('request', (request) => rollbackRequests.push(new URL(request.url()).pathname));
+      await rollbackPage.route('**/assets/directory.js', (route) => route.abort());
+      await rollbackPage.route('**/assets/directory-snapshot.js', (route) => route.abort());
+      const rollbackHome = await rollbackPage.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
+      assert.equal(rollbackHome?.status(), 200, `${name}: rollback fallback home status`);
+      await rollbackPage.locator('.localization-group').first().waitFor();
+      assert.equal(
+        rollbackRequests.some((path) => path.endsWith('/snapshot.js')),
+        true,
+        `${name}: rollback fallback uses the compatible full snapshot`,
+      );
+      await rollbackPage.close();
       await page.locator("a[href='collection/']").first().click();
       await page.waitForLoadState('networkidle');
       assert.match(page.url(), /\/collection\/$/u, `${name}: collection URL`);
@@ -578,6 +592,22 @@ try {
             await page.evaluate(() => document.activeElement?.matches('[data-show-more], [data-results-progress]')),
             true,
             `${name}: progressive result focus`,
+          );
+          while ((await showMore.count()) > 0) await showMore.click();
+          assert.equal(
+            await page.locator('[data-view] [data-item-id]').count(),
+            synthetic.localizationItemCount,
+            `${name}: complete progressive results`,
+          );
+          assert.equal(
+            await page.evaluate(() => document.activeElement?.matches('[data-results-progress]')),
+            true,
+            `${name}: final progressive result focus`,
+          );
+          assert.match(
+            await page.locator('[data-results-progress]').innerText(),
+            new RegExp(`Showing all ${synthetic.localizationItemCount} matching catalogue items\\.`, 'u'),
+            `${name}: final progressive result summary`,
           );
         }
         await page.reload({ waitUntil: 'networkidle' });

@@ -128,6 +128,9 @@ try {
         `${engineName}: system dark theme`,
       );
       const systemThemeToggle = themePage.getByRole('button', { name: 'Dark theme' });
+      await themePage.waitForFunction(
+        () => document.querySelector('[data-theme-toggle]')?.getAttribute('aria-pressed') === 'true',
+      );
       assert.equal(await systemThemeToggle.getAttribute('aria-pressed'), 'true', `${engineName}: system theme state`);
       await systemThemeToggle.click();
       assert.equal(
