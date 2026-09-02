@@ -29,9 +29,9 @@ Catalogue corrections that are not security-sensitive belong in the producer iss
   integrity failures fail closed.
 - Bind every published HTML shell to one immutable runtime-module manifest. Build, deployment, and
   post-deploy checks reject missing, mixed, additional, or changed active and rollback module
-  bytes. The browser separately validates catalogue and migration identities before catalogue
-  rendering, reconciliation, or private-state access; it does not self-hash already executing
-  modules.
+  bytes. Each browser route separately validates the catalogue input it consumes before rendering;
+  the collection route also validates migration identity before reconciliation or private-state
+  access. The browser does not self-hash already executing modules.
 - Render untrusted strings through text APIs and apply a self-first Content Security Policy.
 - Limit import size, quantities, note length, and accepted enums/IDs; never prototype-merge
   untrusted objects.

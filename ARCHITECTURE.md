@@ -67,9 +67,9 @@ Each build emits an immutable `assets/runtime/<app-revision>/` directory. Its ma
 application revision to the producer revision, contract version, semantic fingerprint, catalogue
 and migration byte identities, and the exact runtime-module membership and digest of every module.
 The HTML shell addresses only that revision's entry module, so ordinary browser and CDN cache keys
-do not reuse one module URL across releases. At browser start, the application validates the
-catalogue and migration identities against its built tuple before catalogue rendering,
-private-state reads, or reconciliation.
+do not reuse one module URL across releases. At browser start, each route validates the catalogue
+input it consumes against its built tuple before rendering catalogue-dependent UI. The collection
+route additionally validates the migration identity before reading or reconciling private state.
 
 Runtime-module digests are a publication-time invariant enforced by the build, artifact,
 deployment, and post-deploy smoke checks. The browser does not hash an already executing entry
@@ -87,8 +87,8 @@ manifests and all declared module bytes.
 The index normally consumes only the lightweight, public directory projection required for its
 grouped browse links. Its tested compatibility path loads and validates the full catalogue snapshot
 when an older shell has no directory digest or the directory modules are unavailable. The
-collection route consumes the full validated catalogue and migration snapshot. Neither route
-fetches mutable producer data at runtime.
+collection route consumes the full validated catalogue and migration snapshot; the index does not
+import the migration payload. Neither route fetches mutable producer data at runtime.
 
 ## State-conservation invariant
 
