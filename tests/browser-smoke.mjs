@@ -36,6 +36,16 @@ await new Promise((resolveServer) => server.listen(0, '127.0.0.1', resolveServer
 const address = server.address();
 if (!address || typeof address === 'string') throw new Error('BROWSER_SMOKE_SERVER_UNAVAILABLE');
 const baseUrl = `http://127.0.0.1:${address.port}`;
+const directorySnapshotSource = await readFile(join(root, 'assets/directory-snapshot.js'), 'utf8');
+const corruptedDirectorySnapshotSource = directorySnapshotSource.replace(
+  /"displayName":"[^"]+"/u,
+  '"displayName":"Corrupted directory label"',
+);
+assert.notEqual(
+  corruptedDirectorySnapshotSource,
+  directorySnapshotSource,
+  'directory fixture corruption must change a digest-bound value',
+);
 const expectedCsp =
   "default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'self'; media-src 'none'; manifest-src 'none'";
 
@@ -469,6 +479,34 @@ try {
         `${name}: rollback fallback uses the compatible full snapshot`,
       );
       await rollbackPage.close();
+      const staleValidatorPage = await browser.newPage();
+      const staleValidatorRequests = [];
+      staleValidatorPage.on('request', (request) => staleValidatorRequests.push(new URL(request.url()).pathname));
+      await staleValidatorPage.route('**/assets/directory.js', (route) =>
+        route.fulfill({
+          contentType: 'text/javascript; charset=utf-8',
+          body: 'export async function validateDirectorySnapshot() { return true; }',
+        }),
+      );
+      await staleValidatorPage.route('**/assets/directory-snapshot.js', (route) =>
+        route.fulfill({
+          contentType: 'text/javascript; charset=utf-8',
+          body: corruptedDirectorySnapshotSource,
+        }),
+      );
+      const staleValidatorHome = await staleValidatorPage.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
+      assert.equal(staleValidatorHome?.status(), 200, `${name}: stale validator home status`);
+      assert.equal(
+        await staleValidatorPage.locator('[data-view] h2').textContent(),
+        'Invalid checklist link',
+        `${name}: stable entry point rejects digest mismatch despite a permissive cached validator`,
+      );
+      assert.equal(
+        staleValidatorRequests.some((path) => path.endsWith('/snapshot.js')),
+        false,
+        `${name}: digest mismatch fails closed instead of accepting or falling back`,
+      );
+      await staleValidatorPage.close();
       await page.locator("a[href='collection/']").first().click();
       await page.waitForLoadState('networkidle');
       assert.match(page.url(), /\/collection\/$/u, `${name}: collection URL`);

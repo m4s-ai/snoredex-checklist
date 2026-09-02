@@ -110,6 +110,8 @@ test('stamps the exact app revision into served shells and module', async () => 
     assert.match(app, /import\(['"]\.\/snapshot\.js['"]\)/u);
     assert.match(app, /import\(['"]\.\/migrations\.js['"]\)/u);
     assert.match(app, /import\(['"]\.\/directory-snapshot\.js['"]\)/u);
+    assert.match(app, /crypto\.subtle\.digest\(['"]SHA-256['"]/u);
+    assert.match(app, /matchesPinnedDirectoryDigest\(snapshotModule\.default, expectedDigest\)/u);
     assert.match(theme, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     assert.match(collectionTheme, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     assert.deepEqual(font400, sourceFont400);

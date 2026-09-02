@@ -1700,6 +1700,31 @@ async function renderFullSnapshotHome(): Promise<void> {
   renderIndex(validated.snapshot, snapshotModule.provenance);
 }
 
+function canonicalizeDirectoryValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeDirectoryValue);
+  if (typeof value !== 'object' || value === null) return value;
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(
+    Object.keys(record)
+      .sort()
+      .map((key) => [key, canonicalizeDirectoryValue(record[key])]),
+  );
+}
+
+async function matchesPinnedDirectoryDigest(value: unknown, expectedDigest: string): Promise<boolean> {
+  if (!/^sha256:[0-9a-f]{64}$/u.test(expectedDigest)) return false;
+  try {
+    const bytes = new TextEncoder().encode(JSON.stringify(canonicalizeDirectoryValue(value)));
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    const actualDigest = `sha256:${Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, '0'),
+    ).join('')}`;
+    return actualDigest === expectedDigest;
+  } catch {
+    return false;
+  }
+}
+
 async function renderHome(): Promise<void> {
   const expectedDigest = document.querySelector<HTMLMetaElement>('meta[name="snoredex-directory-sha256"]')?.content;
   if (!expectedDigest) {
@@ -1718,6 +1743,7 @@ async function renderHome(): Promise<void> {
     return;
   }
   if (
+    !(await matchesPinnedDirectoryDigest(snapshotModule.default, expectedDigest)) ||
     !(await directoryModule.validateDirectorySnapshot(snapshotModule.default, expectedDigest)) ||
     !validateProvenance(snapshotModule.provenance, snapshotModule.default)
   ) {
