@@ -1,16 +1,18 @@
 # Verbatim licence texts
 
-`LICENSE.md` describes the licensing *structure*. The two licences it applies must also be
+`LICENSE.md` describes the licensing _structure_. The two licences it applies must also be
 present here **verbatim**, because a paraphrased or reconstructed licence text is not the licence
 and can change what is granted.
 
-These files are pinned to the publisher bytes (same hashes as the upstream `snoredex-data` repo;
-verified 2026-08-22):
+The project and catalogue licence files are pinned to the publisher bytes (same hashes as the
+upstream `snoredex-data` repo; verified 2026-08-22). The Nunito Sans licence is pinned to the
+distribution bytes from `@fontsource/nunito-sans` 5.3.0, verified 2026-09-01.
 
-| File | Canonical source | SHA-256 |
-|---|---|---|
+| File                              | Canonical source                                                                                                                             | SHA-256                                                            |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | `PolyForm-Noncommercial-1.0.0.md` | [PolyForm's versioned publisher repository](https://github.com/polyformproject/polyform-licenses/blob/1.0.0/PolyForm-Noncommercial-1.0.0.md) | `c0ea4a896d2c8c394b29f9427589996db826cd501c512279ff0ed3ef48fabbe5` |
-| `CC-BY-NC-SA-4.0.md` | <https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode.txt> | `e66c269d4819aaab34b49ef5220c4ddab6756f21bb5180761a4eb8561f2b7bbd` |
+| `CC-BY-NC-SA-4.0.md`              | <https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode.txt>                                                                            | `e66c269d4819aaab34b49ef5220c4ddab6756f21bb5180761a4eb8561f2b7bbd` |
+| `Nunito-Sans-OFL-1.1.txt`         | [`@fontsource/nunito-sans` 5.3.0](https://www.npmjs.com/package/@fontsource/nunito-sans/v/5.3.0)                                             | `6632e6c45fcc18cc03909a0a53d84e9775185e06203ff80d6367cf93959b91a8` |
 
 To refresh them, fetch the exact publisher files; never reconstruct legal text from memory:
 

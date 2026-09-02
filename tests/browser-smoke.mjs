@@ -12,6 +12,7 @@ const mimeTypes = new Map([
   ['.json', 'application/json; charset=utf-8'],
   ['.svg', 'image/svg+xml'],
   ['.txt', 'text/plain; charset=utf-8'],
+  ['.woff2', 'font/woff2'],
 ]);
 
 const server = createServer(async (request, response) => {
@@ -36,7 +37,7 @@ const address = server.address();
 if (!address || typeof address === 'string') throw new Error('BROWSER_SMOKE_SERVER_UNAVAILABLE');
 const baseUrl = `http://127.0.0.1:${address.port}`;
 const expectedCsp =
-  "default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'none'; media-src 'none'; manifest-src 'none'";
+  "default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'self'; media-src 'none'; manifest-src 'none'";
 
 async function assertSecurityBoundary(page, name) {
   assert.equal(await page.locator('meta[http-equiv="Content-Security-Policy"]').count(), 1, `${name}: one CSP`);
@@ -52,6 +53,21 @@ async function assertSecurityBoundary(page, name) {
     `${name}: theme bootstrap is blocking`,
   );
   assert.equal(await page.locator('head > script[src$="theme.js"]').count(), 1, `${name}: one theme bootstrap`);
+  const fontFaces = await page.evaluate(async () => {
+    await document.fonts.ready;
+    return [...document.fonts]
+      .filter((face) => face.family.replaceAll('"', '') === 'Nunito Sans')
+      .map((face) => ({ status: face.status, weight: face.weight }))
+      .sort((left, right) => left.weight.localeCompare(right.weight));
+  });
+  assert.deepEqual(
+    fontFaces,
+    [
+      { status: 'loaded', weight: '400' },
+      { status: 'loaded', weight: '500' },
+    ],
+    `${name}: self-hosted Nunito Sans faces`,
+  );
   const scriptSources = await page
     .locator('script')
     .evaluateAll((scripts) => scripts.map((script) => script.getAttribute('src')));
@@ -139,6 +155,13 @@ function controlsForOwnedInput(owned) {
   );
 }
 
+function controlsForItem(page, itemId) {
+  return page
+    .locator(`input[name="status-${itemId}"]`)
+    .first()
+    .locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " collection-controls ")]');
+}
+
 async function assertCollectionEditStateMachine(browser, name, synthetic) {
   const initial = {
     itemId: synthetic.itemId,
@@ -150,8 +173,19 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
   {
     const page = await collectionScenarioPage(browser, synthetic, [initial]);
     try {
+      const controls = controlsForItem(page, synthetic.itemId);
+      const quantity = controls.locator('.quantity-control');
+      assert.equal(await quantity.isVisible(), true, `${name}: quantities available for Have`);
+      assert.equal(await quantity.getAttribute('open'), null, `${name}: quantities initially collapsed`);
+      assert.match(await quantity.locator('summary').innerText(), /Owned 1 · Ordered 0/u, `${name}: quantity summary`);
+      await controls.getByRole('radio', { name: 'Need' }).check();
+      await quantity.waitFor({ state: 'hidden' });
+      await controls.getByRole('radio', { name: 'Ordered' }).check();
+      await quantity.waitFor({ state: 'visible' });
+      await quantity.locator('summary').filter({ hasText: 'Owned 0 · Ordered 1' }).waitFor();
+      await controls.locator('.state-feedback').filter({ hasText: 'Saved' }).waitFor();
+      await quantity.locator('summary').click();
       const owned = page.getByRole('spinbutton', { name: 'Owned' }).first();
-      const controls = controlsForOwnedInput(owned);
       const before = await page.evaluate((key) => localStorage.getItem(key), PRIVATE_STATE_KEY);
       await owned.fill('1123123123');
       await owned.blur();
@@ -163,6 +197,11 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
         before,
         `${name}: invalid quantity does not mutate storage`,
       );
+      await controls.getByRole('radio', { name: 'Need' }).check();
+      await quantity.waitFor({ state: 'visible' });
+      await controls.getByRole('radio', { name: 'Skip' }).check();
+      await quantity.waitFor({ state: 'visible' });
+      assert.equal(await owned.isVisible(), true, `${name}: invalid quantity input remains reachable`);
 
       await owned.fill('2');
       await owned.blur();
@@ -186,11 +225,11 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
     assert.ok(synthetic.secondItemId, `${name}: localization has two trackable items`);
     const page = await collectionScenarioPage(browser, synthetic, [initial]);
     try {
+      await page.locator('.quantity-control').first().locator('summary').click();
       const firstOwned = page.getByRole('spinbutton', { name: 'Owned' }).first();
       const firstOrdered = page.getByRole('spinbutton', { name: 'Ordered' }).first();
       const firstControls = controlsForOwnedInput(firstOwned);
-      const secondOwned = page.getByRole('spinbutton', { name: 'Owned' }).nth(1);
-      const secondControls = controlsForOwnedInput(secondOwned);
+      const secondControls = controlsForItem(page, synthetic.secondItemId);
       await firstOwned.fill('1123123123');
       await firstOwned.blur();
       await firstControls.getByText(INVALID_QUANTITY_MESSAGE, { exact: true }).waitFor();
@@ -243,6 +282,7 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
   {
     const page = await collectionScenarioPage(browser, synthetic, [initial]);
     try {
+      await page.locator('.quantity-control').first().locator('summary').click();
       const owned = page.getByRole('spinbutton', { name: 'Owned' }).first();
       const controls = controlsForOwnedInput(owned);
       await page.evaluate((key) => {
@@ -336,6 +376,7 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
 
       await page.getByRole('button', { name: 'Adopt recovered changes' }).click();
       await page.getByRole('heading', { name: 'Recovered unsaved collection changes' }).waitFor({ state: 'detached' });
+      await page.locator('.quantity-control').first().locator('summary').click();
       const owned = page.getByRole('spinbutton', { name: 'Owned' }).first();
       assert.equal(await owned.isEnabled(), true, `${name}: successful adoption re-enables collection edits`);
       assert.equal(
@@ -381,13 +422,37 @@ try {
       const home = await page.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
       assert.equal(home?.status(), 200, `${name}: home status`);
       assert.equal(await page.title(), 'Snoredex Checklist', `${name}: home title`);
-      assert.equal(await page.locator("a[href='collection/']").count(), 1, `${name}: collection link`);
+      assert.equal(await page.locator("a[href='collection/']").count(), 2, `${name}: collection links`);
+      await page.locator('.localization-group').first().waitFor();
+      assert.match(
+        await page.locator('.proof-list').innerText(),
+        /Per-item statuses, quantities, and notes stay local; selected filter criteria are shareable/u,
+        `${name}: public status criterion is distinguished from private records`,
+      );
+      assert.match(
+        await page.locator('.provenance-disclosure > summary').innerText(),
+        /^Catalogue (?:verified|fixture) · Data as of /u,
+        `${name}: human catalogue summary`,
+      );
       await assertSecurityBoundary(page, `${name}/home`);
-      await page.locator("a[href='collection/']").click();
+      await page.locator("a[href='collection/']").first().click();
       await page.waitForLoadState('networkidle');
       assert.match(page.url(), /\/collection\/$/u, `${name}: collection URL`);
       assert.equal(await page.title(), 'Collection · Snoredex Checklist', `${name}: collection title`);
       await assertSecurityBoundary(page, `${name}/collection`);
+      assert.equal(await page.locator('.query-primary input[name="q"]').isVisible(), true, `${name}: primary search`);
+      assert.equal(
+        await page.locator('.query-advanced').getAttribute('open'),
+        null,
+        `${name}: advanced filters closed`,
+      );
+      assert.equal(await page.locator('[data-view] > .empty-state').count(), 1, `${name}: neutral initial state`);
+      assert.equal(await page.locator('.state-retry:visible').count(), 0, `${name}: no idle retry controls`);
+      assert.match(
+        await page.locator('.provenance-disclosure > summary').innerText(),
+        /^Catalogue (?:verified|fixture) · Data as of /u,
+        `${name}: collection catalogue summary`,
+      );
       assert.equal(
         await page.getByText('Backup and recovery', { exact: true }).count(),
         1,

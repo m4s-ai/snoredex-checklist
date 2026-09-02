@@ -7,7 +7,7 @@
     <meta name="snoredex-app-revision" content="__SNOREDEX_APP_REVISION__" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'none'; media-src 'none'; manifest-src 'none'"
+      content="default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'self'; media-src 'none'; manifest-src 'none'"
     />
     <title>Snoredex Checklist</title>
     <link rel="stylesheet" href="styles.css" />
@@ -30,22 +30,34 @@
         </p>
         <p><a class="button" href="collection/">Open collection</a></p>
       </section>
-      <section class="surface split" data-catalogue-dependent aria-labelledby="about-title">
-        <div>
-          <h2 id="about-title">Made for slow, careful collecting</h2>
-          <p>
-            Snoredex Checklist keeps private progress local. The catalogue is a pinned, validated snapshot from the
-            <a href="https://m4s-ai.github.io/snoredex-data/" rel="noopener noreferrer"
-              >Snoredex Data website <span aria-hidden="true">↗</span><span class="sr-only">External site</span></a
-            >.
-          </p>
+      <section class="surface persuasion" data-catalogue-dependent aria-labelledby="about-title">
+        <h2 id="about-title">Made for slow, careful collecting</h2>
+        <p class="persuasion-copy">
+          Work from an evidence-bound catalogue, keep every collection decision in this browser, and carry your progress
+          with an explicit backup when you choose.
+        </p>
+        <ul class="proof-list">
+          <li>
+            <strong>Catalogue truth stays sourced.</strong> Research remains visible without becoming a missing card.
+          </li>
+          <li>
+            <strong>Progress stays private.</strong> Per-item statuses, quantities, and notes stay local; selected
+            filter criteria are shareable.
+          </li>
+          <li><strong>Your state stays portable.</strong> Export and recovery remain under your control.</li>
+        </ul>
+      </section>
+      <section class="surface directory" data-catalogue-dependent aria-labelledby="directory-title">
+        <div class="directory-heading">
+          <div>
+            <h2 id="directory-title">Browse by locality and language</h2>
+            <p>Choose a catalogue region below, or search across every locality in the collection.</p>
+          </div>
+          <a class="button" href="collection/">Search full catalogue</a>
         </div>
-        <div>
-          <h2>Browse by localization</h2>
-          <nav aria-label="Localizations">
-            <div data-localizations><p>Loading localizations…</p></div>
-          </nav>
-        </div>
+        <nav aria-label="Localizations">
+          <div data-localizations><p>Loading localizations…</p></div>
+        </nav>
       </section>
       <section class="surface" data-catalogue-dependent aria-labelledby="trust-title">
         <h2 id="trust-title">Public data, private collection</h2>

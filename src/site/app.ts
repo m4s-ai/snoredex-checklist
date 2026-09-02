@@ -198,6 +198,9 @@ function enableThemeControl(): void {
 }
 
 function renderProvenance(container: HTMLElement, catalogue: CatalogueSnapshot): void {
+  const details = text('details', undefined, 'provenance-disclosure') as HTMLDetailsElement;
+  const dataAsOf = presentText(catalogue.meta.dataAsOf) ?? 'date unavailable';
+  const summary = provenance.mode === 'pinned-snapshot' ? 'Catalogue verified' : 'Catalogue fixture';
   const dl = text('dl', undefined, 'provenance');
   const fields: [string, unknown][] = [
     ['Data as of', catalogue.meta.dataAsOf ?? 'Unknown'],
@@ -213,7 +216,8 @@ function renderProvenance(container: HTMLElement, catalogue: CatalogueSnapshot):
   for (const [label, value] of fields) {
     dl.append(text('dt', label), text('dd', value));
   }
-  container.replaceChildren(dl);
+  details.append(text('summary', `${summary} · Data as of ${dataAsOf}`), dl);
+  container.replaceChildren(details);
 }
 
 function sortedLocalizations(catalogue: CatalogueSnapshot): SnapshotLocalization[] {
@@ -272,17 +276,39 @@ function renderLocalizationLinks(
   catalogue: CatalogueSnapshot,
   hrefPrefix = 'collection/',
 ): void {
-  const list = text('ul', undefined, 'link-list');
+  const groups = new Map<string, { label: string; localizations: SnapshotLocalization[] }>();
   for (const localization of sortedLocalizations(catalogue)) {
-    const name = localizationLabel(localization);
-    const suffix = localization.locality ? ` (${localization.locality})` : '';
-    const li = text('li');
-    li.append(
-      link(`${hrefPrefix}${serializeQuery({ localization: localization.localizationId })}`, `${name}${suffix}`),
-    );
-    list.append(li);
+    const locality = presentText(localization.locality);
+    const key = locality ?? localization.localizationId;
+    const group = groups.get(key) ?? { label: locality ?? 'Unspecified locality', localizations: [] };
+    group.localizations.push(localization);
+    groups.set(key, group);
   }
-  container.replaceChildren(list);
+  const labelCounts = new Map<string, number>();
+  for (const localization of catalogue.localizations) {
+    const label = localizationLabel(localization);
+    const key = `${localization.locality ?? ''}\u0000${label}`;
+    labelCounts.set(key, (labelCounts.get(key) ?? 0) + 1);
+  }
+  const directory = text('div', undefined, 'localization-groups');
+  for (const group of groups.values()) {
+    const section = text('section', undefined, 'localization-group');
+    section.append(text('h3', group.label));
+    const list = text('ul', undefined, 'link-list');
+    for (const localization of group.localizations) {
+      const li = text('li');
+      li.append(
+        link(
+          `${hrefPrefix}${serializeQuery({ localization: localization.localizationId })}`,
+          localizationDisplayLabel(localization, labelCounts),
+        ),
+      );
+      list.append(li);
+    }
+    section.append(list);
+    directory.append(section);
+  }
+  container.replaceChildren(directory);
 }
 
 function renderIndex(catalogue: CatalogueSnapshot): void {
@@ -422,12 +448,12 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
     if (editionSelect instanceof HTMLSelectElement) editionSelect.disabled = !localizationSelect?.value;
   });
   const primary = text('div', undefined, 'query-primary');
-  primary.append(localization, edition, submit);
+  primary.append(query, localization, edition, submit);
   const advanced = text('details', undefined, 'query-advanced') as HTMLDetailsElement;
-  advanced.open = Boolean(criteria.q || criteria.status || criteria.kind || criteria.research);
+  advanced.open = Boolean(criteria.status || criteria.kind || criteria.research);
   advanced.append(text('summary', 'More filters'));
   const advancedGrid = text('div', undefined, 'query-advanced-grid');
-  advancedGrid.append(query, status, kind, research);
+  advancedGrid.append(status, kind, research);
   advanced.append(advancedGrid);
   form.append(primary, advanced);
   container.replaceChildren(form);
@@ -736,8 +762,9 @@ function renderCollectionControls(
     fieldset.append(labelElement);
   }
 
-  const quantity = text('div', undefined, 'quantity-controls');
-  const quantityHeading = text('span', 'Quantities', 'control-heading');
+  const quantity = text('details', undefined, 'quantity-control') as HTMLDetailsElement;
+  const quantitySummary = text('summary');
+  const quantityFields = text('div', undefined, 'quantity-controls');
   const ownedLabel = text('label', 'Owned');
   const owned = document.createElement('input');
   owned.type = 'number';
@@ -765,7 +792,8 @@ function renderCollectionControls(
   ordered.addEventListener('input', updateQuantityDraft);
   owned.addEventListener('change', () => void controller.commitQuantities(item.itemId));
   ordered.addEventListener('change', () => void controller.commitQuantities(item.itemId));
-  quantity.append(quantityHeading, ownedLabel, orderedLabel);
+  quantityFields.append(ownedLabel, orderedLabel);
+  quantity.append(quantitySummary, quantityFields);
 
   const note = text('div', undefined, 'note-control');
   const noteButton = text('button', 'Add note') as HTMLButtonElement;
@@ -801,6 +829,9 @@ function renderCollectionControls(
     for (const [value, input] of statusInputs) input.checked = value === snapshot.status;
     if (owned.value !== snapshot.quantityOwned) owned.value = snapshot.quantityOwned;
     if (ordered.value !== snapshot.quantityOrdered) ordered.value = snapshot.quantityOrdered;
+    quantity.hidden =
+      (snapshot.status === 'need' || snapshot.status === 'skip') && snapshot.invalidQuantityFields.length === 0;
+    quantitySummary.textContent = `Quantities · Owned ${snapshot.quantityOwned} · Ordered ${snapshot.quantityOrdered}`;
     if (textarea.value !== (snapshot.note ?? '')) textarea.value = snapshot.note ?? '';
     if (snapshot.note !== undefined) noteOpened = true;
     textarea.hidden = !noteOpened;
@@ -1352,12 +1383,12 @@ function renderResults(
   }
   const hasFilter = Boolean(criteria.edition || criteria.q || criteria.kind || criteria.research || criteria.status);
   if (!criteria.localization && !hasFilter) {
-    const summary = text('div', undefined, 'state-panel');
+    const summary = text('section', undefined, 'empty-state');
     summary.append(
-      text('h2', 'Choose a localization or search'),
+      text('h2', 'Search or choose a localization'),
       text(
         'p',
-        'Browse one localization or search the public catalogue across set groups. The owning localization and set remain labelled on every result.',
+        'Search the public catalogue across set groups, or browse one localization. Every result keeps its owning localization and set visible.',
       ),
     );
     container.replaceChildren(...(recoveryPanel === undefined ? [summary] : [recoveryPanel, summary]));
@@ -1492,7 +1523,7 @@ function renderResults(
   else if (inactiveItems.length === 0)
     content.push(text('p', 'No public catalogue items match these criteria.', 'empty-state'));
   if (inactiveItems.length > 0) {
-    const inactive = text('section', undefined, 'state-panel');
+    const inactive = text('section', undefined, 'notice-panel');
     inactive.append(text('h2', model.inactiveHeading), text('p', model.inactiveSummary));
     const inactiveList = text('ul', undefined, 'item-list');
     const inactiveSetIdentityCounts = new Map<string, Set<string>>();

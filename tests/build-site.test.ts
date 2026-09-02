@@ -68,7 +68,20 @@ test('stamps the exact app revision into served shells and module', async () => 
       encoding: 'utf8',
     });
     assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
-    const [home, collection, guide, stylesheet, app, theme, collectionTheme, moduleManifestText] = await Promise.all([
+    const [
+      home,
+      collection,
+      guide,
+      stylesheet,
+      app,
+      theme,
+      collectionTheme,
+      moduleManifestText,
+      font400,
+      font500,
+      sourceFont400,
+      sourceFont500,
+    ] = await Promise.all([
       readFile(resolve(output, 'index.html'), 'utf8'),
       readFile(resolve(output, 'collection/index.html'), 'utf8'),
       readFile(resolve(output, 'llms.txt'), 'utf8'),
@@ -77,6 +90,10 @@ test('stamps the exact app revision into served shells and module', async () => 
       readFile(resolve(output, 'theme.js'), 'utf8'),
       readFile(resolve(output, 'collection/theme.js'), 'utf8'),
       readFile(resolve(output, 'assets/module-manifest.json'), 'utf8'),
+      readFile(resolve(output, 'assets/fonts/nunito-sans-latin-400-normal.woff2')),
+      readFile(resolve(output, 'assets/fonts/nunito-sans-latin-500-normal.woff2')),
+      readFile(resolve(root, 'site-src/assets/fonts/nunito-sans-latin-400-normal.woff2')),
+      readFile(resolve(root, 'site-src/assets/fonts/nunito-sans-latin-500-normal.woff2')),
     ]);
     assert.match(home, new RegExp(`name="snoredex-app-revision" content="${revision}"`, 'u'));
     assert.match(collection, new RegExp(`name="snoredex-app-revision" content="${revision}"`, 'u'));
@@ -85,6 +102,8 @@ test('stamps the exact app revision into served shells and module', async () => 
     assert.match(app, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     assert.match(theme, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     assert.match(collectionTheme, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
+    assert.deepEqual(font400, sourceFont400);
+    assert.deepEqual(font500, sourceFont500);
     const moduleManifest = JSON.parse(moduleManifestText);
     assert.equal(moduleManifest.schema, 'snoredex-site-module-manifest');
     assert.equal(moduleManifest.appRevision, revision);
