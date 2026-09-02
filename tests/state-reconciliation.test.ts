@@ -159,6 +159,32 @@ test('counts catalogue targets independently of private holdings', () => {
   assert.equal(result.value.report.accounting.newResearch, 1);
 });
 
+test('allows an unowned catalogue transition to a research target', () => {
+  const result = reconcilePrivateState(
+    state(oldFingerprint, [{ itemId: oldA, status: 'have', quantityOwned: 1, quantityOrdered: 0 }]),
+    targetFingerprint,
+    {
+      migrations: [
+        migration(oldFingerprint, targetFingerprint, [
+          transition(oldA, [targetA], 'rekey-1:1', 'preserve', 'one-to-one-preserve'),
+          transition(oldB, [targetB], 'rekey-1:1', 'preserve', 'one-to-one-preserve'),
+        ]),
+      ],
+      knownSourceItemIds: new Set([oldA, oldB]),
+      knownTargetItemIds: new Set([targetA]),
+      targetItemClasses: new Map([
+        [targetA, 'current-known'],
+        [targetB, 'research'],
+      ]),
+    },
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.value.state.items, [
+    { itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 },
+  ]);
+});
+
 test('blocks a migration that omits a source-catalogue item', () => {
   const result = reconcilePrivateState(state(), targetFingerprint, {
     migrations: [

@@ -185,7 +185,7 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
       await quantity.locator('summary').filter({ hasText: 'Owned 0 · Ordered 1' }).waitFor();
       await controls.locator('.state-feedback').filter({ hasText: 'Saved' }).waitFor();
       await quantity.locator('summary').click();
-      const owned = page.getByRole('spinbutton', { name: 'Owned' }).first();
+      const owned = controls.getByRole('spinbutton', { name: 'Owned' });
       const before = await page.evaluate((key) => localStorage.getItem(key), PRIVATE_STATE_KEY);
       await owned.fill('1123123123');
       await owned.blur();
@@ -225,10 +225,10 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
     assert.ok(synthetic.secondItemId, `${name}: localization has two trackable items`);
     const page = await collectionScenarioPage(browser, synthetic, [initial]);
     try {
-      await page.locator('.quantity-control').first().locator('summary').click();
-      const firstOwned = page.getByRole('spinbutton', { name: 'Owned' }).first();
-      const firstOrdered = page.getByRole('spinbutton', { name: 'Ordered' }).first();
-      const firstControls = controlsForOwnedInput(firstOwned);
+      const firstControls = controlsForItem(page, synthetic.itemId);
+      await firstControls.locator('.quantity-control summary').click();
+      const firstOwned = firstControls.getByRole('spinbutton', { name: 'Owned' });
+      const firstOrdered = firstControls.getByRole('spinbutton', { name: 'Ordered' });
       const secondControls = controlsForItem(page, synthetic.secondItemId);
       await firstOwned.fill('1123123123');
       await firstOwned.blur();
@@ -282,9 +282,9 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
   {
     const page = await collectionScenarioPage(browser, synthetic, [initial]);
     try {
-      await page.locator('.quantity-control').first().locator('summary').click();
-      const owned = page.getByRole('spinbutton', { name: 'Owned' }).first();
-      const controls = controlsForOwnedInput(owned);
+      const controls = controlsForItem(page, synthetic.itemId);
+      await controls.locator('.quantity-control summary').click();
+      const owned = controls.getByRole('spinbutton', { name: 'Owned' });
       await page.evaluate((key) => {
         const setItem = Storage.prototype.setItem;
         globalThis.__snoredexFailNextStateWrite = true;
@@ -322,10 +322,8 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
   {
     const page = await collectionScenarioPage(browser, synthetic, [{ ...initial, note: 'old note' }]);
     try {
-      const note = page.getByRole('textbox', { name: /Private note for/u }).first();
-      const controls = note.locator(
-        'xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " collection-controls ")]',
-      );
+      const controls = controlsForItem(page, synthetic.itemId);
+      const note = controls.getByRole('textbox', { name: /Private note for/u });
       await note.fill('');
       await note.pressSequentially('  first');
       await note.press('Enter');
@@ -350,8 +348,9 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
   {
     const page = await collectionScenarioPage(browser, synthetic, [initial]);
     try {
-      await page.getByRole('button', { name: 'Add note' }).first().click();
-      const note = page.getByRole('textbox', { name: /Private note for/u }).first();
+      const initialControls = controlsForItem(page, synthetic.itemId);
+      await initialControls.getByRole('button', { name: 'Add note' }).click();
+      const note = initialControls.getByRole('textbox', { name: /Private note for/u });
       await note.fill('recovered browser draft');
       await page.waitForFunction(() =>
         Object.keys(localStorage).some(
@@ -376,8 +375,9 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
 
       await page.getByRole('button', { name: 'Adopt recovered changes' }).click();
       await page.getByRole('heading', { name: 'Recovered unsaved collection changes' }).waitFor({ state: 'detached' });
-      await page.locator('.quantity-control').first().locator('summary').click();
-      const owned = page.getByRole('spinbutton', { name: 'Owned' }).first();
+      const controls = controlsForItem(page, synthetic.itemId);
+      await controls.locator('.quantity-control summary').click();
+      const owned = controls.getByRole('spinbutton', { name: 'Owned' });
       assert.equal(await owned.isEnabled(), true, `${name}: successful adoption re-enables collection edits`);
       assert.equal(
         await page.evaluate(
