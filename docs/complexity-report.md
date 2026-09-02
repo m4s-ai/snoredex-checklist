@@ -3,9 +3,9 @@
 > Advisory AST-derived estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (33 production code files).
-Lines: 11,897.
+Lines: 11,907.
 Function-like nodes: 749.
-McCabe estimate: sum 3,432; mean 4.6; median 2; P90 10; P95 19.
+McCabe estimate: sum 3,436; mean 4.6; median 2; P90 10; P95 19.
 Hotspots: 70 functions exceed 10; 35 exceed 20.
 
 The report parses each source file with the bundled TypeScript compiler and counts runtime function-like declarations plus structural decision nodes: if/for/while/do/catch/case statements, conditional expressions and logical (&&/||/??) binary expressions. Type-only function signatures and nested function bodies are excluded from their enclosing function. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
@@ -15,8 +15,8 @@ The report parses each source file with the bundled TypeScript compiler and coun
 | `src/site/catalogue.ts:223`         | `validateSnapshot`               |         90 |
 | `src/state/storage.ts:705`          | `persistPendingNoteDraft`        |         75 |
 | `src/site/app.ts:1347`              | `renderResults`                  |         58 |
+| `src/state/reconciliation.ts:515`   | `reconcilePrivateState`          |         58 |
 | `src/catalogue/validate.ts:235`     | `validateSemantics`              |         56 |
-| `src/state/reconciliation.ts:513`   | `reconcilePrivateState`          |         55 |
 | `src/catalogue/validate.ts:416`     | `validateCatalogueFixture`       |         54 |
 | `scripts/catalogue-release.mjs:127` | `createCatalogueReleaseManifest` |         50 |
 | `scripts/check-artifact.mjs:535`    | `extractHead`                    |         45 |
@@ -29,6 +29,6 @@ The report parses each source file with the bundled TypeScript compiler and coun
 | `src/catalogue/sync.ts:763`         | `syncCataloguePair`              |         29 |
 | `src/site/catalogue.ts:93`          | `validateProvenance`             |         29 |
 | `src/site/query.ts:57`              | `criteriaFromParameters`         |         28 |
-| `src/state/reconciliation.ts:167`   | `migrationIsStructurallyValid`   |         28 |
+| `src/state/reconciliation.ts:168`   | `migrationIsStructurallyValid`   |         28 |
 | `src/state/domain.ts:148`           | `normalizeRecordForImport`       |         27 |
 | `scripts/check-artifact.mjs:87`     | `readAttribute`                  |         26 |
