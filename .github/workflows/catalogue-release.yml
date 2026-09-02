@@ -249,13 +249,9 @@ jobs:
               published="$RUNNER_TEMP/published-catalogue-release"
               mkdir -p "$published"
               gh release download "$tag" --pattern catalogue-release.json --dir "$published"
-              node --input-type=module <<'NODE'
-              import { readFile } from 'node:fs/promises';
-              import { assertCatalogueReleaseEvidenceMatches } from './scripts/catalogue-release.mjs';
-              const published = JSON.parse(await readFile(`${process.env.RUNNER_TEMP}/published-catalogue-release/catalogue-release.json`, 'utf8'));
-              const current = JSON.parse(await readFile(`${process.env.RUNNER_TEMP}/catalogue-release/catalogue-release.json`, 'utf8'));
-              assertCatalogueReleaseEvidenceMatches(published, current);
-              NODE
+              node scripts/catalogue-release.mjs \
+                --assert-published "$published/catalogue-release.json" \
+                --current-release "$RUNNER_TEMP/catalogue-release/catalogue-release.json"
               echo "::notice::Reusing immutable catalogue evidence ${tag}."
               exit 0
             fi
