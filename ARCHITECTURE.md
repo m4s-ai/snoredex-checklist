@@ -84,9 +84,11 @@ active and rollback asset sets together. Post-deploy smoke derives the expected 
 built provenance even when the workflow later checks out recovery tooling, then verifies the live
 manifests and all declared module bytes.
 
-The index consumes only the lightweight, public directory projection required for its grouped
-browse links. The collection route consumes the full validated catalogue and migration snapshot.
-Neither route fetches mutable producer data at runtime.
+The index normally consumes only the lightweight, public directory projection required for its
+grouped browse links. Its tested compatibility path loads and validates the full catalogue snapshot
+when an older shell has no directory digest or the directory modules are unavailable. The
+collection route consumes the full validated catalogue and migration snapshot. Neither route
+fetches mutable producer data at runtime.
 
 ## State-conservation invariant
 
