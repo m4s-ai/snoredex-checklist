@@ -192,6 +192,21 @@ try {
     `export const provenance = Object.freeze(${JSON.stringify(provenance)});\nexport default Object.freeze(${JSON.stringify(catalogue)});\n`,
     'utf8',
   );
+  const directorySnapshot = {
+    meta: {
+      schema: catalogue.meta.schema,
+      schemaVersion: catalogue.meta.schemaVersion,
+      catalogueFingerprint: catalogue.meta.catalogueFingerprint,
+      sourceRepository: catalogue.meta.sourceRepository,
+      dataAsOf: catalogue.meta.dataAsOf,
+    },
+    localizations: catalogue.localizations,
+  };
+  await writeFile(
+    resolve(assets, 'directory-snapshot.js'),
+    `export const provenance = Object.freeze(${JSON.stringify(provenance)});\nexport default Object.freeze(${JSON.stringify(directorySnapshot)});\n`,
+    'utf8',
+  );
   const catalogueTransitions = migrationManifest.catalogueTransitions;
   const knownSourceIdsByFingerprint = buildValidatedSourceMembershipIndex(migrationManifest, catalogue);
   const serializedKnownSourceIdsByFingerprint = [...knownSourceIdsByFingerprint.entries()].map(
@@ -242,8 +257,16 @@ try {
   );
   const catalogueModule = await import(pathToFileURL(resolve(assets, 'catalogue.js')));
   const snapshotModule = await import(pathToFileURL(resolve(assets, 'snapshot.js')));
+  const directoryModule = await import(pathToFileURL(resolve(assets, 'directory.js')));
+  const directorySnapshotModule = await import(pathToFileURL(resolve(assets, 'directory-snapshot.js')));
   if (!(await catalogueModule.validateSnapshot(snapshotModule.default)).ok)
     throw new Error('site snapshot failed browser boundary validation');
+  if (
+    !directoryModule.validateDirectorySnapshot(directorySnapshotModule.default) ||
+    !catalogueModule.validateProvenance(directorySnapshotModule.provenance, directorySnapshotModule.default)
+  ) {
+    throw new Error('site directory snapshot failed browser boundary validation');
+  }
 
   await copyRevisionShell(resolve(root, 'site-src/index.html'), resolve(staging, 'index.html'));
   await copyRevisionScript(resolve(root, 'site-src/theme.js'), resolve(staging, 'theme.js'));

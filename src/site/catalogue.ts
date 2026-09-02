@@ -90,7 +90,7 @@ function isArtifactUrl(value: unknown): value is string {
 }
 
 /** Validate the generated wrapper before any of its presentation fields are used. */
-export function validateProvenance(value: unknown, catalogue: CatalogueSnapshot): boolean {
+export function validateProvenance(value: unknown, catalogue: Pick<CatalogueSnapshot, 'meta'>): boolean {
   if (
     !isRecord(value) ||
     value.contractVersion !== catalogue.meta.schemaVersion ||

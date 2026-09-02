@@ -4,6 +4,7 @@ import test from 'node:test';
 import fixture from './fixtures/collector-catalogue.fixture.json' with { type: 'json' };
 import { semanticFingerprint } from '../src/catalogue/validate.ts';
 import { localizationLabel, validateProvenance, validateSnapshot } from '../src/site/catalogue.ts';
+import { validateDirectorySnapshot } from '../src/site/directory.ts';
 import { matchesResearch } from '../src/site/filter.ts';
 import { buildBrowseHierarchy, buildProgressViewModel, buildResultViewModel } from '../src/site/results.ts';
 
@@ -14,6 +15,31 @@ function reseal(value: any): any {
 
 test('accepts the reviewed browser snapshot shape', async () => {
   assert.equal((await validateSnapshot(fixture.catalogue)).ok, true);
+});
+
+test('validates the bounded homepage directory projection', () => {
+  const directory = {
+    meta: {
+      schema: fixture.catalogue.meta.schema,
+      schemaVersion: fixture.catalogue.meta.schemaVersion,
+      catalogueFingerprint: fixture.catalogue.meta.catalogueFingerprint,
+      sourceRepository: fixture.catalogue.meta.sourceRepository,
+      dataAsOf: fixture.catalogue.meta.dataAsOf,
+    },
+    localizations: fixture.catalogue.localizations,
+  };
+  assert.equal(validateDirectorySnapshot(directory), true);
+  assert.equal(
+    validateDirectorySnapshot({
+      ...directory,
+      localizations: [...directory.localizations, directory.localizations[0]],
+    }),
+    false,
+  );
+  assert.equal(
+    validateDirectorySnapshot({ ...directory, meta: { ...directory.meta, catalogueFingerprint: 'invalid' } }),
+    false,
+  );
 });
 
 test('accepts schema-valid empty sort keys', async () => {

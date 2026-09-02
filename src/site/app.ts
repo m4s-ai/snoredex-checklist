@@ -4,7 +4,6 @@ import {
   validateSnapshot,
   type CatalogueSnapshot,
   type SnapshotItem,
-  type SnapshotLocalization,
 } from './catalogue.js';
 import { imageAssetUrl, resolveImageAsset } from './assets.js';
 import {
@@ -27,6 +26,8 @@ import { parseQuery, serializeQuery, type QueryCriteria } from './query.js';
 import { buildBrowseHierarchy, buildProgressViewModel, buildResultViewModel } from './results.js';
 import { knownSourceItemIdsByFingerprint, migrationManifest } from './migrations.js';
 import snapshot, { provenance } from './snapshot.js';
+import { localizationDisplayLabel, renderProvenance, sortedLocalizations } from './directory-view.js';
+import { enableThemeControl } from './theme-control.js';
 
 interface BackupExport {
   readonly filename: string;
@@ -115,6 +116,11 @@ function text(tag: string, value?: unknown, className?: string): HTMLElement {
   return element;
 }
 
+function setViewStatus(message: string): void {
+  const status = document.querySelector<HTMLElement>('[data-view-status]');
+  if (status) status.textContent = message;
+}
+
 function link(href: string, label: string, className?: string): HTMLAnchorElement {
   const element = text('a', label, className) as HTMLAnchorElement;
   element.href = href;
@@ -176,64 +182,6 @@ function itemRowDisambiguators(items: readonly SnapshotItem[], includeEdition = 
   return labels;
 }
 
-function enableThemeControl(): void {
-  const button = document.querySelector<HTMLButtonElement>('[data-theme-toggle]');
-  if (!button) return;
-  const update = (): void => {
-    const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
-    button.textContent = 'Dark theme';
-    button.setAttribute('aria-pressed', String(theme === 'dark'));
-  };
-  button.addEventListener('click', () => {
-    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-    document.documentElement.dataset.theme = next;
-    try {
-      localStorage.setItem('snoredex-theme', next);
-    } catch {
-      /* private state stays local */
-    }
-    update();
-  });
-  update();
-}
-
-function renderProvenance(container: HTMLElement, catalogue: CatalogueSnapshot): void {
-  const details = text('details', undefined, 'provenance-disclosure') as HTMLDetailsElement;
-  const dataAsOf = presentText(catalogue.meta.dataAsOf) ?? 'date unavailable';
-  const summary = provenance.mode === 'pinned-snapshot' ? 'Catalogue verified' : 'Catalogue fixture';
-  const dl = text('dl', undefined, 'provenance');
-  const fields: [string, unknown][] = [
-    ['Data as of', catalogue.meta.dataAsOf ?? 'Unknown'],
-    ['Source', catalogue.meta.sourceRepository ?? 'Unknown'],
-    ['Contract', catalogue.meta.schemaVersion],
-    ['Catalogue fingerprint', catalogue.meta.catalogueFingerprint],
-    ['Build input', provenance.mode],
-    ['Producer revision', provenance.sourceCommit],
-  ];
-  if (provenance.mode === 'pinned-snapshot') {
-    fields.push(['Catalogue byte digest', provenance.catalogueByteSha256]);
-  }
-  for (const [label, value] of fields) {
-    dl.append(text('dt', label), text('dd', value));
-  }
-  details.append(text('summary', `${summary} · Data as of ${dataAsOf}`), dl);
-  container.replaceChildren(details);
-}
-
-function sortedLocalizations(catalogue: CatalogueSnapshot): SnapshotLocalization[] {
-  return [...catalogue.localizations].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
-}
-
-function localizationDisplayLabel(
-  localization: SnapshotLocalization,
-  labelCounts: ReadonlyMap<string, number>,
-): string {
-  const label = localizationLabel(localization);
-  const key = `${localization.locality ?? ''}\u0000${label}`;
-  if ((labelCounts.get(key) ?? 0) <= 1) return label;
-  return `${label} (${presentText(localization.languageTag) ?? 'variant'})`;
-}
-
 function editionEntriesForLocalization(catalogue: CatalogueSnapshot, localizationId: string) {
   const sets = new Map(catalogue.localSets.map((set) => [set.localSetId, set] as const));
   const editions = catalogue.setEditions
@@ -269,51 +217,6 @@ function editionEntriesForLocalization(catalogue: CatalogueSnapshot, localizatio
       label: (totals.get(base) ?? 0) > 1 ? `${base} · edition ${occurrence}` : base,
     };
   });
-}
-
-function renderLocalizationLinks(
-  container: HTMLElement,
-  catalogue: CatalogueSnapshot,
-  hrefPrefix = 'collection/',
-): void {
-  const groups = new Map<string, { label: string; localizations: SnapshotLocalization[] }>();
-  for (const localization of sortedLocalizations(catalogue)) {
-    const locality = presentText(localization.locality);
-    const key = locality ?? localization.localizationId;
-    const group = groups.get(key) ?? { label: locality ?? 'Unspecified locality', localizations: [] };
-    group.localizations.push(localization);
-    groups.set(key, group);
-  }
-  const labelCounts = new Map<string, number>();
-  for (const localization of catalogue.localizations) {
-    const label = localizationLabel(localization);
-    const key = `${localization.locality ?? ''}\u0000${label}`;
-    labelCounts.set(key, (labelCounts.get(key) ?? 0) + 1);
-  }
-  const directory = text('div', undefined, 'localization-groups');
-  for (const group of groups.values()) {
-    const section = text('section', undefined, 'localization-group');
-    section.append(text('h3', group.label));
-    const list = text('ul', undefined, 'link-list');
-    for (const localization of group.localizations) {
-      const li = text('li');
-      li.append(
-        link(
-          `${hrefPrefix}${serializeQuery({ localization: localization.localizationId })}`,
-          localizationDisplayLabel(localization, labelCounts),
-        ),
-      );
-      list.append(li);
-    }
-    section.append(list);
-    directory.append(section);
-  }
-  container.replaceChildren(directory);
-}
-
-function renderIndex(catalogue: CatalogueSnapshot): void {
-  renderProvenance($('[data-provenance]'), catalogue);
-  renderLocalizationLinks($('[data-localizations]'), catalogue);
 }
 
 function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalogue: CatalogueSnapshot): void {
@@ -484,6 +387,7 @@ function renderInvalid(container: HTMLElement, recoverableLocalization?: string,
   actions.append(link(homeHref, 'Home'));
   section.append(actions);
   container.replaceChildren(section);
+  setViewStatus(failClosed ? 'Catalogue unavailable.' : 'Invalid checklist link.');
 }
 
 function renderProgress(
@@ -729,6 +633,7 @@ const STATUS_OPTIONS = [
   ['skip', 'Skip'],
 ] as const;
 const MAX_NOTE_CODE_POINTS = 2_000;
+const RESULT_CHUNK_SIZE = 24;
 
 function renderCollectionControls(
   item: SnapshotItem,
@@ -1350,6 +1255,7 @@ function renderResults(
   catalogue: CatalogueSnapshot,
   state: PrivateStateRead,
   stateController?: CollectionStateController,
+  visibleItemLimit = RESULT_CHUNK_SIZE,
 ): void {
   resultCleanups.get(container)?.forEach((cleanup) => cleanup());
   const cleanups = new Set<Cleanup>();
@@ -1363,7 +1269,7 @@ function renderResults(
       : renderRecoveryPanel(
           stateController,
           (announcement) => {
-            renderResults(container, criteria, catalogue, stateController.state, stateController);
+            renderResults(container, criteria, catalogue, stateController.state, stateController, visibleItemLimit);
             announceRecoveryResult(container, announcement);
           },
           registerCleanup,
@@ -1379,6 +1285,7 @@ function renderResults(
       ),
     );
     container.replaceChildren(...(recoveryPanel === undefined ? [deferred] : [recoveryPanel, deferred]));
+    setViewStatus('Status filter unavailable.');
     return;
   }
   const hasFilter = Boolean(criteria.edition || criteria.q || criteria.kind || criteria.research || criteria.status);
@@ -1392,6 +1299,7 @@ function renderResults(
       ),
     );
     container.replaceChildren(...(recoveryPanel === undefined ? [summary] : [recoveryPanel, summary]));
+    setViewStatus('Collection ready. Search or choose a localization.');
     return;
   }
   const progress = renderProgress(catalogue, criteria.localization, criteria.edition, state);
@@ -1412,12 +1320,15 @@ function renderResults(
       if (nextStatusKey === previousStatusKey) return;
       previousStatusKey = nextStatusKey;
       stopStatusListener?.();
-      renderResults(container, criteria, catalogue, stateController.state, stateController);
+      renderResults(container, criteria, catalogue, stateController.state, stateController, visibleItemLimit);
     });
     registerCleanup(() => stopStatusListener?.());
   }
   const model = buildResultViewModel(criteria, catalogue, matchesResearch, state.readable ? state.statuses : undefined);
   const { activeItems: items, inactiveItems } = model;
+  const matchingItemCount = items.length + inactiveItems.length;
+  let remainingItemSlots = Math.min(Math.max(visibleItemLimit, RESULT_CHUNK_SIZE), matchingItemCount);
+  let mountedItemCount = 0;
   const content: Node[] = [];
   if (recoveryPanel !== undefined) content.push(recoveryPanel);
   content.push(progress);
@@ -1437,6 +1348,7 @@ function renderResults(
   }
   for (const localization of groups) {
     const localizationSection = text('section', undefined, 'result-localization');
+    let localizationHasItems = false;
     const displayLocalizationLabel = localizationDisplayLabel(localization.localization, localizationLabelCounts);
     const editionEntries = editionEntriesForLocalization(catalogue, localization.localization.localizationId);
     const editionLabels = new Map(editionEntries.map(({ edition, label }) => [edition.setEditionId, label] as const));
@@ -1461,10 +1373,12 @@ function renderResults(
       if (!setLabels.has(edition.localSetId)) setLabels.set(edition.localSetId, label);
     for (const set of localization.sets) {
       const setSection = text('section', undefined, 'result-set');
+      let setHasItems = false;
       const displaySetLabel = setLabels.get(set.set.localSetId) ?? 'Unidentified set';
       if (!selectedEditionLabel) setSection.append(text('h3', displaySetLabel));
       for (const edition of set.editions) {
         const editionSection = text('section', undefined, 'result-edition');
+        let editionHasItems = false;
         const headingLabel = editionLabels.get(edition.edition.setEditionId) ?? displaySetLabel;
         const hasEditionHeading = !selectedEditionLabel && headingLabel !== displaySetLabel;
         if (hasEditionHeading) editionSection.append(text('h4', headingLabel));
@@ -1481,12 +1395,18 @@ function renderResults(
           ),
         );
         for (const item of currentItems) {
+          if (remainingItemSlots === 0) break;
           const itemIdentity = currentDisambiguators.get(item.itemId);
           list.append(renderItemRow(item, catalogue, false, undefined, itemIdentity, stateController, registerCleanup));
+          remainingItemSlots -= 1;
+          mountedItemCount += 1;
         }
-        if (list.childElementCount > 0) editionSection.append(list);
+        if (list.childElementCount > 0) {
+          editionSection.append(list);
+          editionHasItems = true;
+        }
         const research = edition.items.filter((item) => item.active && item.progressClass === 'research');
-        if (research.length > 0) {
+        if (research.length > 0 && remainingItemSlots > 0) {
           const researchSection = text('section', undefined, 'research-section');
           researchSection.append(
             text(selectedEditionLabel ? 'h3' : hasEditionHeading ? 'h5' : 'h4', 'Research (read-only)'),
@@ -1505,19 +1425,31 @@ function renderResults(
             ),
           );
           for (const item of research) {
+            if (remainingItemSlots === 0) break;
             const itemIdentity = researchDisambiguators.get(item.itemId);
             researchList.append(
               renderItemRow(item, catalogue, false, undefined, itemIdentity, stateController, registerCleanup),
             );
+            remainingItemSlots -= 1;
+            mountedItemCount += 1;
           }
-          researchSection.append(researchList);
-          editionSection.append(researchSection);
+          if (researchList.childElementCount > 0) {
+            researchSection.append(researchList);
+            editionSection.append(researchSection);
+            editionHasItems = true;
+          }
         }
-        setSection.append(editionSection);
+        if (editionHasItems) {
+          setSection.append(editionSection);
+          setHasItems = true;
+        }
       }
-      localizationSection.append(setSection);
+      if (setHasItems) {
+        localizationSection.append(setSection);
+        localizationHasItems = true;
+      }
     }
-    grouped.append(localizationSection);
+    if (localizationHasItems) grouped.append(localizationSection);
   }
   if (items.length > 0) content.push(grouped);
   else if (inactiveItems.length === 0)
@@ -1538,7 +1470,7 @@ function renderResults(
       catalogue.items.filter((candidate) => !candidate.active),
       false,
     );
-    for (const item of inactiveItems) {
+    for (const item of inactiveItems.slice(0, remainingItemSlots)) {
       const localization = catalogue.localizations.find(
         (candidate) => candidate.localizationId === item.localizationId,
       );
@@ -1561,18 +1493,55 @@ function renderResults(
       inactiveList.append(
         renderItemRow(item, catalogue, true, ownerLabel, identitySuffix, stateController, registerCleanup),
       );
+      mountedItemCount += 1;
     }
-    inactive.append(inactiveList);
-    content.push(inactive);
+    if (inactiveList.childElementCount > 0) {
+      inactive.append(inactiveList);
+      content.push(inactive);
+    }
+  }
+  if (mountedItemCount < matchingItemCount) {
+    const remainingCount = matchingItemCount - mountedItemCount;
+    const nextCount = Math.min(RESULT_CHUNK_SIZE, remainingCount);
+    const more = text('div', undefined, 'results-more');
+    more.dataset.resultsProgress = '';
+    const summary = text('p', `Showing ${mountedItemCount} of ${matchingItemCount} matching catalogue items.`);
+    const reveal = text('button', `Show ${nextCount} more item${nextCount === 1 ? '' : 's'}`) as HTMLButtonElement;
+    reveal.type = 'button';
+    reveal.dataset.showMore = '';
+    reveal.addEventListener('click', () => {
+      renderResults(
+        container,
+        criteria,
+        catalogue,
+        stateController?.state ?? state,
+        stateController,
+        visibleItemLimit + RESULT_CHUNK_SIZE,
+      );
+      const nextFocus =
+        container.querySelector<HTMLButtonElement>('[data-show-more]') ??
+        container.querySelector<HTMLElement>('[data-results-progress]');
+      if (nextFocus) {
+        if (!(nextFocus instanceof HTMLButtonElement)) nextFocus.tabIndex = -1;
+        nextFocus.focus();
+      }
+    });
+    more.append(summary, reveal);
+    content.push(more);
   }
   container.replaceChildren(...content);
+  setViewStatus(
+    matchingItemCount === 0
+      ? 'No public catalogue items match these criteria.'
+      : `Showing ${mountedItemCount} of ${matchingItemCount} matching catalogue items.`,
+  );
 }
 
 async function renderCollection(catalogue: CatalogueSnapshot): Promise<void> {
   const ids = new Set(sortedLocalizations(catalogue).map((row) => row.localizationId));
   const editionIds = new Set(catalogue.setEditions.map((row) => row.setEditionId));
   const parsed = parseQuery(window.location.search, ids, editionIds);
-  renderProvenance($('[data-provenance]'), catalogue);
+  renderProvenance($('[data-provenance]'), catalogue, provenance);
   if (!parsed.ok) {
     renderInvalid($('[data-view]'), parsed.recoverableLocalization);
     return;
@@ -1619,8 +1588,6 @@ if (!validated.ok) {
   renderInvalid($('[data-view]'), undefined, true);
 } else if (!validateProvenance(provenance, validated.snapshot)) {
   renderInvalid($('[data-view]'), undefined, true);
-} else if (document.body.dataset.page === 'collection') {
-  await renderCollection(validated.snapshot);
 } else {
-  renderIndex(validated.snapshot);
+  await renderCollection(validated.snapshot);
 }

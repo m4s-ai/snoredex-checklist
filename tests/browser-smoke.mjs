@@ -146,6 +146,16 @@ async function collectionScenarioPage(browser, synthetic, items) {
   await page.goto(`${baseUrl}/collection/?localization=${encodeURIComponent(synthetic.localizationId)}`, {
     waitUntil: 'networkidle',
   });
+  const requiredItemIds = [synthetic.itemId, synthetic.secondItemId].filter(Boolean);
+  while (
+    !(await Promise.all(requiredItemIds.map((itemId) => controlsForItem(page, itemId).count()))).every(
+      (count) => count > 0,
+    )
+  ) {
+    const showMore = page.locator('[data-show-more]');
+    assert.equal(await showMore.count(), 1, 'target item remains reachable through progressive results');
+    await showMore.click();
+  }
   return page;
 }
 
@@ -360,6 +370,9 @@ async function assertCollectionEditStateMachine(browser, name, synthetic) {
         ),
       );
       await page.reload({ waitUntil: 'networkidle' });
+      while ((await page.locator(`[data-item-id="${synthetic.itemId}"]`).count()) === 0) {
+        await page.locator('[data-show-more]').click();
+      }
 
       await page.getByRole('heading', { name: 'Recovered unsaved collection changes' }).waitFor();
       assert.equal(
@@ -412,11 +425,13 @@ try {
       const page = await browser.newPage();
       const failures = [];
       const unexpectedRequests = [];
+      const requestedPaths = [];
       page.on('pageerror', (error) => failures.push(error.message));
       page.on('console', (message) => {
         if (message.type() === 'error') failures.push(message.text());
       });
       page.on('request', (request) => {
+        requestedPaths.push(new URL(request.url()).pathname);
         if (!request.url().startsWith(baseUrl)) unexpectedRequests.push(request.url());
       });
       const home = await page.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
@@ -435,10 +450,25 @@ try {
         `${name}: human catalogue summary`,
       );
       await assertSecurityBoundary(page, `${name}/home`);
+      assert.equal(
+        requestedPaths.some((path) => path.endsWith('/snapshot.js') || path.endsWith('/migrations.js')),
+        false,
+        `${name}: home omits full catalogue payloads`,
+      );
       await page.locator("a[href='collection/']").first().click();
       await page.waitForLoadState('networkidle');
       assert.match(page.url(), /\/collection\/$/u, `${name}: collection URL`);
       assert.equal(await page.title(), 'Collection · Snoredex Checklist', `${name}: collection title`);
+      assert.equal(
+        requestedPaths.some((path) => path.endsWith('/snapshot.js')),
+        true,
+        `${name}: collection loads full catalogue`,
+      );
+      assert.equal(
+        requestedPaths.some((path) => path.endsWith('/migrations.js')),
+        true,
+        `${name}: collection loads migrations`,
+      );
       await assertSecurityBoundary(page, `${name}/collection`);
       assert.equal(await page.locator('.query-primary input[name="q"]').isVisible(), true, `${name}: primary search`);
       assert.equal(
@@ -447,6 +477,17 @@ try {
         `${name}: advanced filters closed`,
       );
       assert.equal(await page.locator('[data-view] > .empty-state').count(), 1, `${name}: neutral initial state`);
+      assert.equal(await page.locator('[data-view]').getAttribute('aria-live'), null, `${name}: results are not live`);
+      assert.equal(
+        await page.locator('[data-view-status]').getAttribute('role'),
+        'status',
+        `${name}: scoped view status`,
+      );
+      assert.match(
+        await page.locator('[data-view-status]').textContent(),
+        /Collection ready/u,
+        `${name}: concise neutral announcement`,
+      );
       assert.equal(await page.locator('.state-retry:visible').count(), 0, `${name}: no idle retry controls`);
       assert.match(
         await page.locator('.provenance-disclosure > summary').innerText(),
@@ -484,6 +525,9 @@ try {
           fingerprint: catalogue.meta.catalogueFingerprint,
           itemId: item.itemId,
           localizationId: item.localizationId,
+          localizationItemCount: catalogue.items.filter(
+            (candidate) => candidate.active && candidate.localizationId === item.localizationId,
+          ).length,
           secondItemId: trackable.find(
             (candidate) => candidate.localizationId === item.localizationId && candidate.itemId !== item.itemId,
           )?.itemId,
@@ -513,6 +557,29 @@ try {
             }),
           );
         }, synthetic);
+        await page.goto(`${baseUrl}/collection/?localization=${encodeURIComponent(synthetic.localizationId)}`, {
+          waitUntil: 'networkidle',
+        });
+        assert.equal(
+          await page.locator('[data-view] [data-item-id]').count(),
+          Math.min(24, synthetic.localizationItemCount),
+          `${name}: initial result chunk`,
+        );
+        if (synthetic.localizationItemCount > 24) {
+          const showMore = page.locator('[data-show-more]');
+          assert.equal(await showMore.count(), 1, `${name}: progressive result control`);
+          await showMore.click();
+          assert.equal(
+            await page.locator('[data-view] [data-item-id]').count(),
+            Math.min(48, synthetic.localizationItemCount),
+            `${name}: second result chunk`,
+          );
+          assert.equal(
+            await page.evaluate(() => document.activeElement?.matches('[data-show-more], [data-results-progress]')),
+            true,
+            `${name}: progressive result focus`,
+          );
+        }
         await page.reload({ waitUntil: 'networkidle' });
         await page.getByText('Backup and recovery', { exact: true }).click();
         const exportButton = page.getByRole('button', { name: 'Export collection' });

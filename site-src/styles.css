@@ -748,6 +748,17 @@ textarea {
   padding: 1rem;
   background: var(--soft);
 }
+.results-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+.results-more p {
+  margin: 0;
+}
 .state-panel {
   border: 2px solid var(--danger);
   border-radius: 12px;
@@ -803,12 +814,12 @@ textarea {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
+  .image-button img {
+    transition: none;
+  }
+  .image-button:hover img,
+  .image-button:focus-visible img {
+    transform: none;
   }
 }
 @media (forced-colors: active) {
