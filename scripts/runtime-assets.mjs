@@ -102,6 +102,48 @@ export function validateRuntimeAssetSetManifest(value, expectedTuple) {
   return paths.has('app.js') && paths.has('snapshot.js') && paths.has('migrations.js');
 }
 
+export async function readRuntimeAssetSet(pointer, expectedTuple, readBytes) {
+  if (!validateRuntimeAssetSetPointer(pointer, expectedTuple?.appRevision)) {
+    throw new Error('RUNTIME_ASSET_POINTER_INVALID');
+  }
+  let manifestBytes;
+  let manifest;
+  try {
+    manifestBytes = await readBytes(`${pointer.path}/manifest.json`);
+    manifest = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(manifestBytes));
+  } catch {
+    throw new Error('RUNTIME_ASSET_MANIFEST_INVALID');
+  }
+  if (
+    manifestBytes.byteLength !== pointer.manifestByteLength ||
+    sha256(manifestBytes) !== pointer.manifestSha256 ||
+    !validateRuntimeAssetSetManifest(manifest, expectedTuple)
+  ) {
+    throw new Error('RUNTIME_ASSET_MANIFEST_INVALID');
+  }
+  return {
+    manifest,
+    moduleTexts: await Promise.all(
+      manifest.modules.map(async (module) => {
+        let bytes;
+        try {
+          bytes = await readBytes(`${pointer.path}/${module.path}`);
+        } catch {
+          throw new Error('RUNTIME_ASSET_MODULE_INVALID');
+        }
+        if (bytes.byteLength !== module.byteLength || sha256(bytes) !== module.sha256) {
+          throw new Error('RUNTIME_ASSET_MODULE_INVALID');
+        }
+        try {
+          return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        } catch {
+          throw new Error('RUNTIME_ASSET_MODULE_INVALID');
+        }
+      }),
+    ),
+  };
+}
+
 export async function writeRuntimeAssetSet({ assetsRoot, sourceRoot = assetsRoot, modulePaths, runtime }) {
   if (!validateRuntimeTuple(runtime)) throw new Error('RUNTIME_ASSET_TUPLE_INVALID');
   const paths = [...new Set(modulePaths)].sort();

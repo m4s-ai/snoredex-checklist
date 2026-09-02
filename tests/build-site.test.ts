@@ -7,8 +7,54 @@ import test from 'node:test';
 
 import { replaceOutput } from '../scripts/site-output.ts';
 import { buildValidatedSourceMembershipIndex } from '../scripts/migration-membership.ts';
+import { readRuntimeAssetSet, sha256 } from '../scripts/runtime-assets.mjs';
 
 const root = resolve(import.meta.dirname, '..');
+
+test('validates every fetched runtime asset byte', async () => {
+  const runtime = {
+    appRevision: 'a'.repeat(40),
+    producerRevision: 'b'.repeat(40),
+    contractVersion: '1.0.0',
+    catalogueFingerprint: `sha256:${'c'.repeat(64)}`,
+    catalogueByteSha256: `sha256:${'d'.repeat(64)}`,
+    catalogueByteLength: 123,
+    migrationByteSha256: `sha256:${'e'.repeat(64)}`,
+    migrationByteLength: 456,
+  } as const;
+  const modules = new Map(
+    ['app.js', 'snapshot.js', 'migrations.js'].map((path) => [path, Buffer.from(`export const path = '${path}';\n`)]),
+  );
+  const manifest = {
+    schema: 'snoredex-runtime-asset-set',
+    schemaVersion: '1.0.0',
+    runtime,
+    modules: [...modules].map(([path, bytes]) => ({ path, byteLength: bytes.byteLength, sha256: sha256(bytes) })),
+  };
+  const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
+  const pointer = {
+    appRevision: runtime.appRevision,
+    path: `runtime/${runtime.appRevision}`,
+    manifestSha256: sha256(manifestBytes),
+    manifestByteLength: manifestBytes.byteLength,
+  };
+  const readBytes = async (path: string) => {
+    if (path.endsWith('/manifest.json')) return manifestBytes;
+    const bytes = modules.get(path.split('/').at(-1) ?? '');
+    if (!bytes) throw new Error('missing');
+    return bytes;
+  };
+
+  const loaded = await readRuntimeAssetSet(pointer, runtime, readBytes);
+  assert.equal(loaded.moduleTexts.length, modules.size);
+  await assert.rejects(
+    () =>
+      readRuntimeAssetSet(pointer, runtime, async (path: string) =>
+        path.endsWith('/app.js') ? Buffer.from('corrupt') : readBytes(path),
+      ),
+    /RUNTIME_ASSET_MODULE_INVALID/u,
+  );
+});
 
 test('validates migration source membership against the target contract', () => {
   const catalogue = {

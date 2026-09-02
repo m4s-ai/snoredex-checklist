@@ -11,9 +11,11 @@ const root = resolve(import.meta.dirname, '..');
 test('production adoption validates the reviewed target migration without requiring the fixture as a source', async () => {
   const scriptPath = resolve(root, 'scripts/check-production-adoption.mjs');
   const manifestScriptPath = resolve(root, 'scripts/create-deployment-manifest.mjs');
+  const smokeScriptPath = resolve(root, 'scripts/smoke-pages.mjs');
   const workflowPath = resolve(root, '.github/workflows/deploy-pages.yml');
   const script = await readFile(scriptPath, 'utf8');
   const manifestScript = await readFile(manifestScriptPath, 'utf8');
+  const smokeScript = await readFile(smokeScriptPath, 'utf8');
   const lock = JSON.parse(await readFile(resolve(root, 'catalogue.lock.json'), 'utf8'));
   const workflow = await readFile(workflowPath, 'utf8');
   assert.doesNotMatch(script, /collector-catalogue\.fixture/u);
@@ -59,6 +61,11 @@ test('production adoption validates the reviewed target migration without requir
     workflow,
     /SNOREDEX_EXPECTED_GITHUB_SHA: \$\{\{ steps\.deployment-inputs\.outputs\.consumer_revision \}\}/u,
   );
+  const deployedSmokeStep = workflow.slice(workflow.indexOf('- name: Smoke-test deployed Pages site'));
+  assert.match(deployedSmokeStep, /dist\/site\/provenance\.json/u);
+  assert.doesNotMatch(deployedSmokeStep, /catalogue\.lock\.json/u);
+  assert.match(smokeScript, /readRuntimeAssetSet\(pointer, runtime, getRuntimeBytes\)/u);
+  assert.match(smokeScript, /readRuntimeAssetSet\(retained\[0\], deployment\.rollback, getRuntimeBytes\)/u);
   assert.doesNotMatch(workflow, /git merge-base --is-ancestor/u);
   assert.match(
     workflow,

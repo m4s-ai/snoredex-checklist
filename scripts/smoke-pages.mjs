@@ -1,5 +1,5 @@
 import { validatePagesDeployment } from '../src/site/deployment.ts';
-import { sha256, validateRuntimeAssetSetManifest, validateRuntimeAssetSetPointer } from './runtime-assets.mjs';
+import { readRuntimeAssetSet, validateRuntimeAssetSetPointer } from './runtime-assets.mjs';
 
 const pageUrl = process.env.SNOREDEX_PAGE_URL;
 if (pageUrl !== 'https://m4s-ai.github.io/snoredex-checklist/') throw new Error('PAGES_SMOKE_URL_INVALID');
@@ -18,6 +18,11 @@ async function get(path) {
   const response = await fetch(new URL(path, pageUrl), { redirect: 'error' });
   if (!response.ok) throw new Error('PAGES_SMOKE_HTTP_FAILED');
   return response;
+}
+
+async function getRuntimeBytes(path) {
+  const response = await get(`./assets/${path}`);
+  return new Uint8Array(await response.arrayBuffer());
 }
 
 const home = await get('./');
@@ -44,14 +49,6 @@ if (
   throw new Error('PAGES_SMOKE_MODULE_MANIFEST_INVALID');
 }
 const pointer = moduleManifest.runtimeAssetSet;
-const runtimeManifestResponse = await get(`./assets/${pointer.path}/manifest.json`);
-const runtimeManifestBytes = new Uint8Array(await runtimeManifestResponse.arrayBuffer());
-let runtimeManifest;
-try {
-  runtimeManifest = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(runtimeManifestBytes));
-} catch {
-  throw new Error('PAGES_SMOKE_RUNTIME_MANIFEST_INVALID');
-}
 const runtime = {
   appRevision: expected.appRevision,
   producerRevision: expected.producerRevision,
@@ -62,29 +59,13 @@ const runtime = {
   migrationByteSha256: expected.migrationByteSha256,
   migrationByteLength: expected.migrationByteLength,
 };
-if (
-  runtimeManifestBytes.byteLength !== pointer.manifestByteLength ||
-  sha256(runtimeManifestBytes) !== pointer.manifestSha256 ||
-  !validateRuntimeAssetSetManifest(runtimeManifest, runtime)
-) {
-  throw new Error('PAGES_SMOKE_RUNTIME_MANIFEST_INVALID');
-}
-const moduleResponses = await Promise.all(
-  runtimeManifest.modules.map(async (module) => {
-    const response = await get(`./assets/${pointer.path}/${module.path}`);
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength !== module.byteLength || sha256(bytes) !== module.sha256) {
-      throw new Error('PAGES_SMOKE_RUNTIME_MODULE_INVALID');
-    }
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-  }),
-);
+const { moduleTexts: activeModuleTexts } = await readRuntimeAssetSet(pointer, runtime, getRuntimeBytes);
 const [homeText, collectionText, guideText, stylesheetText, ...moduleTexts] = await Promise.all([
   home.text(),
   collection.text(),
   guide.text(),
   stylesheet.text(),
-  ...moduleResponses,
+  ...activeModuleTexts,
 ]);
 const [themeText, collectionThemeText] = await Promise.all([theme.text(), collectionTheme.text()]);
 if (
@@ -125,5 +106,8 @@ if (
     (retained.length !== 1 || JSON.stringify(deployment.rollback.runtimeAssetSet) !== JSON.stringify(retained[0])))
 ) {
   throw new Error('PAGES_SMOKE_ROLLBACK_RUNTIME_INVALID');
+}
+if (deployment.rollback !== undefined) {
+  await readRuntimeAssetSet(retained[0], deployment.rollback, getRuntimeBytes);
 }
 console.log('Pages smoke ok');

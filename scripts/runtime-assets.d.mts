@@ -24,6 +24,11 @@ export function validateRuntimeAssetSetPointer(
   expectedAppRevision?: string,
 ): value is RuntimeAssetSetPointer;
 export function validateRuntimeAssetSetManifest(value: unknown, expectedTuple?: RuntimeTuple): boolean;
+export function readRuntimeAssetSet(
+  pointer: RuntimeAssetSetPointer,
+  expectedTuple: RuntimeTuple,
+  readBytes: (path: string) => Promise<Uint8Array>,
+): Promise<{ readonly manifest: unknown; readonly moduleTexts: readonly string[] }>;
 export function writeRuntimeAssetSet(options: {
   assetsRoot: string;
   sourceRoot?: string;
