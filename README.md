@@ -10,12 +10,12 @@ belongs only to this consumer and stays in the browser.
 
 Current implementation, contract, and deployment status lives in
 [`snoredex-checklist#2`](https://github.com/m4s-ai/snoredex-checklist/issues/2),
-[`snoredex-checklist#25`](https://github.com/m4s-ai/snoredex-checklist/issues/25), and
-[`snoredex-data#304`](https://github.com/m4s-ai/snoredex-data/issues/304). The current branch
-adopts the accepted producer publication `44d72b0a33125efc595309592afbf24d4eb210c1` under
+[`snoredex-checklist#29`](https://github.com/m4s-ai/snoredex-checklist/issues/29), and
+[`snoredex-data#332`](https://github.com/m4s-ai/snoredex-data/issues/332). The current branch
+adopts the accepted producer publication `98700119700523ee4939b7539103f7ba61ab03e6` under
 contract `1.0.0`, semantic fingerprint
-`sha256:c9b59276dadaf321b39ada5d17eaea74c4beecd00f8dc0cae0a46fc37afb8f15`, and byte digest
-`sha256:e3dd0b1826c705744f3a7aca232f62b28a4aa30a78c060bd855be083f98f7e0f`.
+`sha256:7f88c3c6dffc4b1fe73c868cd6be1baaa36116129b5217eaa1f17d590bd47d81`, and byte digest
+`sha256:5887db812354eaca90ae496af2bac82b4b8eceb9529c0919072d1ede03220da7`.
 The exact immutable URL and all identity fields are recorded in [`catalogue.lock.json`](catalogue.lock.json).
 
 Do not use `analysis_checklist.json` as a production API and do not reconstruct producer truth from
@@ -158,8 +158,8 @@ npm run sync:catalogue -- \
   --byte-sha256 sha256:<64-hex-byte-digest> \
   --migration-artifact-url https://raw.githubusercontent.com/m4s-ai/snoredex-data/<40-hex-producer-commit>/collector_migrations.json \
   --migration-byte-sha256 sha256:<64-hex-byte-digest> \
-  --issue-url https://github.com/m4s-ai/snoredex-checklist/issues/25 \
-  --issue-url https://github.com/m4s-ai/snoredex-data/issues/304
+  --issue-url https://github.com/m4s-ai/snoredex-checklist/issues/29 \
+  --issue-url https://github.com/m4s-ai/snoredex-data/issues/332
 ```
 
 The command rejects unsupported or malformed input, oversized files, encoding/JSON failures,
