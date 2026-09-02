@@ -221,6 +221,11 @@ test('workflow gates exact producer bytes, skips duplicate releases and preserve
   assert.match(workflow, /git restore -- catalogue\.lock\.json vendor\/snoredex-data\/collector_catalogue\.json/u);
   assert.match(workflow, /release_args\+=\(--prerelease\)/u);
   assert.match(workflow, /steps\.sealed\.outputs\.status == 'ready'/u);
+  assert.ok(
+    workflow.includes(`if [[ "$COMPATIBILITY_STATUS" == "blocked" ]]; then
+            echo "::error title=\${COMPATIBILITY_CODE}::Producer bytes were released as a blocked prerelease; the committed catalogue and deployment remain unchanged."
+            exit 1`),
+  );
   assert.match(workflow, /SNOREDEX_CURRENT_DEPLOYMENT_PATH="\$CURRENT_DEPLOYMENT_PATH"/u);
   assert.match(workflow, /CATALOGUE_UPDATE_BLOCKED_CURRENT_DEPLOYMENT/u);
   assert.doesNotMatch(workflow, /state=missing/u);
@@ -235,6 +240,8 @@ test('workflow gates exact producer bytes, skips duplicate releases and preserve
   assert.match(workflow, /branch="codex\/catalogue-\$\{PRODUCER_REVISION\}-\$\{GITHUB_SHA\}"/u);
   assert.match(workflow, /branch_parent=.*git rev-parse "origin\/\$\{branch\}\^"/u);
   assert.match(workflow, /gh workflow run ci\.yml --ref "\$branch"/u);
+  assert.match(workflow, /Refs #29; deploy and rollback verification remain required\./u);
+  assert.doesNotMatch(workflow, /does not close #29/u);
   assert.match(workflow, /event=workflow_dispatch/u);
   assert.match(workflow, /existing_pr=.*\n          if git ls-remote/u);
   assert.match(ciWorkflow, /workflow_dispatch:/u);

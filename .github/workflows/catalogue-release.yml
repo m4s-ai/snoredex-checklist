@@ -307,7 +307,7 @@ jobs:
           fi
           if [[ -z "$existing_pr" ]]; then
             set +e
-            existing_pr="$(gh pr create --base main --head "$branch" --title "[P4] Adopt catalogue ${PRODUCER_REVISION:0:12}" --body "Issue-backed catalogue update for #29 from m4s-ai/snoredex-data@${PRODUCER_REVISION}. Source bytes and compatibility evidence are published in the catalogue release; this PR does not close #29 before deploy and rollback verification." 2>/dev/null)"
+            existing_pr="$(gh pr create --base main --head "$branch" --title "[P4] Adopt catalogue ${PRODUCER_REVISION:0:12}" --body "Issue-backed catalogue update for m4s-ai/snoredex-checklist#29 from m4s-ai/snoredex-data@${PRODUCER_REVISION}. Source bytes and compatibility evidence are published in the catalogue release. Refs #29; deploy and rollback verification remain required." 2>/dev/null)"
             pr_status=$?
             set -e
             if [[ "$pr_status" -ne 0 ]]; then
@@ -342,5 +342,6 @@ jobs:
             if [[ -n "$PULL_REQUEST_URL" ]]; then echo "- Update PR: ${PULL_REQUEST_URL}"; fi
           } >> "$GITHUB_STEP_SUMMARY"
           if [[ "$COMPATIBILITY_STATUS" == "blocked" ]]; then
-            echo "::warning title=${COMPATIBILITY_CODE}::Producer bytes were released as a prerelease, but the committed catalogue and deployment remain unchanged."
+            echo "::error title=${COMPATIBILITY_CODE}::Producer bytes were released as a blocked prerelease; the committed catalogue and deployment remain unchanged."
+            exit 1
           fi

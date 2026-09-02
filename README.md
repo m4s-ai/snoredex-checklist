@@ -141,9 +141,10 @@ and creates or reuses an issue-backed PR. If repository policy denies bot-create
 leaves the ready branch and compare URL instead. The following deployment adopts the update only
 after that PR is reviewed and merged. A consumer-contract failure, unavailable current deployment
 manifest or missing complete producer migration route creates an explicit blocked prerelease and
-warning, while preserving the current vendor pair and deployment. No catalogue or migration truth
-is inferred here. Because this repository already has a published deployment boundary, every
-non-200 manifest response, including 404, is unavailable rather than an initial-deployment shortcut.
+then fails the intake run with an error, while preserving the current vendor pair and deployment.
+No catalogue or migration truth is inferred here. Because this repository already has a published
+deployment boundary, every non-200 manifest response, including 404, is unavailable rather than an
+initial-deployment shortcut.
 
 The underlying operator transaction remains available for recovery. Run it only with identity
 values already sealed by the catalogue release:
