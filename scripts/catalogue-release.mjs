@@ -281,6 +281,19 @@ function required(name) {
 }
 
 async function main() {
+  if (process.argv.includes('--assert-published')) {
+    const publishedRelease = decodeJson(
+      await readFile(resolve(required('--assert-published'))),
+      'CATALOGUE_RELEASE_PUBLISHED_INVALID',
+    );
+    const currentRelease = decodeJson(
+      await readFile(resolve(required('--current-release'))),
+      'CATALOGUE_RELEASE_PUBLISHED_INVALID',
+    );
+    assertCatalogueReleaseEvidenceMatches(publishedRelease, currentRelease);
+    return;
+  }
+
   const candidateDirectory = resolve(required('--candidate-dir'));
   const currentLock = decodeJson(
     await readFile(resolve(argument('--current-lock') ?? 'catalogue.lock.json')),

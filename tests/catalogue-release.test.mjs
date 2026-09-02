@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -125,6 +128,43 @@ test('reuses only matching immutable publication evidence', () => {
   );
 });
 
+test('checks immutable publication evidence through the workflow CLI boundary', async () => {
+  const published = createCatalogueReleaseManifest({
+    ...input(),
+    compatibilityStatus: 'ready',
+    compatibilityCode: 'CATALOGUE_UPDATE_READY',
+  });
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-catalogue-release-'));
+  const publishedPath = join(directory, 'published.json');
+  const currentPath = join(directory, 'current.json');
+
+  try {
+    await writeFile(publishedPath, JSON.stringify(published), 'utf8');
+    await writeFile(currentPath, JSON.stringify(published), 'utf8');
+    const result = spawnSync(
+      process.execPath,
+      ['scripts/catalogue-release.mjs', '--assert-published', publishedPath, '--current-release', currentPath],
+      { encoding: 'utf8' },
+    );
+    assert.equal(result.status, 0, result.stderr);
+
+    await writeFile(
+      currentPath,
+      JSON.stringify({ ...published, consumerRevision: '4444444444444444444444444444444444444444' }),
+      'utf8',
+    );
+    const conflict = spawnSync(
+      process.execPath,
+      ['scripts/catalogue-release.mjs', '--assert-published', publishedPath, '--current-release', currentPath],
+      { encoding: 'utf8' },
+    );
+    assert.equal(conflict.status, 1);
+    assert.match(conflict.stderr, /CATALOGUE_RELEASE_PUBLISHED_CONFLICT/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('rejects catalogue bytes whose semantic fingerprint is not sealed', () => {
   const catalogue = JSON.parse(catalogueBytes.toString('utf8'));
   catalogue.meta.dataAsOf = '2099-01-01';
@@ -187,7 +227,10 @@ test('workflow gates exact producer bytes, skips duplicate releases and preserve
   assert.match(workflow, /gh release list --exclude-drafts/u);
   assert.match(workflow, /tag="catalogue-\$\{PRODUCER_REVISION\}-\$\{GITHUB_SHA\}-\$\{COMPATIBILITY_CODE\}"/u);
   assert.match(workflow, /select\(\.tag_name ==/u);
-  assert.match(workflow, /assertCatalogueReleaseEvidenceMatches/u);
+  assert.match(
+    workflow,
+    /node scripts\/catalogue-release\.mjs \\\n+                --assert-published "\$published\/catalogue-release\.json" \\\n+                --current-release "\$RUNNER_TEMP\/catalogue-release\/catalogue-release\.json"/u,
+  );
   assert.match(workflow, /gh api --method DELETE "repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{release_id\}"/u);
   assert.match(workflow, /branch="codex\/catalogue-\$\{PRODUCER_REVISION\}-\$\{GITHUB_SHA\}"/u);
   assert.match(workflow, /branch_parent=.*git rev-parse "origin\/\$\{branch\}\^"/u);
