@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
@@ -81,6 +82,57 @@ function migration(
 ): ReconciliationMigration {
   return { fromFingerprint, toFingerprint, transitions };
 }
+
+interface VendoredCatalogue {
+  readonly meta: { readonly catalogueFingerprint: string };
+  readonly items: readonly {
+    readonly itemId: string;
+    readonly active: boolean;
+    readonly progressClass: 'current-known' | 'research';
+  }[];
+}
+
+interface VendoredMigration extends ReconciliationMigration {
+  readonly sourceItemIds: readonly string[];
+}
+
+interface VendoredMigrationManifest {
+  readonly catalogueTransitions: readonly VendoredMigration[];
+}
+
+test('reconciles every direct vendored migration route to the current catalogue', async () => {
+  const [catalogue, manifest] = await Promise.all([
+    readFile(new URL('../vendor/snoredex-data/collector_catalogue.json', import.meta.url), 'utf8').then(
+      (value) => JSON.parse(value) as VendoredCatalogue,
+    ),
+    readFile(new URL('../vendor/snoredex-data/collector_migrations.json', import.meta.url), 'utf8').then(
+      (value) => JSON.parse(value) as VendoredMigrationManifest,
+    ),
+  ]);
+  const targetItemClasses = new Map(
+    catalogue.items.filter((item) => item.active).map((item) => [item.itemId, item.progressClass] as const),
+  );
+  const knownTargetItemIds = new Set(
+    catalogue.items.filter((item) => item.active && item.progressClass === 'current-known').map((item) => item.itemId),
+  );
+  const directRoutes = manifest.catalogueTransitions.filter(
+    (route) => route.toFingerprint === catalogue.meta.catalogueFingerprint,
+  );
+
+  assert.notEqual(directRoutes.length, 0);
+  for (const route of directRoutes) {
+    const result = reconcilePrivateState(state(route.fromFingerprint), catalogue.meta.catalogueFingerprint, {
+      migrations: manifest.catalogueTransitions,
+      knownSourceItemIdsByFingerprint: new Map([[route.fromFingerprint, new Set(route.sourceItemIds)]]),
+      knownTargetItemIds,
+      targetItemClasses,
+    });
+
+    assert.equal(result.ok, true, `vendored route ${route.fromFingerprint} must reconcile`);
+    if (!result.ok) continue;
+    assert.equal(result.value.report.accounting.conservationSatisfied, true);
+  }
+});
 
 test('reconciles retained and explicit one-to-one state without mutation', () => {
   const source = state(oldFingerprint, [
