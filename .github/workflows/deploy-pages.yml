@@ -231,6 +231,11 @@ jobs:
           const lock = JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8'));
           const commit = /^[0-9a-f]{40}$/u;
           const digest = /^sha256:[0-9a-f]{64}$/u;
+          const runtimePointer = (value, revision) =>
+            value?.appRevision === revision &&
+            value?.path === `runtime/${revision}` &&
+            digest.test(value?.manifestSha256 ?? '') &&
+            validLength(value?.manifestByteLength);
           const previous = current?.rollback;
           const sources = current?.sourceFingerprints;
           const sameCatalogueDeployment = current?.catalogueFingerprint === previous?.catalogueFingerprint;
@@ -248,6 +253,9 @@ jobs:
             previous.catalogueFingerprint !== lock.catalogueFingerprint ||
             previous.catalogueByteSha256 !== lock.catalogueByteSha256 ||
             previous.catalogueByteLength !== lock.catalogueByteLength ||
+            previous.migrationByteSha256 !== lock.migrationByteSha256 ||
+            previous.migrationByteLength !== lock.migrationByteLength ||
+            !runtimePointer(previous.runtimeAssetSet, targetRevision) ||
             !digest.test(current.catalogueFingerprint ?? '') ||
             !digest.test(previous.catalogueFingerprint ?? '') ||
             !digest.test(previous.catalogueByteSha256 ?? '') ||
@@ -271,6 +279,17 @@ jobs:
         run: |
           npm run test:browser
           npm run test:accessibility
+      - name: Retain revision-coherent runtime assets
+        env:
+          SNOREDEX_PAGE_URL: https://m4s-ai.github.io/snoredex-checklist/
+          SNOREDEX_CURRENT_DEPLOYMENT_PATH: ${{ steps.current-production.outputs.manifest_path }}
+          WORKFLOW_REVISION: ${{ github.sha }}
+        run: |
+          if [[ "$(git rev-parse HEAD)" != "$WORKFLOW_REVISION" ]]; then
+            git checkout --detach "$WORKFLOW_REVISION"
+            npm ci
+          fi
+          node scripts/retain-runtime-assets.mjs
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
       - name: Add deployment provenance
@@ -297,4 +316,6 @@ jobs:
           export SNOREDEX_EXPECTED_CATALOGUE_FINGERPRINT="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).catalogueFingerprint)")"
           export SNOREDEX_EXPECTED_CATALOGUE_BYTE_SHA256="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).catalogueByteSha256)")"
           export SNOREDEX_EXPECTED_CATALOGUE_BYTE_LENGTH="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(String(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).catalogueByteLength))")"
+          export SNOREDEX_EXPECTED_MIGRATION_BYTE_SHA256="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).migrationByteSha256)")"
+          export SNOREDEX_EXPECTED_MIGRATION_BYTE_LENGTH="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(String(JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8')).migrationByteLength))")"
           npm run smoke:pages

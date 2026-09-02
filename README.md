@@ -179,7 +179,12 @@ consumer commit. Select `adopt` for a manual forward catalogue adoption when req
 The workflow builds and checks that exact revision, writes `deployment.json`, and performs a bounded
 HTTPS smoke test against the resulting Pages URL. A rollback requires an existing published
 manifest whose exact recovery tuple names the selected consumer revision and its pinned catalogue;
-an arbitrary older ancestor is not sufficient. The manifest carries every catalogue fingerprint
+an arbitrary older ancestor is not sufficient. Each HTML shell loads an immutable
+`assets/runtime/<app-revision>/` module set whose manifest pins the app and producer revisions,
+contract version, catalogue fingerprint, catalogue and migration byte identities, and every module
+digest. A deployment retains only the active set and its declared one-slot rollback set; missing,
+mixed, additional, or digest-mismatched runtime files fail the artifact and Pages checks. The
+deployment manifest carries every catalogue fingerprint
 that may still be active in browsers after the one-slot rollback. A later adoption must provide a
 reviewed route for each of those fingerprints. If those sources diverge, no single rollback target
 is advertised and the workflow fails closed until a recoverable target exists. The selected revision

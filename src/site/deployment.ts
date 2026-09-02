@@ -7,6 +7,8 @@ export type PagesSmokeExpectations = Readonly<{
   catalogueFingerprint?: string;
   catalogueByteSha256?: string;
   catalogueByteLength?: number;
+  migrationByteSha256?: string;
+  migrationByteLength?: number;
 }>;
 
 function isRecord(value: unknown): value is RecordValue {
@@ -21,6 +23,18 @@ function isDigest(value: unknown): value is string {
   return typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value);
 }
 
+function isRuntimeAssetSetPointer(value: unknown, appRevision: string): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    value.appRevision === appRevision &&
+    value.path === `runtime/${appRevision}` &&
+    isDigest(value.manifestSha256) &&
+    typeof value.manifestByteLength === 'number' &&
+    Number.isSafeInteger(value.manifestByteLength) &&
+    value.manifestByteLength > 0
+  );
+}
+
 export function validatePagesDeployment(
   deployment: unknown,
   provenance: unknown,
@@ -31,6 +45,7 @@ export function validatePagesDeployment(
   const provenanceRecord = isRecord(provenance) ? provenance : {};
   const catalogue = isRecord(provenanceRecord.catalogue) ? provenanceRecord.catalogue : {};
   const expectedLength = expected.catalogueByteLength;
+  const expectedMigrationLength = expected.migrationByteLength;
 
   if (
     !isCommit(expected.appRevision) ||
@@ -40,7 +55,11 @@ export function validatePagesDeployment(
     !isDigest(expected.catalogueByteSha256) ||
     typeof expectedLength !== 'number' ||
     !Number.isSafeInteger(expectedLength) ||
-    expectedLength <= 0
+    expectedLength <= 0 ||
+    !isDigest(expected.migrationByteSha256) ||
+    typeof expectedMigrationLength !== 'number' ||
+    !Number.isSafeInteger(expectedMigrationLength) ||
+    expectedMigrationLength <= 0
   ) {
     return false;
   }
@@ -66,6 +85,11 @@ export function validatePagesDeployment(
     deploymentRecord.catalogueByteSha256 === expected.catalogueByteSha256 &&
     deploymentRecord.catalogueByteSha256 === catalogue.catalogueByteSha256 &&
     deploymentRecord.catalogueByteLength === expectedLength &&
-    deploymentRecord.catalogueByteLength === catalogue.catalogueByteLength
+    deploymentRecord.catalogueByteLength === catalogue.catalogueByteLength &&
+    deploymentRecord.migrationByteSha256 === expected.migrationByteSha256 &&
+    deploymentRecord.migrationByteSha256 === catalogue.migrationByteSha256 &&
+    deploymentRecord.migrationByteLength === expectedMigrationLength &&
+    deploymentRecord.migrationByteLength === catalogue.migrationByteLength &&
+    isRuntimeAssetSetPointer(deploymentRecord.runtimeAssetSet, expected.appRevision)
   );
 }

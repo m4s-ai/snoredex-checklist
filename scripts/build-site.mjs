@@ -5,6 +5,11 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { replaceOutput } from './site-output.ts';
 import { buildValidatedSourceMembershipIndex } from './migration-membership.ts';
+import {
+  runtimeTupleFromProvenance,
+  validateRuntimeAssetSetDirectory,
+  writeRuntimeAssetSet,
+} from './runtime-assets.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const output = resolve(root, process.argv[2] === '--out-dir' ? process.argv[3] : 'dist/site');
@@ -224,18 +229,40 @@ try {
   );
   await writeFile(
     resolve(assets, 'migrations.js'),
-    `export const migrationManifest = Object.freeze(${JSON.stringify({ catalogueTransitions })});\nexport const knownSourceItemIdsByFingerprint = new Map(${JSON.stringify(serializedKnownSourceIdsByFingerprint)}.map(([fingerprint, itemIds]) => [fingerprint, new Set(itemIds)]));\n`,
+    `export const migrationManifest = Object.freeze(${JSON.stringify({ catalogueTransitions })});\nexport const knownSourceItemIdsByFingerprint = new Map(${JSON.stringify(serializedKnownSourceIdsByFingerprint)}.map(([fingerprint, itemIds]) => [fingerprint, new Set(itemIds)]));\nexport const runtimeIdentity = Object.freeze(${JSON.stringify({ appRevision: gitRevision, catalogueFingerprint: catalogue.meta.catalogueFingerprint, migrationByteSha256: migrationDigest, migrationByteLength: migrationBytes.byteLength })});\n`,
     'utf8',
   );
   const javascriptModules = await stampJavascriptAssets(assets);
+  const runtime = runtimeTupleFromProvenance({
+    schema: 'snoredex-site-provenance',
+    schemaVersion: '1.0.0',
+    appRevision: gitRevision,
+    catalogue: {
+      mode: provenance.mode,
+      sourceCommit: provenance.sourceCommit,
+      sourceRepository: provenance.sourceRepository,
+      contractVersion: provenance.contractVersion,
+      catalogueFingerprint: catalogue.meta.catalogueFingerprint,
+      catalogueByteSha256: provenance.catalogueByteSha256,
+      catalogueByteLength: provenance.catalogueByteLength,
+      lock: provenance.lock,
+    },
+  });
+  const runtimeAssetSet = await writeRuntimeAssetSet({
+    assetsRoot: assets,
+    modulePaths: javascriptModules,
+    runtime,
+  });
   await writeFile(
     resolve(assets, 'module-manifest.json'),
     `${JSON.stringify(
       {
         schema: 'snoredex-site-module-manifest',
-        schemaVersion: '1.0.0',
+        schemaVersion: '2.0.0',
         appRevision: gitRevision,
-        modules: javascriptModules,
+        runtimeAssetSet,
+        retainedRuntimeAssetSets: [],
+        legacyModules: javascriptModules,
       },
       null,
       2,
@@ -257,6 +284,8 @@ try {
           catalogueFingerprint: catalogue.meta.catalogueFingerprint,
           catalogueByteSha256: provenance.catalogueByteSha256 ?? null,
           catalogueByteLength: provenance.catalogueByteLength ?? null,
+          migrationByteSha256: migrationDigest,
+          migrationByteLength: migrationBytes.byteLength,
           lock: provenance.lock,
         },
       },
@@ -275,6 +304,9 @@ try {
     !catalogueModule.validateProvenance(directorySnapshotModule.provenance, directorySnapshotModule.default)
   ) {
     throw new Error('site directory snapshot failed browser boundary validation');
+  }
+  if (!(await validateRuntimeAssetSetDirectory(assets, runtimeAssetSet, runtime))) {
+    throw new Error('site runtime asset set failed validation');
   }
 
   await copyRevisionShell(resolve(root, 'site-src/index.html'), resolve(staging, 'index.html'), {

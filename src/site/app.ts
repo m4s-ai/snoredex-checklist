@@ -1697,10 +1697,47 @@ async function renderCollection(
   }
 }
 
-async function renderFullSnapshotHome(): Promise<void> {
+function isRuntimeRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function shellAppRevision(): string | undefined {
+  const value = document.querySelector<HTMLMetaElement>('meta[name="snoredex-app-revision"]')?.content;
+  return value && /^[0-9a-f]{40}$/u.test(value) ? value : undefined;
+}
+
+function matchesShellRevision(provenance: unknown, appRevision: string): boolean {
+  return isRuntimeRecord(provenance) && provenance.appRevision === appRevision;
+}
+
+function matchesMigrationRuntime(
+  value: unknown,
+  provenance: unknown,
+  catalogueFingerprint: string,
+  appRevision: string,
+): boolean {
+  if (!isRuntimeRecord(value) || !isRuntimeRecord(provenance) || !isRuntimeRecord(provenance.lock)) return false;
+  return (
+    value.appRevision === appRevision &&
+    value.catalogueFingerprint === catalogueFingerprint &&
+    typeof value.migrationByteSha256 === 'string' &&
+    /^sha256:[0-9a-f]{64}$/u.test(value.migrationByteSha256) &&
+    value.migrationByteSha256 === provenance.lock.migrationByteSha256 &&
+    typeof value.migrationByteLength === 'number' &&
+    Number.isSafeInteger(value.migrationByteLength) &&
+    value.migrationByteLength > 0 &&
+    value.migrationByteLength === provenance.lock.migrationByteLength
+  );
+}
+
+async function renderFullSnapshotHome(appRevision: string): Promise<void> {
   const snapshotModule = await import('./snapshot.js');
   const validated = await validateSnapshot(snapshotModule.default);
-  if (!validated.ok || !validateProvenance(snapshotModule.provenance, validated.snapshot)) {
+  if (
+    !validated.ok ||
+    !matchesShellRevision(snapshotModule.provenance, appRevision) ||
+    !validateProvenance(snapshotModule.provenance, validated.snapshot)
+  ) {
     renderInvalid($('[data-view]'), undefined, true);
     return;
   }
@@ -1738,9 +1775,14 @@ async function matchesPinnedDirectoryEnvelopeDigest(
 }
 
 async function renderHome(): Promise<void> {
+  const appRevision = shellAppRevision();
+  if (!appRevision) {
+    renderInvalid($('[data-view]'), undefined, true);
+    return;
+  }
   const expectedDigest = document.querySelector<HTMLMetaElement>('meta[name="snoredex-directory-sha256"]')?.content;
   if (!expectedDigest) {
-    await renderFullSnapshotHome();
+    await renderFullSnapshotHome(appRevision);
     return;
   }
   let directoryModule: typeof import('./directory.js');
@@ -1751,7 +1793,7 @@ async function renderHome(): Promise<void> {
       import('./directory-snapshot.js'),
     ]);
   } catch {
-    await renderFullSnapshotHome();
+    await renderFullSnapshotHome(appRevision);
     return;
   }
   const projectionDigest = await canonicalDirectoryDigest(snapshotModule.default);
@@ -1759,6 +1801,7 @@ async function renderHome(): Promise<void> {
     !projectionDigest ||
     !(await matchesPinnedDirectoryEnvelopeDigest(snapshotModule.default, snapshotModule.provenance, expectedDigest)) ||
     !(await directoryModule.validateDirectorySnapshot(snapshotModule.default, projectionDigest)) ||
+    !matchesShellRevision(snapshotModule.provenance, appRevision) ||
     !validateProvenance(snapshotModule.provenance, snapshotModule.default)
   ) {
     renderInvalid($('[data-view]'), undefined, true);
@@ -1768,10 +1811,32 @@ async function renderHome(): Promise<void> {
 }
 
 async function start(): Promise<void> {
+  const appRevision = shellAppRevision();
+  if (!appRevision) {
+    renderInvalid($('[data-view]'), undefined, true);
+    return;
+  }
   if (document.body.dataset.page === 'collection') {
-    const [snapshotModule, migrationsModule] = await Promise.all([import('./snapshot.js'), import('./migrations.js')]);
+    let snapshotModule: typeof import('./snapshot.js');
+    let migrationsModule: typeof import('./migrations.js');
+    try {
+      [snapshotModule, migrationsModule] = await Promise.all([import('./snapshot.js'), import('./migrations.js')]);
+    } catch {
+      renderInvalid($('[data-view]'), undefined, true);
+      return;
+    }
     const validated = await validateSnapshot(snapshotModule.default);
-    if (!validated.ok || !validateProvenance(snapshotModule.provenance, validated.snapshot)) {
+    if (
+      !validated.ok ||
+      !matchesShellRevision(snapshotModule.provenance, appRevision) ||
+      !validateProvenance(snapshotModule.provenance, validated.snapshot) ||
+      !matchesMigrationRuntime(
+        migrationsModule.runtimeIdentity,
+        snapshotModule.provenance,
+        validated.snapshot.meta.catalogueFingerprint,
+        appRevision,
+      )
+    ) {
       renderInvalid($('[data-view]'), undefined, true);
       return;
     }

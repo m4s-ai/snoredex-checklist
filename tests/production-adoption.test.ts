@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
+import { writeRuntimeAssetSet } from '../scripts/runtime-assets.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 
@@ -19,8 +20,11 @@ test('production adoption validates the reviewed target migration without requir
   assert.match(script, /candidate\?\.toFingerprint === targetFingerprint/u);
   assert.match(script, /sourceFingerprints/u);
   assert.match(manifestScript, /SNOREDEX_CURRENT_DEPLOYMENT_PATH/u);
-  assert.match(manifestScript, /manifest\.rollback = deploymentTuple\(previous\)/u);
-  assert.match(manifestScript, /previous && lock\.catalogueFingerprint === previous\.catalogueFingerprint/u);
+  assert.match(manifestScript, /manifest\.rollback = \{ \.\.\.rollback, runtimeAssetSet: retained \}/u);
+  assert.match(
+    manifestScript,
+    /rollbackSource && lock\.catalogueFingerprint === rollbackSource\.catalogueFingerprint/u,
+  );
   assert.match(workflow, /rollback target must match the exact published recovery tuple/u);
   assert.match(workflow, /consumer_revision lacks recoverable deployment provenance/u);
   assert.match(
@@ -98,6 +102,44 @@ test('production adoption validates the reviewed target migration without requir
   try {
     const currentManifestPath = resolve(temporaryDirectory, 'deployment.json');
     const previousAppRevision = 'b'.repeat(40);
+    const appRevision = 'a'.repeat(40);
+    const runtime = {
+      appRevision,
+      producerRevision: lock.producerRevision,
+      contractVersion: lock.contractVersion,
+      catalogueFingerprint: lock.catalogueFingerprint,
+      catalogueByteSha256: lock.catalogueByteSha256,
+      catalogueByteLength: lock.catalogueByteLength,
+      migrationByteSha256: lock.migrationByteSha256,
+      migrationByteLength: lock.migrationByteLength,
+    };
+    const assets = resolve(temporaryDirectory, 'assets');
+    await mkdir(assets, { recursive: true });
+    for (const path of ['app.js', 'snapshot.js', 'migrations.js']) {
+      await writeFile(resolve(assets, path), `export const fixture = '${path}';\n`, 'utf8');
+    }
+    const activeRuntimeAssetSet = await writeRuntimeAssetSet({
+      assetsRoot: assets,
+      modulePaths: ['app.js', 'snapshot.js', 'migrations.js'],
+      runtime,
+    });
+    const rollbackRuntimeAssetSet = await writeRuntimeAssetSet({
+      assetsRoot: assets,
+      modulePaths: ['app.js', 'snapshot.js', 'migrations.js'],
+      runtime: { ...runtime, appRevision: previousAppRevision },
+    });
+    await writeFile(
+      resolve(assets, 'module-manifest.json'),
+      JSON.stringify({
+        schema: 'snoredex-site-module-manifest',
+        schemaVersion: '2.0.0',
+        appRevision,
+        runtimeAssetSet: activeRuntimeAssetSet,
+        retainedRuntimeAssetSets: [rollbackRuntimeAssetSet],
+        legacyModules: ['app.js', 'snapshot.js', 'migrations.js'],
+      }),
+      'utf8',
+    );
     const previousDeployment = {
       schema: 'snoredex-checklist-deployment',
       schemaVersion: '1.0.0',
@@ -109,6 +151,9 @@ test('production adoption validates the reviewed target migration without requir
       catalogueFingerprint: lock.catalogueFingerprint,
       catalogueByteSha256: lock.catalogueByteSha256,
       catalogueByteLength: lock.catalogueByteLength,
+      migrationByteSha256: lock.migrationByteSha256,
+      migrationByteLength: lock.migrationByteLength,
+      runtimeAssetSet: rollbackRuntimeAssetSet,
       sourceFingerprints: [],
     };
     const provenancePath = resolve(temporaryDirectory, 'provenance.json');
@@ -117,7 +162,7 @@ test('production adoption validates the reviewed target migration without requir
       JSON.stringify({
         schema: 'snoredex-site-provenance',
         schemaVersion: '1.0.0',
-        appRevision: 'a'.repeat(40),
+        appRevision,
         catalogue: {
           mode: 'pinned-snapshot',
           sourceCommit: lock.producerRevision,
@@ -126,6 +171,8 @@ test('production adoption validates the reviewed target migration without requir
           catalogueFingerprint: lock.catalogueFingerprint,
           catalogueByteSha256: lock.catalogueByteSha256,
           catalogueByteLength: lock.catalogueByteLength,
+          migrationByteSha256: lock.migrationByteSha256,
+          migrationByteLength: lock.migrationByteLength,
           lock,
         },
       }),
@@ -191,6 +238,9 @@ test('production adoption validates the reviewed target migration without requir
       catalogueFingerprint: lock.catalogueFingerprint,
       catalogueByteSha256: lock.catalogueByteSha256,
       catalogueByteLength: lock.catalogueByteLength,
+      migrationByteSha256: lock.migrationByteSha256,
+      migrationByteLength: lock.migrationByteLength,
+      runtimeAssetSet: rollbackRuntimeAssetSet,
     });
     assert.deepEqual(generatedDeployment.sourceFingerprints, [lock.catalogueFingerprint]);
 
@@ -217,6 +267,9 @@ test('production adoption validates the reviewed target migration without requir
       catalogueFingerprint: lock.catalogueFingerprint,
       catalogueByteSha256: lock.catalogueByteSha256,
       catalogueByteLength: lock.catalogueByteLength,
+      migrationByteSha256: lock.migrationByteSha256,
+      migrationByteLength: lock.migrationByteLength,
+      runtimeAssetSet: rollbackRuntimeAssetSet,
     });
     assert.deepEqual(divergentDeployment.sourceFingerprints, [reviewedSourceFingerprint, lock.catalogueFingerprint]);
 

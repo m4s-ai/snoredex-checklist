@@ -37,6 +37,18 @@ const address = server.address();
 if (!address || typeof address === 'string') throw new Error('BROWSER_SMOKE_SERVER_UNAVAILABLE');
 const baseUrl = `http://127.0.0.1:${address.port}`;
 const directorySnapshotSource = await readFile(join(root, 'assets/directory-snapshot.js'), 'utf8');
+const snapshotSource = await readFile(join(root, 'assets/snapshot.js'), 'utf8');
+const migrationsSource = await readFile(join(root, 'assets/migrations.js'), 'utf8');
+const staleRuntimeSnapshotSource = snapshotSource.replace(
+  /"appRevision":"[0-9a-f]{40}"/u,
+  `"appRevision":"${'e'.repeat(40)}"`,
+);
+const staleRuntimeMigrationsSource = migrationsSource.replace(
+  /"appRevision":"[0-9a-f]{40}"/u,
+  `"appRevision":"${'e'.repeat(40)}"`,
+);
+assert.notEqual(staleRuntimeSnapshotSource, snapshotSource, 'snapshot runtime fixture must change its revision');
+assert.notEqual(staleRuntimeMigrationsSource, migrationsSource, 'migration runtime fixture must change its revision');
 const corruptedDirectorySnapshotSource = directorySnapshotSource.replace(
   /"displayName":"[^"]+"/u,
   '"displayName":"Corrupted directory label"',
@@ -477,8 +489,8 @@ try {
       const rollbackPage = await browser.newPage();
       const rollbackRequests = [];
       rollbackPage.on('request', (request) => rollbackRequests.push(new URL(request.url()).pathname));
-      await rollbackPage.route('**/assets/directory.js', (route) => route.abort());
-      await rollbackPage.route('**/assets/directory-snapshot.js', (route) => route.abort());
+      await rollbackPage.route('**/assets/runtime/**/directory.js', (route) => route.abort());
+      await rollbackPage.route('**/assets/runtime/**/directory-snapshot.js', (route) => route.abort());
       const rollbackHome = await rollbackPage.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
       assert.equal(rollbackHome?.status(), 200, `${name}: rollback fallback home status`);
       await rollbackPage.locator('.localization-group').first().waitFor();
@@ -491,13 +503,13 @@ try {
       const staleValidatorPage = await browser.newPage();
       const staleValidatorRequests = [];
       staleValidatorPage.on('request', (request) => staleValidatorRequests.push(new URL(request.url()).pathname));
-      await staleValidatorPage.route('**/assets/directory.js', (route) =>
+      await staleValidatorPage.route('**/assets/runtime/**/directory.js', (route) =>
         route.fulfill({
           contentType: 'text/javascript; charset=utf-8',
           body: 'export async function validateDirectorySnapshot() { return true; }',
         }),
       );
-      await staleValidatorPage.route('**/assets/directory-snapshot.js', (route) =>
+      await staleValidatorPage.route('**/assets/runtime/**/directory-snapshot.js', (route) =>
         route.fulfill({
           contentType: 'text/javascript; charset=utf-8',
           body: corruptedDirectorySnapshotSource,
@@ -519,7 +531,7 @@ try {
       const staleProvenancePage = await browser.newPage();
       const staleProvenanceRequests = [];
       staleProvenancePage.on('request', (request) => staleProvenanceRequests.push(new URL(request.url()).pathname));
-      await staleProvenancePage.route('**/assets/directory-snapshot.js', (route) =>
+      await staleProvenancePage.route('**/assets/runtime/**/directory-snapshot.js', (route) =>
         route.fulfill({
           contentType: 'text/javascript; charset=utf-8',
           body: staleProvenanceDirectorySnapshotSource,
@@ -539,7 +551,7 @@ try {
       );
       await staleProvenancePage.close();
       const legacyBootstrapPage = await browser.newPage();
-      await legacyBootstrapPage.route('**/assets/app.js', (route) =>
+      await legacyBootstrapPage.route('**/assets/runtime/**/app.js', (route) =>
         route.fulfill({
           contentType: 'text/javascript; charset=utf-8',
           body: `
@@ -562,6 +574,36 @@ try {
         `${name}: preceding bootstrap fails closed against the stable marker's envelope digest`,
       );
       await legacyBootstrapPage.close();
+      for (const [modulePath, source] of [
+        ['snapshot.js', staleRuntimeSnapshotSource],
+        ['migrations.js', staleRuntimeMigrationsSource],
+      ]) {
+        const mixedRuntimePage = await browser.newPage();
+        await mixedRuntimePage.route(`**/assets/runtime/**/${modulePath}`, (route) =>
+          route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: source }),
+        );
+        await mixedRuntimePage.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
+        const privateStateBefore = JSON.stringify({ schema: 'synthetic-private-state', marker: modulePath });
+        await mixedRuntimePage.evaluate(({ key, value }) => localStorage.setItem(key, value), {
+          key: PRIVATE_STATE_KEY,
+          value: privateStateBefore,
+        });
+        const mixedRuntimeCollection = await mixedRuntimePage.goto(`${baseUrl}/collection/`, {
+          waitUntil: 'networkidle',
+        });
+        assert.equal(mixedRuntimeCollection?.status(), 200, `${name}: mixed ${modulePath} collection status`);
+        assert.equal(
+          await mixedRuntimePage.locator('[data-view] h2').textContent(),
+          'Invalid checklist link',
+          `${name}: mixed ${modulePath} fails closed`,
+        );
+        assert.equal(
+          await mixedRuntimePage.evaluate((key) => localStorage.getItem(key), PRIVATE_STATE_KEY),
+          privateStateBefore,
+          `${name}: mixed ${modulePath} leaves private state untouched`,
+        );
+        await mixedRuntimePage.close();
+      }
       await page.locator("a[href='collection/']").first().click();
       await page.waitForLoadState('networkidle');
       assert.match(page.url(), /\/collection\/$/u, `${name}: collection URL`);

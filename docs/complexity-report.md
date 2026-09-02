@@ -2,11 +2,11 @@
 
 > Advisory AST-derived estimate; this is not a release gate or a conformance claim.
 
-Scope: `src/` and `scripts/` (35 production code files).
-Lines: 12,211.
-Function-like nodes: 768.
-McCabe estimate: sum 3,524; mean 4.6; median 2; P90 10; P95 19.
-Hotspots: 71 functions exceed 10; 36 exceed 20.
+Scope: `src/` and `scripts/` (37 production code files).
+Lines: 12,892.
+Function-like nodes: 797.
+McCabe estimate: sum 3,712; mean 4.7; median 2; P90 10; P95 19.
+Hotspots: 75 functions exceed 10; 37 exceed 20.
 
 The report parses each source file with the bundled TypeScript compiler and counts runtime function-like declarations plus structural decision nodes: if/for/while/do/catch/case statements, conditional expressions and logical (&&/||/??) binary expressions. Type-only function signatures and nested function bodies are excluded from their enclosing function. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
 
@@ -19,16 +19,16 @@ The report parses each source file with the bundled TypeScript compiler and coun
 | `src/catalogue/validate.ts:235`     | `validateSemantics`              |         56 |
 | `src/catalogue/validate.ts:416`     | `validateCatalogueFixture`       |         54 |
 | `scripts/catalogue-release.mjs:127` | `createCatalogueReleaseManifest` |         50 |
-| `scripts/check-artifact.mjs:535`    | `extractHead`                    |         45 |
+| `scripts/check-artifact.mjs:540`    | `extractHead`                    |         45 |
+| `src/site/deployment.ts:38`         | `validatePagesDeployment`        |         40 |
 | `src/state/storage.ts:1142`         | `setDraftOwnerState`             |         36 |
 | `src/catalogue/sync.ts:517`         | `parseJournal`                   |         34 |
-| `scripts/check-artifact.mjs:259`    | `stripHtmlComments`              |         32 |
+| `scripts/check-artifact.mjs:264`    | `stripHtmlComments`              |         32 |
 | `src/state/domain.ts:211`           | `parseState`                     |         32 |
-| `src/site/deployment.ts:24`         | `validatePagesDeployment`        |         31 |
 | `src/state/backup.ts:289`           | `writeAuthority`                 |         30 |
 | `src/catalogue/sync.ts:763`         | `syncCataloguePair`              |         29 |
 | `src/site/catalogue.ts:93`          | `validateProvenance`             |         29 |
 | `src/site/query.ts:57`              | `criteriaFromParameters`         |         28 |
 | `src/state/reconciliation.ts:168`   | `migrationIsStructurallyValid`   |         28 |
 | `src/state/domain.ts:148`           | `normalizeRecordForImport`       |         27 |
-| `scripts/check-artifact.mjs:87`     | `readAttribute`                  |         26 |
+| `scripts/check-artifact.mjs:92`     | `readAttribute`                  |         26 |

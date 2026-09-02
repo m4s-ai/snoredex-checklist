@@ -21,6 +21,8 @@ test('requires Pages smoke provenance to match the expected workflow tuple', () 
     catalogueFingerprint: `sha256:${'c'.repeat(64)}`,
     catalogueByteSha256: `sha256:${'d'.repeat(64)}`,
     catalogueByteLength: 123,
+    migrationByteSha256: `sha256:${'e'.repeat(64)}`,
+    migrationByteLength: 456,
   };
   const provenance = {
     schema: 'snoredex-site-provenance',
@@ -33,6 +35,8 @@ test('requires Pages smoke provenance to match the expected workflow tuple', () 
       catalogueFingerprint: expected.catalogueFingerprint,
       catalogueByteSha256: expected.catalogueByteSha256,
       catalogueByteLength: expected.catalogueByteLength,
+      migrationByteSha256: expected.migrationByteSha256,
+      migrationByteLength: expected.migrationByteLength,
     },
   };
   const deployment = {
@@ -46,6 +50,14 @@ test('requires Pages smoke provenance to match the expected workflow tuple', () 
     catalogueFingerprint: expected.catalogueFingerprint,
     catalogueByteSha256: expected.catalogueByteSha256,
     catalogueByteLength: expected.catalogueByteLength,
+    migrationByteSha256: expected.migrationByteSha256,
+    migrationByteLength: expected.migrationByteLength,
+    runtimeAssetSet: {
+      appRevision: expected.appRevision,
+      path: `runtime/${expected.appRevision}`,
+      manifestSha256: `sha256:${'f'.repeat(64)}`,
+      manifestByteLength: 789,
+    },
   };
   assert.equal(
     validatePagesDeployment(deployment, provenance, 'https://m4s-ai.github.io/snoredex-checklist/', expected),

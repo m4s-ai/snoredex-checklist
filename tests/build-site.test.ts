@@ -104,8 +104,8 @@ test('stamps the exact app revision into served shells and module', async () => 
     assert.match(app, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     assert.match(directorySnapshot, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     assert.match(home, /name="snoredex-directory-sha256" content="sha256:[0-9a-f]{64}"/u);
-    assert.match(home, /<script type="module" src="assets\/app\.js"><\/script>/u);
-    assert.match(collection, /<script type="module" src="\.\.\/assets\/app\.js"><\/script>/u);
+    assert.match(home, new RegExp(`assets/runtime/${revision}/app\\.js`, 'u'));
+    assert.match(collection, new RegExp(`\\.\\./assets/runtime/${revision}/app\\.js`, 'u'));
     assert.doesNotMatch(app, /from ['"]\.\/(?:snapshot|migrations)\.js['"]/u);
     assert.match(app, /import\(['"]\.\/snapshot\.js['"]\)/u);
     assert.match(app, /import\(['"]\.\/migrations\.js['"]\)/u);
@@ -122,13 +122,19 @@ test('stamps the exact app revision into served shells and module', async () => 
     assert.deepEqual(font500, sourceFont500);
     const moduleManifest = JSON.parse(moduleManifestText);
     assert.equal(moduleManifest.schema, 'snoredex-site-module-manifest');
+    assert.equal(moduleManifest.schemaVersion, '2.0.0');
     assert.equal(moduleManifest.appRevision, revision);
-    assert.ok(Array.isArray(moduleManifest.modules));
-    assert.ok(moduleManifest.modules.includes('app.js'));
-    assert.ok(moduleManifest.modules.includes('directory.js'));
-    assert.ok(moduleManifest.modules.includes('directory-snapshot.js'));
-    for (const modulePath of moduleManifest.modules) {
-      const module = await readFile(resolve(output, 'assets', modulePath), 'utf8');
+    assert.equal(moduleManifest.runtimeAssetSet.path, `runtime/${revision}`);
+    assert.deepEqual(moduleManifest.retainedRuntimeAssetSets, []);
+    const runtimeManifest = JSON.parse(
+      await readFile(resolve(output, 'assets', moduleManifest.runtimeAssetSet.path, 'manifest.json'), 'utf8'),
+    );
+    assert.equal(runtimeManifest.runtime.appRevision, revision);
+    assert.ok(runtimeManifest.modules.some((module: { path: string }) => module.path === 'app.js'));
+    assert.ok(runtimeManifest.modules.some((module: { path: string }) => module.path === 'directory.js'));
+    assert.ok(runtimeManifest.modules.some((module: { path: string }) => module.path === 'directory-snapshot.js'));
+    for (const entry of runtimeManifest.modules) {
+      const module = await readFile(resolve(output, 'assets', moduleManifest.runtimeAssetSet.path, entry.path), 'utf8');
       assert.match(module, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     }
   } finally {
