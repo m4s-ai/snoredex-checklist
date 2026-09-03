@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import {
+  runtimeShellBindings,
   runtimeTupleFromProvenance,
   sha256,
   validateRuntimeAssetSetDirectory,
@@ -76,6 +77,51 @@ async function retainLegacyTheme(candidate, manifest) {
   await writeFile(join(root, 'collection/theme.js'), theme);
 }
 
+async function promoteActiveShellIntegrity(pointer, runtime, modulePaths) {
+  const [theme, collectionTheme] = await Promise.all([
+    readFile(join(root, 'theme.js')),
+    readFile(join(root, 'collection/theme.js')),
+  ]);
+  const marker = Buffer.from(`snoredex-app-revision:${runtime.appRevision}`, 'utf8');
+  if (!theme.equals(collectionTheme) || !theme.includes(marker)) throw new Error('RUNTIME_ACTIVE_THEME_INVALID');
+  const directory = join(assets, ...pointer.path.split('/'));
+  await writeFile(join(directory, 'theme.js'), theme);
+  const promotedPaths = [...new Set([...modulePaths, 'theme.js'])];
+  const promotedPointer = await writeRuntimeAssetSet({
+    assetsRoot: assets,
+    sourceRoot: directory,
+    modulePaths: promotedPaths,
+    runtime,
+  });
+  const promotedManifest = await readJson(join(directory, 'manifest.json'), 'RUNTIME_ACTIVE_MANIFEST_INVALID');
+  for (const relativePath of ['index.html', 'collection/index.html']) {
+    const path = join(root, relativePath);
+    const prefix = relativePath === 'index.html' ? '' : '../';
+    const shell = await readFile(path, 'utf8');
+    const bindings = runtimeShellBindings(promotedManifest, `${prefix}assets/${promotedPointer.path}/`);
+    const themeScript = `<script src="${prefix}theme.js"></script>`;
+    const appScript = `<script type="module" src="${prefix}assets/${pointer.path}/app.js"></script>`;
+    if (!shell.includes("script-src 'self';") || !shell.includes(themeScript) || !shell.includes(appScript)) {
+      throw new Error('RUNTIME_ACTIVE_SHELL_INVALID');
+    }
+    await writeFile(
+      path,
+      shell
+        .replace("script-src 'self';", `script-src 'self' '${bindings.importMapCsp}';`)
+        .replace(
+          themeScript,
+          `<script type="importmap">${bindings.importMap}</script>\n    <script src="${prefix}assets/${promotedPointer.path}/theme.js" integrity="${bindings.themeIntegrity}"></script>`,
+        )
+        .replace(
+          appScript,
+          `<script type="module" src="${prefix}assets/${promotedPointer.path}/app.js" integrity="${bindings.appIntegrity}"></script>`,
+        ),
+      'utf8',
+    );
+  }
+  return { pointer: promotedPointer, runtime, legacyModules: promotedPaths };
+}
+
 async function promoteLegacyActiveSet(provenance, manifest) {
   if (
     manifest?.schema !== 'snoredex-site-module-manifest' ||
@@ -107,7 +153,7 @@ async function promoteLegacyActiveSet(provenance, manifest) {
       'utf8',
     );
   }
-  return { pointer, runtime, legacyModules: manifest.modules };
+  return promoteActiveShellIntegrity(pointer, runtime, manifest.modules);
 }
 
 async function loadActiveSet(provenance, manifest) {
@@ -121,6 +167,12 @@ async function loadActiveSet(provenance, manifest) {
     !(await validateRuntimeAssetSetDirectory(assets, manifest.runtimeAssetSet, runtime))
   ) {
     throw new Error('RUNTIME_ACTIVE_MANIFEST_INVALID');
+  }
+  const directory = join(assets, ...manifest.runtimeAssetSet.path.split('/'));
+  const runtimeManifest = await readJson(join(directory, 'manifest.json'), 'RUNTIME_ACTIVE_MANIFEST_INVALID');
+  const modulePaths = runtimeManifest.modules.map((module) => module.path);
+  if (!modulePaths.includes('theme.js')) {
+    return promoteActiveShellIntegrity(manifest.runtimeAssetSet, runtime, modulePaths);
   }
   return { pointer: manifest.runtimeAssetSet, runtime, legacyModules: manifest.legacyModules ?? [] };
 }

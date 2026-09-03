@@ -34,6 +34,9 @@ Catalogue corrections that are not security-sensitive belong in the producer iss
   table and entry/theme SRI values block changed runtime bytes before browser execution. Each route
   separately validates the catalogue input it consumes before rendering; the collection route also
   validates migration identity before reconciliation or private-state access.
+- A one-generation rollback to a pre-integrity shell validates the advertised old runtime first,
+  then binds its stamped theme and unchanged application modules into a regenerated SRI/integrity
+  shell before publication.
 - Render untrusted strings through text APIs and apply a self-first Content Security Policy.
 - Limit import size, quantities, note length, and accepted enums/IDs; never prototype-merge
   untrusted objects.

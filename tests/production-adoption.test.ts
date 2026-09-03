@@ -4,9 +4,98 @@ import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
-import { writeRuntimeAssetSet } from '../scripts/runtime-assets.mjs';
+import { validateRuntimeAssetSetDirectory, writeRuntimeAssetSet } from '../scripts/runtime-assets.mjs';
 
 const root = resolve(import.meta.dirname, '..');
+
+test('upgrades a validated pre-integrity rollback shell before publication', async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), 'snoredex-runtime-promotion-'));
+  try {
+    const lock = JSON.parse(await readFile(resolve(root, 'catalogue.lock.json'), 'utf8'));
+    const appRevision = 'a'.repeat(40);
+    const runtime = {
+      appRevision,
+      producerRevision: lock.producerRevision,
+      contractVersion: lock.contractVersion,
+      catalogueFingerprint: lock.catalogueFingerprint,
+      catalogueByteSha256: lock.catalogueByteSha256,
+      catalogueByteLength: lock.catalogueByteLength,
+      migrationByteSha256: lock.migrationByteSha256,
+      migrationByteLength: lock.migrationByteLength,
+    };
+    const assets = resolve(directory, 'assets');
+    const modulePaths = ['app.js', 'snapshot.js', 'migrations.js'];
+    await mkdir(resolve(directory, 'collection'), { recursive: true });
+    await mkdir(assets, { recursive: true });
+    for (const path of modulePaths) await writeFile(resolve(assets, path), `export const path = '${path}';\n`);
+    const pointer = await writeRuntimeAssetSet({ assetsRoot: assets, modulePaths, runtime });
+    await writeFile(
+      resolve(assets, 'module-manifest.json'),
+      JSON.stringify({
+        schema: 'snoredex-site-module-manifest',
+        schemaVersion: '2.0.0',
+        appRevision,
+        runtimeAssetSet: pointer,
+        retainedRuntimeAssetSets: [],
+        legacyModules: modulePaths,
+      }),
+    );
+    await writeFile(
+      resolve(directory, 'provenance.json'),
+      JSON.stringify({
+        schema: 'snoredex-site-provenance',
+        schemaVersion: '1.0.0',
+        appRevision,
+        catalogue: {
+          mode: 'pinned-snapshot',
+          sourceCommit: lock.producerRevision,
+          sourceRepository: lock.sourceRepository,
+          contractVersion: lock.contractVersion,
+          catalogueFingerprint: lock.catalogueFingerprint,
+          catalogueByteSha256: lock.catalogueByteSha256,
+          catalogueByteLength: lock.catalogueByteLength,
+          migrationByteSha256: lock.migrationByteSha256,
+          migrationByteLength: lock.migrationByteLength,
+          lock,
+        },
+      }),
+    );
+    const theme = `document.documentElement.dataset.theme = 'light';\n/* snoredex-app-revision:${appRevision} */\n`;
+    const csp = "default-src 'none'; script-src 'self'; style-src 'self'";
+    const shell = (prefix: string) =>
+      `<head><meta http-equiv="Content-Security-Policy" content="${csp}"><script src="${prefix}theme.js"></script></head><body><script type="module" src="${prefix}assets/${pointer.path}/app.js"></script></body>`;
+    await Promise.all([
+      writeFile(resolve(directory, 'theme.js'), theme),
+      writeFile(resolve(directory, 'collection/theme.js'), theme),
+      writeFile(resolve(directory, 'index.html'), shell('')),
+      writeFile(resolve(directory, 'collection/index.html'), shell('../')),
+    ]);
+
+    const env = { ...process.env };
+    delete env.SNOREDEX_CURRENT_DEPLOYMENT_PATH;
+    delete env.SNOREDEX_PAGE_URL;
+    const result = spawnSync(process.execPath, [resolve(root, 'scripts/retain-runtime-assets.mjs'), directory], {
+      cwd: root,
+      encoding: 'utf8',
+      env,
+    });
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+    const promotedModuleManifest = JSON.parse(await readFile(resolve(assets, 'module-manifest.json'), 'utf8'));
+    const promotedRuntimeManifest = JSON.parse(
+      await readFile(resolve(assets, promotedModuleManifest.runtimeAssetSet.path, 'manifest.json'), 'utf8'),
+    );
+    assert.ok(promotedRuntimeManifest.modules.some((module: { path: string }) => module.path === 'theme.js'));
+    assert.equal(await validateRuntimeAssetSetDirectory(assets, promotedModuleManifest.runtimeAssetSet, runtime), true);
+    for (const page of ['index.html', 'collection/index.html']) {
+      const html = await readFile(resolve(directory, page), 'utf8');
+      assert.match(html, /<script type="importmap">\{"integrity":/u);
+      assert.match(html, /integrity="sha256-[A-Za-z\d+/]+=*"/u);
+      assert.doesNotMatch(html, /src="(?:\.\.\/)?theme\.js"/u);
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test('production adoption validates the reviewed target migration without requiring the fixture as a source', async () => {
   const scriptPath = resolve(root, 'scripts/check-production-adoption.mjs');

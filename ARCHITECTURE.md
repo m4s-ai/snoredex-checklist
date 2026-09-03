@@ -90,6 +90,12 @@ manifests and all declared module bytes. Because that smoke runs after Pages pub
 failure marks the workflow failed but does not automatically restore the prior deployment; recovery
 uses the validated manual rollback path.
 
+During the one-generation transition from a pre-integrity build, rollback tooling first validates
+the advertised old set, then adds its identically stamped root theme to that set and regenerates the
+old shell's SRI, integrity map, CSP hash, and runtime pointer before publication. This preserves the
+exact old application bytes while ensuring the deployed rollback shell satisfies the current
+browser boundary.
+
 The index normally consumes only the lightweight, public directory projection required for its
 grouped browse links. Its tested compatibility path loads and validates the full catalogue snapshot
 when an older shell has no directory digest or the directory modules are unavailable. The

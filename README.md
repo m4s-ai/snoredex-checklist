@@ -205,6 +205,9 @@ reviewed route for each of those fingerprints. If those sources diverge, no sing
 is advertised and the workflow fails closed until a recoverable target exists. The selected revision
 must still contain the recoverable deployment-manifest tooling and npm commands used by this
 workflow. An older commit without them is not an eligible rollback target.
+When the immediate rollback target predates browser integrity bindings, the current recovery
+tooling validates it first and then republishes that same application module set with its stamped
+theme and generated SRI/integrity shell bindings.
 Do not edit browser-local collection state or rewrite a lock in place. Verify the deployed
 `deployment.json` and `provenance.json` tuple before considering the rollback complete.
 The HTTPS smoke runs after GitHub Pages publication. A smoke failure marks the workflow failed and
