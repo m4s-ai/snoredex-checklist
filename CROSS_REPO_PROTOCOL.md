@@ -1,10 +1,15 @@
 <!-- doc: role=cross-repository protocol index; stage=stable -->
+
 # Cross-repository protocol
 
-Shared contract work is coordinated through reciprocally linked GitHub issues. The full current
-protocol and lifecycle are specified in
+Shared contract work is coordinated through reciprocally linked GitHub issues. The accepted v1
+protocol and completed lifecycle are recorded in
 [`snoredex-checklist#2`](https://github.com/m4s-ai/snoredex-checklist/issues/2); producer contract
 semantics are owned by [`snoredex-data#254`](https://github.com/m4s-ai/snoredex-data/issues/254).
+The first production catalogue update and rollback precedent is recorded in
+[`snoredex-checklist#29`](https://github.com/m4s-ai/snoredex-checklist/issues/29),
+[`snoredex-data#332`](https://github.com/m4s-ai/snoredex-data/issues/332), and
+[`snoredex-data#342`](https://github.com/m4s-ai/snoredex-data/issues/342).
 
 ## Required record
 
@@ -20,6 +25,11 @@ or shared-rollout change is documented before merge in both repositories. Each p
 
 PR comments, review threads, chat, CI output, labels, and edited issue bodies do not replace the
 issue history.
+
+Every later shared change opens new reciprocally linked producer and consumer issues. A release
+ledger may supplement those paired issues when useful, but never replaces either side of the
+cross-repository record. Completed v1 issues remain immutable evidence and are not reused as a
+changing backlog.
 
 ## Lifecycle
 

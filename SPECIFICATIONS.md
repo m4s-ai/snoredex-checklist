@@ -1,4 +1,5 @@
 <!-- doc: role=specification workflow; stage=stable -->
+
 # Specification workflow
 
 This repository uses **issue-driven specification development**. A GitHub issue is the canonical
@@ -23,30 +24,32 @@ review, chat, or a generated artifact.
 
 ## Executable specification
 
-Once the paired producer contract is accepted, its consumer-facing evidence belongs in these
-locations:
+The accepted v1 producer contract is recorded in the linked authority issues. Its consumer-facing
+executable evidence belongs in these locations:
 
-| Artifact | Role |
-| --- | --- |
-| `schemas/` | Accepted JSON Schemas at trust boundaries |
-| `tests/fixtures/` | Reviewed synthetic compatibility, failure, and migration examples |
-| `vendor/snoredex-data/` | One validated, committed catalogue and migration snapshot |
-| `catalogue.lock.json` | Producer revision, artifact URL, contract version, semantic fingerprint, and byte digest |
-| tests/workflows | Smallest runnable checks proving the issue's acceptance scenarios |
+| Artifact                                                    | Role                                                                                     |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `schemas/`                                                  | Accepted JSON Schemas at trust boundaries                                                |
+| `tests/fixtures/`                                           | Reviewed synthetic compatibility, failure, and migration examples                        |
+| `vendor/snoredex-data/`                                     | One validated, committed catalogue and migration snapshot                                |
+| `catalogue.lock.json`                                       | Producer revision, artifact URL, contract version, semantic fingerprint, and byte digest |
+| `dist/site/assets/runtime/<app-revision>/manifest.json`     | Built identity and digest boundary for one immutable runtime-module set                  |
+| `dist/site/deployment.json` and `dist/site/provenance.json` | Built publication, rollback, and provenance evidence; never hand-edited source           |
+| `tests/` and `.github/workflows/`                           | Smallest runnable checks proving issue acceptance and publication scenarios              |
 
 Do not create placeholder files merely to resemble this layout. Add an artifact when an accepted
 specification gives it content and an owning validation path.
 
 ## Specification authorities
 
-| Specification | Authority |
-| --- | --- |
-| [`snoredex-checklist#2`](https://github.com/m4s-ai/snoredex-checklist/issues/2) | Consumer product, private state, implementation and acceptance |
-| [`snoredex-data#254`](https://github.com/m4s-ai/snoredex-data/issues/254) | Producer contract semantics, artifacts, fixtures and publication evidence |
+| Specification                                                                   | Authority                                                                 |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| [`snoredex-checklist#2`](https://github.com/m4s-ai/snoredex-checklist/issues/2) | Consumer product, private state, implementation and acceptance            |
+| [`snoredex-data#254`](https://github.com/m4s-ai/snoredex-data/issues/254)       | Producer contract semantics, artifacts, fixtures and publication evidence |
 
-Before the producer contract is accepted, consumer work is limited to reviewed synthetic fixtures.
-Real catalogue data may be vendored only after both issues record the required acceptance and
-publication evidence.
+For a new or changed producer contract, consumer work stays on reviewed synthetic fixtures until
+both repositories record the required acceptance and publication evidence. Real catalogue data may
+be vendored only through the issue-backed sync after that record and its pinned artifact exist.
 
 ## From specification to verified release
 
@@ -59,3 +62,8 @@ publication evidence.
    and rollback evidence.
 6. Record consumer `ADOPTED`, then end-to-end `VERIFIED`, against that same artifact.
 7. Close only after rollback and recovery remain possible and both sides agree on the result.
+
+The completed v1 lifecycle is preserved in
+[`snoredex-checklist#2`](https://github.com/m4s-ai/snoredex-checklist/issues/2) and its linked
+acceptance issues. A later contract, publication, or rollout change opens a new paired issue record;
+closed v1 issues are evidence, not a mutable backlog.

@@ -5,9 +5,11 @@
 Supported-release and deployment status lives in the owning issues and release records. These
 security and privacy boundaries apply to every prototype, fixture, and release.
 
-Before the first production deployment, no production version is supported. Once a release record
-exists, the supported version is the currently deployed v1 revision named there; no unsupported
-response-time promise is made.
+The supported version is the currently deployed v1 application revision named by the live
+[`deployment.json`](https://m4s-ai.github.io/snoredex-checklist/deployment.json) and
+[`provenance.json`](https://m4s-ai.github.io/snoredex-checklist/provenance.json). A retained rollback
+generation is a bounded recovery target, not a separately maintained release while it is inactive.
+No unsupported response-time promise is made.
 
 ## Report a vulnerability
 
@@ -25,6 +27,13 @@ Catalogue corrections that are not security-sensitive belong in the producer iss
 - No analytics, telemetry, remote fonts, third-party scripts, or private values in URLs/logs.
 - Validate catalogue, migration, and import data at trust boundaries; unsupported versions and
   integrity failures fail closed.
+- Bind every published HTML shell to one immutable runtime-module manifest. Build, deployment, and
+  artifact checks reject missing, mixed, additional, or changed active and rollback module bytes
+  before publication. Post-deploy smoke detects live discrepancies and fails the workflow but does
+  not automatically restore the previous publication. Each browser route separately validates the
+  catalogue input it consumes before rendering; the collection route also validates migration
+  identity before reconciliation or private-state access. The browser does not self-hash already
+  executing modules.
 - Render untrusted strings through text APIs and apply a self-first Content Security Policy.
 - Limit import size, quantities, note length, and accepted enums/IDs; never prototype-merge
   untrusted objects.
@@ -36,3 +45,6 @@ Catalogue corrections that are not security-sensitive belong in the producer iss
 
 Security fixes that affect both repositories follow the issue protocol privately until coordinated
 disclosure is safe.
+
+The dated repository-setting evidence and required release gates are recorded in
+[`docs/security/repository-controls.md`](docs/security/repository-controls.md).

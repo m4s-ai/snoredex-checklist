@@ -1,4 +1,5 @@
 <!-- doc: role=stable architecture boundaries; stage=stable -->
+
 # Architecture
 
 ## Status
@@ -14,16 +15,22 @@ contract details, fixtures, and lifecycle status remain owned by
 snoredex-data reviewed truth
         |
         v
-versioned collector artifact + migrations + deployment manifest
+versioned collector artifact + migrations
         |
         v
 validated committed vendor snapshot <--- catalogue.lock.json
         |
         v
-static checklist app <----------> versioned browser-local state
+exact consumer build ---> immutable runtime set + deployment/provenance manifests
         |                                      |
         v                                      v
-GitHub Pages                         deterministic JSON backup/restore
+GitHub Pages HTML ---> pinned runtime modules ---> catalogue projection
+                                                   |
+                                                   v
+                                      versioned browser-local state
+                                                   |
+                                                   v
+                                      deterministic JSON backup/restore
 ```
 
 Normal builds and the running app do not fetch mutable producer data. Only an issue-backed sync
@@ -42,16 +49,48 @@ digest pass validation.
 There is no write-back edge from the checklist to the producer. Private state must never enter
 source, build artifacts, URLs, analytics, logs, or public issues.
 
-## Planned boundaries
+## Implemented boundaries
 
-| Boundary | Responsibility | Failure mode |
-| --- | --- | --- |
-| Ingestion | Validate supported contract, digest, fingerprint, uniqueness, and references | Keep the last known-good snapshot |
-| Catalogue projection | Present producer-assigned item and progress classes without inference | Show unsupported/stale state; do not render guessed truth |
-| State | Normalize and atomically persist one logical local authority with a legacy-readable active key and one recovery sidecar | Preserve rollback readability, reject stale operations and keep private export/recovery available |
-| Reconciliation | Conserve every old item ID across catalogue transitions | Stop on missing, ambiguous, 1:N, or N:1 transitions |
-| UI | Render untrusted producer text safely and expose accessible collection controls | Fail visibly; never leak private values |
-| Publication | Build a static artifact from the committed snapshot only | Do not deploy when provenance or gates disagree |
+| Boundary             | Responsibility                                                                                                          | Failure mode                                                                                      |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Ingestion            | Validate supported contract, digest, fingerprint, uniqueness, and references                                            | Keep the last known-good snapshot                                                                 |
+| Catalogue projection | Present producer-assigned item and progress classes without inference                                                   | Show unsupported/stale state; do not render guessed truth                                         |
+| State                | Normalize and atomically persist one logical local authority with a legacy-readable active key and one recovery sidecar | Preserve rollback readability, reject stale operations and keep private export/recovery available |
+| Reconciliation       | Conserve every old item ID across catalogue transitions                                                                 | Stop on missing, ambiguous, 1:N, or N:1 transitions                                               |
+| UI                   | Render untrusted producer text safely and expose accessible collection controls                                         | Fail visibly; never leak private values                                                           |
+| Runtime publication  | Bind each HTML shell to one immutable module set and verify every declared byte                                         | Reject the artifact or deployment when files are missing, mixed, additional, or digest-mismatched |
+| Publication          | Build a static artifact from the committed snapshot and exact consumer revision only                                    | Do not deploy when provenance, compatibility, runtime, or gates disagree                          |
+
+## Revision-coherent publication
+
+Each build emits an immutable `assets/runtime/<app-revision>/` directory. Its manifest binds the
+application revision to the producer revision, contract version, semantic fingerprint, catalogue
+and migration byte identities, and the exact runtime-module membership and digest of every module.
+The HTML shell addresses only that revision's entry module, so ordinary browser and CDN cache keys
+do not reuse one module URL across releases. At browser start, each route validates the catalogue
+input it consumes against its built tuple before rendering catalogue-dependent UI. The collection
+route additionally validates the migration identity before reading or reconciling private state.
+
+Runtime-module digests are a publication-time invariant enforced by the build, artifact,
+deployment, and post-deploy smoke checks. The browser does not hash an already executing entry
+module or its complete import graph. A host or CDN that mutates bytes at an immutable revision URL
+is therefore detected by those publication checks, not guaranteed to fail inside the in-page
+bootstrap before any module code executes.
+
+The root `deployment.json` is the active publication pointer and may name one retained rollback
+generation. `provenance.json` records the built tuple used to evaluate that publication. Deploy
+validation checks both retained generations, rejects undeclared or changed modules, and keeps the
+active and rollback asset sets together. Post-deploy smoke derives the expected tuple from the
+built provenance even when the workflow later checks out recovery tooling, then verifies the live
+manifests and all declared module bytes. Because that smoke runs after Pages publication, a live
+failure marks the workflow failed but does not automatically restore the prior deployment; recovery
+uses the validated manual rollback path.
+
+The index normally consumes only the lightweight, public directory projection required for its
+grouped browse links. Its tested compatibility path loads and validates the full catalogue snapshot
+when an older shell has no directory digest or the directory modules are unavailable. The
+collection route consumes the full validated catalogue and migration snapshot; the index does not
+import the migration payload. Neither route fetches mutable producer data at runtime.
 
 ## State-conservation invariant
 

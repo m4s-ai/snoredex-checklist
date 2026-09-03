@@ -1,4 +1,5 @@
 <!-- doc: role=contribution workflow; stage=stable -->
+
 # Contributing
 
 Start with [`AGENTS.md`](AGENTS.md), the owning issue, every comment, and every linked authority.
@@ -47,3 +48,15 @@ producer issue, and a merge is not a publication or verification event.
 Keep stable rules in `AGENTS.md`, stable design boundaries in repository documents, changing plans
 and decisions in issues, and commands in `README.md`/workflows. Use LF, UTF-8 without BOM, and keep
 `CLAUDE.md` as a pointer rather than a second rules file.
+
+When behavior changes, update the affected public documentation in the same issue and pull request:
+use `README.md` for operation and entry-point guidance, `PRODUCT.md` for product boundaries,
+`DESIGN.md` for current interaction and visual rules, `SECURITY.md` for policy, and
+`site-src/llms.txt` for the public machine-readable data boundary. Update accessibility or
+repository-control evidence only from an actual dated verification record. Preserve
+`docs/design/reference.html` as historical synthetic evidence unless its owning design issue
+explicitly commissions a replacement.
+
+Run `npm run format:check` for documentation-only changes and `npm run check` before the pull
+request. Verify changed relative links and public URLs, inspect generated-site changes, and do not
+edit generated files in `dist/` or `docs/complexity-report.md` by hand.

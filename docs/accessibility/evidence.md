@@ -42,19 +42,35 @@ does not replace the owner-run assistive-technology and real-device rows below.
 
 ## Manual release evidence
 
-The following checks require a real supported device or assistive technology session. They are
-release gates and must be filled in by the owner before claiming complete WCAG 2.2 AA and browser
-support coverage. A pending row is not evidence of a pass.
+The owner completed the manual matrix on 2026-09-02 against deployed application revision
+`60143d264c250a448ea92f7546122e9e2e7533f4`. Every requested representative flow passed and no
+release-blocking accessibility or supported-browser defect was reported.
 
-| Check                                        | Required environment                        | Result                                                                                   | Evidence / date |
-| -------------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------- | --------------- |
-| Keyboard-only browse, edit, dialog, recovery | Latest supported desktop browser            | Covered by automated keyboard flow above; owner visual confirmation pending              | —               |
-| Windows screen reader and keyboard           | Supported Windows release + screen reader   | Pending owner run                                                                        | —               |
-| VoiceOver with Safari                        | Supported macOS + Safari                    | Pending owner run                                                                        | —               |
-| VoiceOver with Safari on iOS                 | Supported iPhone/iOS release                | Pending owner run                                                                        | —               |
-| Touch, orientation, 320px reflow, 200% text  | Real phone/tablet in portrait and landscape | Automated 320px/200% gate passes; real-device confirmation pending                       | —               |
-| Contrast, forced colors, reduced motion      | Supported desktop browser/OS settings       | Reduced-motion automated gate passes; forced-colors and OS contrast confirmation pending | —               |
+| Check                                                               | Environment                                                              | Result | Evidence / date                                                                                                |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------ | -------------------------------------------------------------------------------------------------------------- |
+| Keyboard-only browse, edit, dialog, validation, backup and recovery | Supported desktop browser                                                | PASS   | [Owner acceptance](https://github.com/m4s-ai/snoredex-checklist/issues/27#issuecomment-5509760967), 2026-09-02 |
+| Windows screen reader and keyboard                                  | Windows 11 Pro build 26200, Edge 151.0.4129.78, Narrator 10.0.26100.8875 | PASS   | [Owner acceptance](https://github.com/m4s-ai/snoredex-checklist/issues/27#issuecomment-5509760967), 2026-09-02 |
+| VoiceOver with Safari                                               | macOS and Safari; exact versions not supplied                            | PASS   | [Owner acceptance](https://github.com/m4s-ai/snoredex-checklist/issues/27#issuecomment-5509760967), 2026-09-02 |
+| VoiceOver with Safari on iOS                                        | iOS and Safari; exact device/version not supplied                        | PASS   | [Owner acceptance](https://github.com/m4s-ai/snoredex-checklist/issues/27#issuecomment-5509760967), 2026-09-02 |
+| Touch, portrait/landscape, narrow reflow and 200% zoom              | Real narrow device plus desktop zoom; exact device/version not supplied  | PASS   | [Owner acceptance](https://github.com/m4s-ai/snoredex-checklist/issues/27#issuecomment-5509760967), 2026-09-02 |
+| Forced colors/high contrast, light/dark and reduced motion          | Supported desktop browser and OS settings                                | PASS   | [Owner acceptance](https://github.com/m4s-ai/snoredex-checklist/issues/27#issuecomment-5509760967), 2026-09-02 |
 
-When completing a row, record the browser/OS/device, date, tested route and a short result here.
-Use synthetic data only; never attach private collection state, personal images, or identifying
-screen recordings.
+The acceptance covered spoken and visible names, states and announcements; focus order; status and
+quantity editing; image-dialog operation; direct `/` and `/collection/` loads; touch targets;
+reflow; and recovery. Exact Apple and physical-device versions were not supplied, so none are
+invented here. All evidence used the required synthetic-only scope and contains no private
+collection data.
+
+## Post-acceptance regression evidence
+
+Later product-interface work in [issue #79](https://github.com/m4s-ai/snoredex-checklist/issues/79)
+kept search primary, made status changes one tap, revealed quantities contextually, bounded result
+mounting, and simplified homepage and provenance presentation. Its final build passed Chromium,
+Firefox, and WebKit browser smoke and all 12 accessibility engine/viewport configurations. The
+runtime-coherence work in [issue #81](https://github.com/m4s-ai/snoredex-checklist/issues/81) also
+passed those 12 configurations and introduced no intentional interaction redesign.
+
+Those automated regressions support the later builds; they do not retroactively turn the dated
+manual session into a blanket claim for every future revision, browser, assistive technology, or
+catalogue snapshot. A future material interaction change must update its owning issue and rerun the
+appropriate manual rows.

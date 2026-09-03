@@ -2,13 +2,16 @@
 
 # Repository security controls
 
-This record translates the accepted v1 decisions in issue #11 into verifiable repository and
-GitHub-hosted controls. It does not contain secrets, private collection data, or a second policy.
+This record translates the accepted v1 decisions in
+[`snoredex-checklist#11`](https://github.com/m4s-ai/snoredex-checklist/issues/11) into verifiable
+repository and GitHub-hosted controls. The release-gate evidence was completed on 2026-09-02; the
+live settings below were rechecked on 2026-09-03. It contains no secrets, private collection data,
+or second policy.
 
 ## Controls in the repository
 
-- [`SECURITY.md`](../../SECURITY.md) routes confidential reports to GitHub Repository Security
-  Advisories and states the pre-release support boundary.
+- [`SECURITY.md`](../../SECURITY.md) routes confidential reports to GitHub Private Vulnerability
+  Reporting or a private Security Advisory and defines the deployed-release support boundary.
 - [`.github/dependabot.yml`](../../.github/dependabot.yml) checks the root npm lockfile and GitHub
   Actions references weekly. Dependabot pull requests use the normal CI gates and maintainer
   review; there is no auto-approval, auto-merge, grouping, ignore rule, or gate bypass.
@@ -17,26 +20,29 @@ GitHub-hosted controls. It does not contain secrets, private collection data, or
   suffix or private-value canaries from tracked/build outputs.
 - The static entry pages carry the first-applicable default-deny meta CSP. The browser smoke gate
   verifies its directives and the absence of inline executable scripts.
+- The build, artifact, and deployment-manifest checks bind each HTML shell to an immutable runtime
+  manifest, verify exact module membership and byte digests, and validate both the active and
+  retained rollback generations before publication. The post-deploy smoke re-fetches the live
+  manifests and declared bytes after Pages publication; a mismatch fails the workflow but requires
+  an explicit operator rollback rather than automatically restoring the prior site.
 
-## GitHub-hosted controls to activate and verify
+## Verified GitHub-hosted controls
 
-These controls are settings owned by repository administrators, not custom workflows. Activate
-them in the same issue-backed release-gate change and record the resulting setting evidence in
-issue #11 before release acceptance:
+These settings are owned by repository administrators rather than repository files. GitHub remains
+the live source of truth if a setting changes after the dated check.
 
-1. Enable GitHub Private Vulnerability Reporting for this public repository and ensure the sole
-   maintainer receives security-alert notifications. Do not add a security mailbox, upload form,
-   third-party disclosure service, or public disclosure automation.
-2. Enable GitHub CodeQL **default setup** for JavaScript/TypeScript. Use the GitHub-managed query
-   suite; do not add a custom CodeQL workflow, query pack, CLI job, or duplicate scanner. Wait for
-   the first scan, triage its findings, and only then register its actual stable check name as a
-   required rule.
-3. Activate one `main` ruleset after the real CI check names are stable. Require pull requests,
-   the actual designated CI gates, and blocked force-push/deletion; keep zero approvals for the
-   single-maintainer v1 workflow. Never pre-register a phantom check or bypass Dependabot.
-4. Keep squash-only merging and automatic feature-branch deletion enabled; merging remains
-   distinct from publication/deployment.
+| Control                | Verified configuration                                                                                                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Confidential reporting | GitHub Private Vulnerability Reporting enabled                                                                                                                                             |
+| Supply-chain alerts    | Dependabot security updates, secret scanning, and secret-scanning push protection enabled                                                                                                  |
+| Code scanning          | CodeQL default setup, GitHub-managed default query suite, weekly; JavaScript/TypeScript and Actions analyzed                                                                               |
+| Protected branch       | Active [`main release gates`](https://github.com/m4s-ai/snoredex-checklist/rules/21879322) ruleset on `main`; deletion and non-fast-forward updates blocked; no bypass actors              |
+| Pull requests          | Required with zero approvals for the single-maintainer workflow; stale reviews dismissed on push; all review threads must be resolved; unattributed changes require an additional approval |
+| Strict checks          | `core (ubuntu-24.04)`, `core (windows-2025)`, `browser (ubuntu-24.04)`, `Analyze (javascript-typescript)`, and `Analyze (actions)`                                                         |
+| Merge policy           | Squash merge only; merge commits and rebase merging disabled; feature branches deleted after merge                                                                                         |
 
-The exact activation timestamp, setting URL/screenshot, CodeQL scan result and required-check
-names belong in the issue/release evidence. Until that evidence exists, the release gate remains
-open and this document must not be read as a claim that the GitHub-hosted settings are active.
+The completed G6 evidence, including deterministic CI and Pages behavior, privacy and trust-boundary
+checks, browser/accessibility gates, and forward/rollback/forward recovery, is recorded in the
+[`issue #11 verification comment`](https://github.com/m4s-ai/snoredex-checklist/issues/11#issuecomment-5509764589).
+Repository settings are rechecked for security-sensitive changes; this dated record is not a
+substitute for querying the current GitHub configuration.

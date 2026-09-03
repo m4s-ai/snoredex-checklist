@@ -1,8 +1,9 @@
-# Snoredex visual design baseline
+# Snoredex visual design reference
 
-Status: owner-approved on 2026-08-24. GitHub issue [#30] is the product decision and
-implementation map. This directory preserves the approved visual direction; it is not the
-production application.
+Status: historical owner-approved baseline from 2026-08-24. GitHub issue [#30] is its product
+decision and implementation map. This directory preserves that synthetic reference; it is not the
+production application or the current interaction specification. Use [`DESIGN.md`](../../DESIGN.md)
+for the current production design system.
 
 [#30]: https://github.com/m4s-ai/snoredex-checklist/issues/30
 
@@ -33,21 +34,21 @@ Nunito Sans is self-hosted at weights 400 and 500, with a system-UI fallback; co
 and quantities use tabular numerals. First visit follows `prefers-color-scheme`; a manual Light or
 Dark override is stored locally.
 
-| Token | Light | Dark |
-| --- | --- | --- |
-| Page | `#FBF8EE` | `#172326` |
-| Surface | `#FFFFFF` | `#213136` |
-| Soft | `#F1EDDA` | `#2A3C40` |
-| Ink | `#23343A` | `#F4F0DD` |
-| Muted | `#637176` | `#B7C2BD` |
-| Primary | `#456F78` | `#79AEB8` |
-| Primary soft | `#DCEBED` | `#29464C` |
-| Accent | `#A7C8B8` | `#9CC2AF` |
-| Highlight | `#E8D69B` | `#D8C78E` |
-| Danger | `#AD5752` | `#E28F87` |
-| Border | `#D8DDD3` | `#405257` |
+| Token          | Light     | Dark      |
+| -------------- | --------- | --------- |
+| Page           | `#FBF8EE` | `#172326` |
+| Surface        | `#FFFFFF` | `#213136` |
+| Soft           | `#F1EDDA` | `#2A3C40` |
+| Ink            | `#23343A` | `#F4F0DD` |
+| Muted          | `#637176` | `#B7C2BD` |
+| Primary        | `#456F78` | `#79AEB8` |
+| Primary soft   | `#DCEBED` | `#29464C` |
+| Accent         | `#A7C8B8` | `#9CC2AF` |
+| Highlight      | `#E8D69B` | `#D8C78E` |
+| Danger         | `#AD5752` | `#E28F87` |
+| Border         | `#D8DDD3` | `#405257` |
 | Control border | `#7C8B8A` | `#7B8D8F` |
-| Focus | `#7A5C00` | `#F0D276` |
+| Focus          | `#7A5C00` | `#F0D276` |
 
 Controls use 12px corners, rows and dialogs 18px, and hero/large surfaces 24px. Pills are reserved
 for status, tags and theme controls. Depth comes from tonal layers and subtle shadows.
@@ -55,26 +56,42 @@ for status, tags and theme controls. Depth comes from tonal layers and subtle sh
 The target is WCAG 2.2 AA: text and control contrast, visible focus, 44px targets, non-color cues,
 keyboard/touch equivalence, reduced motion, 200% zoom and reflow from 320px through desktop.
 
-## Page reference
+## Current production evolution
 
 The index uses the approved hero copy, “Your Snorlax collection. One checklist.” It explains
 private local state, current-known scope and catalogue provenance without claiming universal
 completeness or official affiliation. Navigation contains no general GitHub link; Snoredex Data is
-linked as a visibly external site.
+linked as a visibly external site. The production index now moves from that short persuasive
+section into a grouped locality/language directory. Its normal path loads only the bounded
+directory projection; the compatibility path loads and validates the full catalogue snapshot when
+an older shell has no directory digest or the directory modules are unavailable. The index does
+not load the migration payload.
 
-The collection uses a left locality -> local set -> set edition navigator on wider screens and a
-semantic “Browse sets” entry point on narrow screens. A selected set edition is the normal work
-view. Current-known progress and Research are separate. One semantic item structure adapts from
-compact row to stacked card. English name is primary; a positively known local name is adjacent.
-Approved images may offer hover zoom only with equivalent focus/click/touch inspection and visible
-scope. Research remains read-only and may link to evidence and the producer correction flow.
+The collection promotes search and uses native localization and set selectors for progressive
+browsing; it no longer renders the reference's always-expanded left catalogue tree. Advanced
+filters, backup/recovery tools, and technical provenance remain available through disclosures.
+Results mount in bounded groups with a dedicated live status and deliberate keyboard focus after
+the collector reveals more. A selected set edition remains the normal work view. Current-known
+progress and Research are separate. One semantic item structure adapts from compact row to stacked
+card. English name is primary; a positively known local name is adjacent. Approved images may
+offer hover zoom only with equivalent focus/click/touch inspection and visible scope. Research
+remains read-only, explains why collection controls are unavailable, and may link to trackable
+items, evidence, and the producer correction flow.
 
 The authoritative private states remain Need, Ordered, Have and Skip as specified in issue [#10].
-The reference uses those labels and must not be treated as a collection-state schema.
+Production keeps all four as one-tap controls for trackable items, revealing quantities only for
+Ordered and Have and notes progressively. Public provenance leads with a short human summary; exact
+revisions, fingerprints, digests, and opaque identifiers remain in technical disclosures. The
+reference uses the status labels but must not be treated as a collection-state schema.
 
 [#10]: https://github.com/m4s-ai/snoredex-checklist/issues/10
 
-## Implementation ownership
+These production changes were accepted through the accessibility/usability remediation in [#27]
+and the cross-page interface audit in [#79].
+
+[#79]: https://github.com/m4s-ai/snoredex-checklist/issues/79
+
+## Historical implementation ownership
 
 - [#21] owns the two entry pages, theme bootstrap, shared tokens, index and shell/provenance.
 - [#24] owns collection navigation, canonical queries, selected edition and progress.
@@ -95,4 +112,5 @@ The reference uses those labels and must not be treated as a collection-state sc
 Open [`reference.html`](reference.html) directly in a browser. It is a self-contained, network-free
 design reference containing the design system, index, collection and component/error examples.
 All content is synthetic; it contains no private collection data or third-party card image. The
-reference is evidence for visual intent, not production source and not catalogue truth.
+reference is frozen evidence for the original visual intent, not production source, current
+interaction behavior, or catalogue truth. Replace it only through an explicitly owned design issue.
