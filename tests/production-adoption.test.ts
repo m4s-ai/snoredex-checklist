@@ -64,8 +64,9 @@ test('production adoption validates the reviewed target migration without requir
   const deployedSmokeStep = workflow.slice(workflow.indexOf('- name: Smoke-test deployed Pages site'));
   assert.match(deployedSmokeStep, /dist\/site\/provenance\.json/u);
   assert.doesNotMatch(deployedSmokeStep, /catalogue\.lock\.json/u);
-  assert.match(smokeScript, /readRuntimeAssetSet\(pointer, runtime, getRuntimeBytes\)/u);
-  assert.match(smokeScript, /readRuntimeAssetSet\(retained\[0\], deployment\.rollback, getRuntimeBytes\)/u);
+  assert.match(smokeScript, /readRuntimeAssetSet\(\s*pointer,\s*runtime,\s*getRuntimeBytes,?\s*\)/u);
+  assert.match(smokeScript, /readRuntimeAssetSet\(\s*retained\[0\],\s*deployment\.rollback,\s*getRuntimeBytes,?\s*\)/u);
+  assert.match(smokeScript, /runtimeShellBindings\(activeRuntimeManifest/u);
   assert.doesNotMatch(workflow, /git merge-base --is-ancestor/u);
   assert.match(
     workflow,

@@ -14,7 +14,7 @@ function isModulePath(value) {
     typeof value === 'string' &&
     value.length > 0 &&
     value.length <= 256 &&
-    value.endsWith('.js') &&
+    /^[a-z0-9][a-z0-9._/-]*\.js$/u.test(value) &&
     !value.startsWith('/') &&
     !value.includes('\\') &&
     value.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..')
@@ -23,6 +23,30 @@ function isModulePath(value) {
 
 export function sha256(bytes) {
   return `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+}
+
+function sriSha256(digest) {
+  if (!digestPattern.test(digest ?? '')) throw new Error('RUNTIME_ASSET_DIGEST_INVALID');
+  return `sha256-${Buffer.from(digest.slice('sha256:'.length), 'hex').toString('base64')}`;
+}
+
+export function runtimeShellBindings(manifest, prefix) {
+  if (!validateRuntimeAssetSetManifest(manifest) || typeof prefix !== 'string' || !prefix.endsWith('/')) {
+    throw new Error('RUNTIME_ASSET_SHELL_BINDING_INVALID');
+  }
+  const integrity = Object.fromEntries(
+    manifest.modules.map((module) => [`${prefix}${module.path}`, sriSha256(module.sha256)]),
+  );
+  const importMap = JSON.stringify({ integrity });
+  const appIntegrity = integrity[`${prefix}app.js`];
+  const themeIntegrity = integrity[`${prefix}theme.js`];
+  if (!appIntegrity || !themeIntegrity) throw new Error('RUNTIME_ASSET_SHELL_BINDING_INVALID');
+  return {
+    importMap,
+    importMapCsp: sriSha256(sha256(Buffer.from(importMap, 'utf8'))),
+    appIntegrity,
+    themeIntegrity,
+  };
 }
 
 export function runtimeTupleFromProvenance(provenance) {

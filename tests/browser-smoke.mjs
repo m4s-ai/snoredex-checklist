@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
 import { chromium, firefox, webkit } from '@playwright/test';
 
+import { runtimeShellBindings } from '../scripts/runtime-assets.mjs';
+
 const root = resolve(process.env.SNOREDEX_SITE_ROOT ?? 'dist/site');
 const mimeTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -39,6 +41,12 @@ const baseUrl = `http://127.0.0.1:${address.port}`;
 const directorySnapshotSource = await readFile(join(root, 'assets/directory-snapshot.js'), 'utf8');
 const snapshotSource = await readFile(join(root, 'assets/snapshot.js'), 'utf8');
 const migrationsSource = await readFile(join(root, 'assets/migrations.js'), 'utf8');
+const moduleManifest = JSON.parse(await readFile(join(root, 'assets/module-manifest.json'), 'utf8'));
+const runtimeManifest = JSON.parse(
+  await readFile(join(root, 'assets', moduleManifest.runtimeAssetSet.path, 'manifest.json'), 'utf8'),
+);
+const homeBindings = runtimeShellBindings(runtimeManifest, `assets/${moduleManifest.runtimeAssetSet.path}/`);
+const collectionBindings = runtimeShellBindings(runtimeManifest, `../assets/${moduleManifest.runtimeAssetSet.path}/`);
 const staleRuntimeSnapshotSource = snapshotSource.replace(
   /"appRevision":"[0-9a-f]{40}"/u,
   `"appRevision":"${'e'.repeat(40)}"`,
@@ -67,23 +75,39 @@ assert.notEqual(
   directorySnapshotSource,
   'directory fixture provenance must change a digest-bound value',
 );
-const expectedCsp =
-  "default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'self'; media-src 'none'; manifest-src 'none'";
-
 async function assertSecurityBoundary(page, name) {
+  const bindings =
+    (await page.locator('body').getAttribute('data-page')) === 'collection' ? collectionBindings : homeBindings;
+  const expectedCsp = `default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self' '${bindings.importMapCsp}'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'self'; media-src 'none'; manifest-src 'none'`;
   assert.equal(await page.locator('meta[http-equiv="Content-Security-Policy"]').count(), 1, `${name}: one CSP`);
   assert.equal(
     await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content'),
     expectedCsp,
     `${name}: CSP directives`,
   );
-  assert.equal(await page.locator('script:not([src])').count(), 0, `${name}: no inline scripts`);
+  assert.equal(await page.locator('script:not([src]):not([type="importmap"])').count(), 0, `${name}: no inline code`);
+  assert.equal(await page.locator('script[type="importmap"]:not([src])').count(), 1, `${name}: one integrity map`);
+  assert.equal(
+    await page.locator('script[type="importmap"]').textContent(),
+    bindings.importMap,
+    `${name}: exact integrity map`,
+  );
   assert.equal(
     await page.locator('head > script[src$="theme.js"][type="module"]').count(),
     0,
     `${name}: theme bootstrap is blocking`,
   );
   assert.equal(await page.locator('head > script[src$="theme.js"]').count(), 1, `${name}: one theme bootstrap`);
+  assert.equal(
+    await page.locator('head > script[src$="theme.js"]').getAttribute('integrity'),
+    bindings.themeIntegrity,
+    `${name}: theme integrity`,
+  );
+  assert.equal(
+    await page.locator('script[type="module"][src$="app.js"]').getAttribute('integrity'),
+    bindings.appIntegrity,
+    `${name}: app integrity`,
+  );
   const fontFaces = await page.evaluate(async () => {
     await document.fonts.ready;
     return [...document.fonts]
@@ -99,11 +123,14 @@ async function assertSecurityBoundary(page, name) {
     ],
     `${name}: self-hosted Nunito Sans faces`,
   );
-  const scriptSources = await page
+  const scripts = await page
     .locator('script')
-    .evaluateAll((scripts) => scripts.map((script) => script.getAttribute('src')));
+    .evaluateAll((elements) => elements.map((script) => ({ source: script.getAttribute('src'), type: script.type })));
   assert.ok(
-    scriptSources.length > 0 && scriptSources.every((source) => typeof source === 'string' && source.length > 0),
+    scripts.length > 0 &&
+      scripts.every(({ source, type }) =>
+        type === 'importmap' ? source === null : typeof source === 'string' && source.length > 0,
+      ),
     `${name}: script sources`,
   );
   const externalLinks = await page
@@ -129,7 +156,11 @@ async function assertCspBlocksInlineEvaluation(browser, name) {
       `${name}: hostile query remains data`,
     );
     assert.match(queryValue, /SELECT \* FROM private_state;/u, `${name}: hostile query keeps SQL-like data`);
-    assert.equal(await page.locator('script:not([src])').count(), 0, `${name}: hostile query did not create script`);
+    assert.equal(
+      await page.locator('script:not([src]):not([type="importmap"])').count(),
+      0,
+      `${name}: hostile query did not create executable script`,
+    );
     assert.equal(
       await page.evaluate(() => globalThis.__snoredexPayloadExecuted === true),
       false,
@@ -550,8 +581,8 @@ try {
         `${name}: stale provenance fails closed instead of accepting or falling back`,
       );
       await staleProvenancePage.close();
-      const legacyBootstrapPage = await browser.newPage();
-      await legacyBootstrapPage.route('**/assets/runtime/**/app.js', (route) =>
+      const tamperedBootstrapPage = await browser.newPage();
+      await tamperedBootstrapPage.route('**/assets/runtime/**/app.js', (route) =>
         route.fulfill({
           contentType: 'text/javascript; charset=utf-8',
           body: `
@@ -566,14 +597,40 @@ try {
           `,
         }),
       );
-      const legacyBootstrapHome = await legacyBootstrapPage.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
-      assert.equal(legacyBootstrapHome?.status(), 200, `${name}: legacy bootstrap home status`);
+      const tamperedBootstrapHome = await tamperedBootstrapPage.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
+      assert.equal(tamperedBootstrapHome?.status(), 200, `${name}: tampered bootstrap home status`);
       assert.equal(
-        await legacyBootstrapPage.locator('body').getAttribute('data-legacy-digest-result'),
-        'false',
-        `${name}: preceding bootstrap fails closed against the stable marker's envelope digest`,
+        await tamperedBootstrapPage.locator('body').getAttribute('data-legacy-digest-result'),
+        null,
+        `${name}: SRI blocks a changed entry module before execution`,
       );
-      await legacyBootstrapPage.close();
+      await tamperedBootstrapPage.close();
+      for (const [modulePath, source] of [
+        ['app.js', `localStorage.setItem('${PRIVATE_STATE_KEY}', 'mutated');`],
+        [
+          'private-state.js',
+          `localStorage.setItem('${PRIVATE_STATE_KEY}', 'mutated'); export async function readPrivateState() { return { readable: true, hasActiveState: false, statuses: new Map() }; }`,
+        ],
+      ]) {
+        const integrityPage = await browser.newPage();
+        await integrityPage.goto(`${baseUrl}/missing`, { waitUntil: 'domcontentloaded' });
+        const privateStateBefore = JSON.stringify({ schema: 'synthetic-private-state', marker: modulePath });
+        await integrityPage.evaluate(({ key, value }) => localStorage.setItem(key, value), {
+          key: PRIVATE_STATE_KEY,
+          value: privateStateBefore,
+        });
+        await integrityPage.route(`**/assets/runtime/**/${modulePath}`, (route) =>
+          route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: source }),
+        );
+        const integrityCollection = await integrityPage.goto(`${baseUrl}/collection/`, { waitUntil: 'networkidle' });
+        assert.equal(integrityCollection?.status(), 200, `${name}: tampered ${modulePath} collection status`);
+        assert.equal(
+          await integrityPage.evaluate((key) => localStorage.getItem(key), PRIVATE_STATE_KEY),
+          privateStateBefore,
+          `${name}: SRI blocks tampered ${modulePath} before private-state access`,
+        );
+        await integrityPage.close();
+      }
       for (const [modulePath, source] of [
         ['snapshot.js', staleRuntimeSnapshotSource],
         ['migrations.js', staleRuntimeMigrationsSource],

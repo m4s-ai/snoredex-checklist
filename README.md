@@ -57,9 +57,11 @@ to those issues instead of copying changing decisions into a second source of tr
 - Research remains read-only and outside Owned/Secured progress.
 - Unknown, retired, split, merged, or re-keyed identities never cause silent state loss.
 - Catalogue adoption and pre-publication artifact validation fail closed when the contract,
-  migrations, lock, runtime manifests, or built bytes disagree. Post-deploy smoke detects live-byte
-  discrepancies and fails the workflow, but does not automatically restore the prior deployment;
-  an operator must select the validated rollback target.
+  migrations, lock, runtime manifests, or built bytes disagree. Browser SRI and import-map
+  integrity also prevent altered entry, theme, static, or dynamic module bytes from executing.
+  Post-deploy smoke detects live-byte discrepancies and fails the workflow, but does not
+  automatically restore the prior deployment; an operator must select the validated rollback
+  target.
 
 ## Development
 
@@ -193,8 +195,10 @@ manifest whose exact recovery tuple names the selected consumer revision and its
 an arbitrary older ancestor is not sufficient. Each HTML shell loads an immutable
 `assets/runtime/<app-revision>/` module set whose manifest pins the app and producer revisions,
 contract version, catalogue fingerprint, catalogue and migration byte identities, and every module
-digest. A deployment retains only the active set and its declared one-slot rollback set; missing,
-mixed, additional, or digest-mismatched runtime files fail the artifact and Pages checks. The
+digest. The shell derives its CSP-bound import-map integrity table and entry/theme SRI values from
+that manifest, so changed module bytes fail in the browser before execution. A deployment retains
+only the active set and its declared one-slot rollback set; missing, mixed, additional, or
+digest-mismatched runtime files fail the artifact and Pages checks. The
 deployment manifest carries every catalogue fingerprint
 that may still be active in browsers after the one-slot rollback. A later adoption must provide a
 reviewed route for each of those fingerprints. If those sources diverge, no single rollback target

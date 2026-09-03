@@ -8,12 +8,14 @@
     <meta name="snoredex-directory-sha256" content="__SNOREDEX_DIRECTORY_SHA256__" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'self'; media-src 'none'; manifest-src 'none'"
+      content="default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self' '__SNOREDEX_IMPORT_MAP_CSP__'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'self'; media-src 'none'; manifest-src 'none'"
     />
     <title>Snoredex Checklist</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="describedby" href="llms.txt" />
-    <script src="theme.js"></script>
+    <!-- prettier-ignore -->
+    <script type="importmap">__SNOREDEX_RUNTIME_IMPORT_MAP__</script>
+    <script src="assets/runtime/__SNOREDEX_APP_REVISION__/theme.js" integrity="__SNOREDEX_THEME_INTEGRITY__"></script>
   </head>
   <body data-page="index">
     <a class="skip-link" href="#main-content">Skip to content</a>
@@ -80,6 +82,10 @@
         ></span
       >
     </footer>
-    <script type="module" src="assets/runtime/__SNOREDEX_APP_REVISION__/app.js"></script>
+    <script
+      type="module"
+      src="assets/runtime/__SNOREDEX_APP_REVISION__/app.js"
+      integrity="__SNOREDEX_APP_INTEGRITY__"
+    ></script>
   </body>
 </html>

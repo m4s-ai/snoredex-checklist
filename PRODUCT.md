@@ -50,9 +50,10 @@ statuses, quantities, notes, recovery records, or collection identities.
 - Normal builds use one committed, validated, digest-pinned vendor snapshot and do not fetch
   mutable producer data.
 - Every published HTML shell addresses one immutable runtime-module set. Build, deployment, and
-  post-deploy checks verify the active and one-slot rollback module digests together. Each route
-  validates its catalogue input before rendering it; the collection route also validates migration
-  identity before private-state access or reconciliation.
+  post-deploy checks verify the active and one-slot rollback module digests together. Browser SRI
+  and import-map integrity verify the entry, theme and imported module graph before execution. Each
+  route validates its catalogue input before rendering it; the collection route also validates
+  migration identity before private-state access or reconciliation.
 - Current-known progress is derived from producer-assigned classes. Research stays outside Owned
   and Secured denominators and is never presented as an ordinary collection status.
 - Catalogue changes conserve every old private-state identity. Ambiguous splits, merges, missing

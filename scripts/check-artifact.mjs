@@ -5,6 +5,7 @@ import process from 'node:process';
 import { SyntaxKind } from 'typescript/unstable/ast';
 import { API } from 'typescript/unstable/sync';
 import {
+  runtimeShellBindings,
   runtimeTupleFromProvenance,
   validateRuntimeAssetSetDirectory,
   validateRuntimeAssetSetPointer,
@@ -765,6 +766,7 @@ try {
   }
   let moduleManifest;
   let runtime;
+  let activeRuntimeManifest;
   const runtimeSetTuples = new Map();
   if (pinnedCatalogue) {
     try {
@@ -797,6 +799,7 @@ try {
       }
       const directory = join(root, 'assets', ...pointer.path.split('/'));
       const setManifest = JSON.parse(await readFile(join(directory, 'manifest.json'), 'utf8'));
+      if (pointer.appRevision === runtime.appRevision) activeRuntimeManifest = setManifest;
       runtimeSetTuples.set(pointer.appRevision, setManifest.runtime);
       const actual = (await filesIn(directory)).map((path) => relative(directory, path).replaceAll('\\', '/')).sort();
       const declared = ['manifest.json', ...setManifest.modules.map((module) => module.path)].sort();
@@ -858,11 +861,14 @@ try {
   }
 
   const forbiddenContent = /\.snoredex-private\.json|synthetic-secret|PRIVATE-NOTE-DO-NOT-LOG/iu;
-  const csp =
-    "default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'self'; media-src 'none'; manifest-src 'none'";
   for (const page of ['index.html', 'collection/index.html']) {
     const html = await readFile(join(root, page), 'utf8');
     const withoutComments = stripHtmlComments(html);
+    const prefix = page === 'index.html' ? '' : '../';
+    const bindings = pinnedCatalogue
+      ? runtimeShellBindings(activeRuntimeManifest, `${prefix}assets/${moduleManifest.runtimeAssetSet.path}/`)
+      : undefined;
+    const csp = `default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'${bindings ? ` '${bindings.importMapCsp}'` : ''}; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'self'; media-src 'none'; manifest-src 'none'`;
     const head = extractHead(withoutComments);
     const hasCspMeta = hasActiveCspMeta(head, csp);
     if (!hasCspMeta) throw new Error(`ARTIFACT_CSP_MISSING: ${page}`);
@@ -870,15 +876,24 @@ try {
     if (/\b(?:unsafe-inline|unsafe-eval)\b/iu.test(html)) throw new Error(`ARTIFACT_CSP_UNSAFE_DIRECTIVE: ${page}`);
     if (/[\s/]on[a-z]+\s*=/iu.test(html)) throw new Error(`ARTIFACT_INLINE_HANDLER_PRESENT: ${page}`);
     if (pinnedCatalogue) {
-      const prefix = page === 'index.html' ? '' : '../';
-      const expectedSource = `${prefix}assets/${moduleManifest.runtimeAssetSet.path}/app.js`;
-      if (!html.includes(`<script type="module" src="${expectedSource}"></script>`)) {
-        throw new Error(`ARTIFACT_RUNTIME_SCRIPT_INVALID: ${page}`);
-      }
+      const expectedImportMap = `<script type="importmap">${bindings.importMap}</script>`;
+      if (!withoutComments.includes(expectedImportMap)) throw new Error(`ARTIFACT_RUNTIME_IMPORT_MAP_INVALID: ${page}`);
     }
+    let importMapCount = 0;
+    let runtimeAppSeen = false;
+    let runtimeThemeSeen = false;
     for (const match of stripHtmlComments(html).matchAll(/<script\b[^>]*>/giu)) {
       const encodedSource = readAttribute(match[0], 'src');
-      if (encodedSource === undefined) throw new Error(`ARTIFACT_INLINE_SCRIPT_PRESENT: ${page}`);
+      if (encodedSource === undefined) {
+        if (
+          pinnedCatalogue &&
+          decodeHtmlAttribute(readAttribute(match[0], 'type') ?? '').toLowerCase() === 'importmap'
+        ) {
+          importMapCount += 1;
+          continue;
+        }
+        throw new Error(`ARTIFACT_INLINE_SCRIPT_PRESENT: ${page}`);
+      }
       const source = decodeHtmlAttribute(encodedSource);
       if (
         !source ||
@@ -892,6 +907,21 @@ try {
         !isArtifactAssetTarget(source, page, relativeFiles)
       )
         throw new Error(`ARTIFACT_EXTERNAL_SCRIPT_PRESENT: ${page}`);
+      if (pinnedCatalogue) {
+        const expectedBase = `${prefix}assets/${moduleManifest.runtimeAssetSet.path}/`;
+        const type = decodeHtmlAttribute(readAttribute(match[0], 'type') ?? '').toLowerCase();
+        const integrity = decodeHtmlAttribute(readAttribute(match[0], 'integrity') ?? '');
+        if (source === `${expectedBase}app.js` && type === 'module' && integrity === bindings.appIntegrity) {
+          runtimeAppSeen = true;
+        } else if (source === `${expectedBase}theme.js` && type === '' && integrity === bindings.themeIntegrity) {
+          runtimeThemeSeen = true;
+        } else {
+          throw new Error(`ARTIFACT_RUNTIME_SCRIPT_INVALID: ${page}`);
+        }
+      }
+    }
+    if (pinnedCatalogue && (importMapCount !== 1 || !runtimeAppSeen || !runtimeThemeSeen)) {
+      throw new Error(`ARTIFACT_RUNTIME_SCRIPT_INVALID: ${page}`);
     }
     for (const tag of htmlTags(withoutComments)) {
       if (tag.closing || tag.name !== 'link') continue;

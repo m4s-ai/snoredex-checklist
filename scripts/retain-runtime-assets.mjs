@@ -21,7 +21,7 @@ function isModulePath(value) {
     typeof value === 'string' &&
     value.length > 0 &&
     value.length <= 256 &&
-    value.endsWith('.js') &&
+    /^[a-z0-9][a-z0-9._/-]*\.js$/u.test(value) &&
     !value.startsWith('/') &&
     !value.includes('\\') &&
     value.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..')
@@ -64,6 +64,16 @@ async function fetchJson(relativePath) {
   } catch {
     throw new Error('RUNTIME_PREVIOUS_ASSET_INVALID');
   }
+}
+
+async function retainLegacyTheme(candidate, manifest) {
+  const modulePaths = manifest.modules.map((module) => (typeof module === 'string' ? module : module.path));
+  if (modulePaths.includes('theme.js')) return;
+  const [theme, collectionTheme] = await Promise.all([fetchBytes('theme.js'), fetchBytes('collection/theme.js')]);
+  const marker = Buffer.from(`snoredex-app-revision:${candidate.appRevision}`, 'utf8');
+  if (!theme.equals(collectionTheme) || !theme.includes(marker)) throw new Error('RUNTIME_PREVIOUS_THEME_INVALID');
+  await writeFile(join(root, 'theme.js'), theme);
+  await writeFile(join(root, 'collection/theme.js'), theme);
 }
 
 async function promoteLegacyActiveSet(provenance, manifest) {
@@ -159,6 +169,7 @@ async function retainPublishedSet(previous, currentRuntime) {
       await mkdir(dirname(destination), { recursive: true });
       await writeFile(destination, bytes);
     }
+    await retainLegacyTheme(candidate, fetched.value);
     return publishedPointer;
   }
 
@@ -185,6 +196,7 @@ async function retainPublishedSet(previous, currentRuntime) {
       await writeFile(destination, bytes);
       await writeFile(join(assets, ...modulePath.split('/')), bytes);
     }
+    await retainLegacyTheme(candidate, legacy);
     return await writeRuntimeAssetSet({ assetsRoot: assets, sourceRoot, modulePaths: legacy.modules, runtime });
   } finally {
     await rm(sourceRoot, { recursive: true, force: true });

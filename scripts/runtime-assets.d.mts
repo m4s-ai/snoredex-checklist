@@ -17,6 +17,15 @@ export interface RuntimeAssetSetPointer {
 }
 
 export function sha256(bytes: Uint8Array): string;
+export function runtimeShellBindings(
+  manifest: unknown,
+  prefix: string,
+): {
+  readonly importMap: string;
+  readonly importMapCsp: string;
+  readonly appIntegrity: string;
+  readonly themeIntegrity: string;
+};
 export function runtimeTupleFromProvenance(provenance: unknown): RuntimeTuple;
 export function validateRuntimeTuple(value: unknown, expected?: RuntimeTuple): value is RuntimeTuple;
 export function validateRuntimeAssetSetPointer(

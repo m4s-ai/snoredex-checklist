@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { replaceOutput } from './site-output.ts';
 import { buildValidatedSourceMembershipIndex } from './migration-membership.ts';
 import {
+  runtimeShellBindings,
   runtimeTupleFromProvenance,
   validateRuntimeAssetSetDirectory,
   writeRuntimeAssetSet,
@@ -152,6 +153,7 @@ try {
   );
   if (stateResult.status !== 0)
     throw new Error(`browser state read API build failed with status ${stateResult.status ?? 'unknown'}`);
+  await cp(resolve(root, 'site-src/theme.js'), resolve(assets, 'theme.js'));
   const siteAssets = await import(pathToFileURL(resolve(assets, 'assets.js')));
   const placeholderAssets = Object.values(siteAssets.PLACEHOLDER_ASSETS ?? {});
   if (placeholderAssets.length === 0) throw new Error('site image manifest has no placeholders');
@@ -253,6 +255,7 @@ try {
     modulePaths: javascriptModules,
     runtime,
   });
+  const runtimeManifest = JSON.parse(await readFile(resolve(assets, runtimeAssetSet.path, 'manifest.json'), 'utf8'));
   await writeFile(
     resolve(assets, 'module-manifest.json'),
     `${JSON.stringify(
@@ -309,13 +312,24 @@ try {
     throw new Error('site runtime asset set failed validation');
   }
 
+  const homeBindings = runtimeShellBindings(runtimeManifest, `assets/${runtimeAssetSet.path}/`);
+  const collectionBindings = runtimeShellBindings(runtimeManifest, `../assets/${runtimeAssetSet.path}/`);
   await copyRevisionShell(resolve(root, 'site-src/index.html'), resolve(staging, 'index.html'), {
     __SNOREDEX_DIRECTORY_SHA256__: directoryEnvelopeSha256,
+    __SNOREDEX_RUNTIME_IMPORT_MAP__: homeBindings.importMap,
+    __SNOREDEX_IMPORT_MAP_CSP__: homeBindings.importMapCsp,
+    __SNOREDEX_APP_INTEGRITY__: homeBindings.appIntegrity,
+    __SNOREDEX_THEME_INTEGRITY__: homeBindings.themeIntegrity,
   });
-  await copyRevisionScript(resolve(root, 'site-src/theme.js'), resolve(staging, 'theme.js'));
+  await cp(resolve(assets, 'theme.js'), resolve(staging, 'theme.js'));
   await mkdir(resolve(staging, 'collection'), { recursive: true });
-  await copyRevisionShell(resolve(root, 'site-src/collection/index.html'), resolve(staging, 'collection/index.html'));
-  await copyRevisionScript(resolve(root, 'site-src/theme.js'), resolve(staging, 'collection/theme.js'));
+  await copyRevisionShell(resolve(root, 'site-src/collection/index.html'), resolve(staging, 'collection/index.html'), {
+    __SNOREDEX_RUNTIME_IMPORT_MAP__: collectionBindings.importMap,
+    __SNOREDEX_IMPORT_MAP_CSP__: collectionBindings.importMapCsp,
+    __SNOREDEX_APP_INTEGRITY__: collectionBindings.appIntegrity,
+    __SNOREDEX_THEME_INTEGRITY__: collectionBindings.themeIntegrity,
+  });
+  await cp(resolve(assets, 'theme.js'), resolve(staging, 'collection/theme.js'));
   await copyRevisionGuide(resolve(root, 'site-src/llms.txt'), resolve(staging, 'llms.txt'));
   await copyRevisionStylesheet(resolve(root, 'site-src/styles.css'), resolve(staging, 'styles.css'));
   await cp(resolve(root, 'LICENSE.md'), resolve(staging, 'LICENSE.md'));
