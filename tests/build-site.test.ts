@@ -7,7 +7,12 @@ import test from 'node:test';
 
 import { replaceOutput } from '../scripts/site-output.ts';
 import { buildValidatedSourceMembershipIndex } from '../scripts/migration-membership.ts';
-import { readRuntimeAssetSet, sha256 } from '../scripts/runtime-assets.mjs';
+import {
+  readRuntimeAssetSet,
+  runtimeShellBindings,
+  sha256,
+  validateRuntimeAssetSetManifest,
+} from '../scripts/runtime-assets.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 
@@ -47,6 +52,13 @@ test('validates every fetched runtime asset byte', async () => {
 
   const loaded = await readRuntimeAssetSet(pointer, runtime, readBytes);
   assert.equal(loaded.moduleTexts.length, modules.size);
+  assert.equal(
+    validateRuntimeAssetSetManifest({
+      ...manifest,
+      modules: [...manifest.modules, { path: 'x</script>.js', byteLength: 1, sha256: `sha256:${'f'.repeat(64)}` }],
+    }),
+    false,
+  );
   await assert.rejects(
     () =>
       readRuntimeAssetSet(pointer, runtime, async (path: string) =>
@@ -177,8 +189,17 @@ test('stamps the exact app revision into served shells and module', async () => 
     );
     assert.equal(runtimeManifest.runtime.appRevision, revision);
     assert.ok(runtimeManifest.modules.some((module: { path: string }) => module.path === 'app.js'));
+    assert.ok(runtimeManifest.modules.some((module: { path: string }) => module.path === 'theme.js'));
     assert.ok(runtimeManifest.modules.some((module: { path: string }) => module.path === 'directory.js'));
     assert.ok(runtimeManifest.modules.some((module: { path: string }) => module.path === 'directory-snapshot.js'));
+    const homeBindings = runtimeShellBindings(runtimeManifest, `assets/runtime/${revision}/`);
+    const collectionBindings = runtimeShellBindings(runtimeManifest, `../assets/runtime/${revision}/`);
+    assert.ok(home.includes(`<script type="importmap">${homeBindings.importMap}</script>`));
+    assert.ok(collection.includes(`<script type="importmap">${collectionBindings.importMap}</script>`));
+    assert.ok(home.includes(`integrity="${homeBindings.appIntegrity}"`));
+    assert.ok(home.includes(`integrity="${homeBindings.themeIntegrity}"`));
+    assert.ok(home.includes(`script-src 'self' '${homeBindings.importMapCsp}'`));
+    assert.ok(collection.includes(`script-src 'self' '${collectionBindings.importMapCsp}'`));
     for (const entry of runtimeManifest.modules) {
       const module = await readFile(resolve(output, 'assets', moduleManifest.runtimeAssetSet.path, entry.path), 'utf8');
       assert.match(module, new RegExp(`snoredex-app-revision:${revision}`, 'u'));

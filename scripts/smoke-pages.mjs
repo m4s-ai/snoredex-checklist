@@ -1,5 +1,5 @@
 import { validatePagesDeployment } from '../src/site/deployment.ts';
-import { readRuntimeAssetSet, validateRuntimeAssetSetPointer } from './runtime-assets.mjs';
+import { readRuntimeAssetSet, runtimeShellBindings, validateRuntimeAssetSetPointer } from './runtime-assets.mjs';
 
 const pageUrl = process.env.SNOREDEX_PAGE_URL;
 if (pageUrl !== 'https://m4s-ai.github.io/snoredex-checklist/') throw new Error('PAGES_SMOKE_URL_INVALID');
@@ -59,7 +59,13 @@ const runtime = {
   migrationByteSha256: expected.migrationByteSha256,
   migrationByteLength: expected.migrationByteLength,
 };
-const { moduleTexts: activeModuleTexts } = await readRuntimeAssetSet(pointer, runtime, getRuntimeBytes);
+const { manifest: activeRuntimeManifest, moduleTexts: activeModuleTexts } = await readRuntimeAssetSet(
+  pointer,
+  runtime,
+  getRuntimeBytes,
+);
+const homeBindings = runtimeShellBindings(activeRuntimeManifest, `assets/${pointer.path}/`);
+const collectionBindings = runtimeShellBindings(activeRuntimeManifest, `../assets/${pointer.path}/`);
 const [homeText, collectionText, guideText, stylesheetText, ...moduleTexts] = await Promise.all([
   home.text(),
   collection.text(),
@@ -67,18 +73,25 @@ const [homeText, collectionText, guideText, stylesheetText, ...moduleTexts] = aw
   stylesheet.text(),
   ...activeModuleTexts,
 ]);
-const [themeText, collectionThemeText] = await Promise.all([theme.text(), collectionTheme.text()]);
 if (
   !homeText.includes('Snoredex Checklist') ||
   !collectionText.includes('<body data-page="collection">') ||
-  !homeText.includes(`<script type="module" src="assets/${pointer.path}/app.js"></script>`) ||
-  !collectionText.includes(`<script type="module" src="../assets/${pointer.path}/app.js"></script>`) ||
+  !homeText.includes(`<script type="importmap">${homeBindings.importMap}</script>`) ||
+  !collectionText.includes(`<script type="importmap">${collectionBindings.importMap}</script>`) ||
+  !homeText.includes(`src="assets/${pointer.path}/app.js"`) ||
+  !homeText.includes(`integrity="${homeBindings.appIntegrity}"`) ||
+  !collectionText.includes(`src="../assets/${pointer.path}/app.js"`) ||
+  !collectionText.includes(`integrity="${collectionBindings.appIntegrity}"`) ||
+  !homeText.includes(`src="assets/${pointer.path}/theme.js"`) ||
+  !homeText.includes(`integrity="${homeBindings.themeIntegrity}"`) ||
+  !collectionText.includes(`src="../assets/${pointer.path}/theme.js"`) ||
+  !collectionText.includes(`integrity="${collectionBindings.themeIntegrity}"`) ||
+  !homeText.includes(`script-src 'self' '${homeBindings.importMapCsp}'`) ||
+  !collectionText.includes(`script-src 'self' '${collectionBindings.importMapCsp}'`) ||
   !homeText.includes(`name="snoredex-app-revision" content="${expected.appRevision}"`) ||
   !collectionText.includes(`name="snoredex-app-revision" content="${expected.appRevision}"`) ||
   !guideText.includes(`snoredex-app-revision:${expected.appRevision}`) ||
   !stylesheetText.includes(`snoredex-app-revision:${expected.appRevision}`) ||
-  !themeText.includes(`snoredex-app-revision:${expected.appRevision}`) ||
-  !collectionThemeText.includes(`snoredex-app-revision:${expected.appRevision}`) ||
   moduleTexts.some((text) => !text.includes(`snoredex-app-revision:${expected.appRevision}`))
 ) {
   throw new Error('PAGES_SMOKE_SHELL_INVALID');
@@ -100,6 +113,7 @@ if (JSON.stringify(deployment.runtimeAssetSet) !== JSON.stringify(pointer)) {
   throw new Error('PAGES_SMOKE_RUNTIME_POINTER_INVALID');
 }
 const retained = moduleManifest.retainedRuntimeAssetSets;
+let retainedRuntimeManifest;
 if (
   (deployment.rollback === undefined && retained.length !== 0) ||
   (deployment.rollback !== undefined &&
@@ -108,6 +122,18 @@ if (
   throw new Error('PAGES_SMOKE_ROLLBACK_RUNTIME_INVALID');
 }
 if (deployment.rollback !== undefined) {
-  await readRuntimeAssetSet(retained[0], deployment.rollback, getRuntimeBytes);
+  ({ manifest: retainedRuntimeManifest } = await readRuntimeAssetSet(
+    retained[0],
+    deployment.rollback,
+    getRuntimeBytes,
+  ));
+}
+const [themeText, collectionThemeText] = await Promise.all([theme.text(), collectionTheme.text()]);
+const rootThemeRevision =
+  retainedRuntimeManifest && !retainedRuntimeManifest.modules.some((module) => module.path === 'theme.js')
+    ? deployment.rollback.appRevision
+    : expected.appRevision;
+if (themeText !== collectionThemeText || !themeText.includes(`snoredex-app-revision:${rootThemeRevision}`)) {
+  throw new Error('PAGES_SMOKE_THEME_INVALID');
 }
 console.log('Pages smoke ok');

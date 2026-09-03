@@ -49,14 +49,12 @@ test('both entry pages use a same-origin guide link', async () => {
   assert.match(collection, describedBy[1]);
 });
 
-test('the site build copies hand-authored guide and theme assets', async () => {
+test('the site build copies the guide and revision-addresses the theme', async () => {
   const buildScript = await readFile(resolve(root, 'scripts/build-site.mjs'), 'utf8');
   assert.match(
     buildScript,
     /copyRevisionGuide\(resolve\(root, ['"]site-src\/llms\.txt['"]\), resolve\(staging, ['"]llms\.txt['"]\)\)/,
   );
-  assert.match(
-    buildScript,
-    /copyRevisionScript\(resolve\(root, ['"]site-src\/theme\.js['"]\), resolve\(staging, ['"]theme\.js['"]\)\)/,
-  );
+  assert.match(buildScript, /cp\(resolve\(root, ['"]site-src\/theme\.js['"]\), resolve\(assets, ['"]theme\.js['"]\)\)/);
+  assert.match(buildScript, /cp\(resolve\(assets, ['"]theme\.js['"]\), resolve\(staging, ['"]theme\.js['"]\)\)/);
 });

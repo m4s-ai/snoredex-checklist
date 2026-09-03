@@ -33,7 +33,7 @@ executable evidence belongs in these locations:
 | `tests/fixtures/`                                           | Reviewed synthetic compatibility, failure, and migration examples                        |
 | `vendor/snoredex-data/`                                     | One validated, committed catalogue and migration snapshot                                |
 | `catalogue.lock.json`                                       | Producer revision, artifact URL, contract version, semantic fingerprint, and byte digest |
-| `dist/site/assets/runtime/<app-revision>/manifest.json`     | Built identity and digest boundary for one immutable runtime-module set                  |
+| `dist/site/assets/runtime/<app-revision>/manifest.json`     | Built identity/digest source for one immutable set and its browser integrity bindings    |
 | `dist/site/deployment.json` and `dist/site/provenance.json` | Built publication, rollback, and provenance evidence; never hand-edited source           |
 | `tests/` and `.github/workflows/`                           | Smallest runnable checks proving issue acceptance and publication scenarios              |
 

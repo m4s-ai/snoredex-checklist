@@ -66,16 +66,20 @@ source, build artifacts, URLs, analytics, logs, or public issues.
 Each build emits an immutable `assets/runtime/<app-revision>/` directory. Its manifest binds the
 application revision to the producer revision, contract version, semantic fingerprint, catalogue
 and migration byte identities, and the exact runtime-module membership and digest of every module.
-The HTML shell addresses only that revision's entry module, so ordinary browser and CDN cache keys
-do not reuse one module URL across releases. At browser start, each route validates the catalogue
-input it consumes against its built tuple before rendering catalogue-dependent UI. The collection
-route additionally validates the migration identity before reading or reconciling private state.
+The HTML shell addresses only that revision's entry module and theme bootstrap, so ordinary browser
+and CDN cache keys do not reuse their URLs across releases. The shell derives a native import-map
+integrity table and entry-script Subresource Integrity values from the same runtime manifest; its
+default-deny CSP permits only that exact generated map. The browser therefore verifies the entry,
+theme and every statically or dynamically imported module before executing changed bytes. At
+browser start, each route also validates the catalogue input it consumes against its built tuple
+before rendering catalogue-dependent UI. The collection route additionally validates the migration
+identity before reading or reconciling private state.
 
-Runtime-module digests are a publication-time invariant enforced by the build, artifact,
-deployment, and post-deploy smoke checks. The browser does not hash an already executing entry
-module or its complete import graph. A host or CDN that mutates bytes at an immutable revision URL
-is therefore detected by those publication checks, not guaranteed to fail inside the in-page
-bootstrap before any module code executes.
+Runtime-module digests are enforced at both boundaries: by browser SRI/import-map integrity during
+module fetch and by the build, artifact, deployment, and post-deploy smoke checks during
+publication. A missing or altered runtime module cannot execute; catalogue and migration tuple
+checks remain defense in depth and preserve private state if a coherent but incompatible input is
+selected.
 
 The root `deployment.json` is the active publication pointer and may name one retained rollback
 generation. `provenance.json` records the built tuple used to evaluate that publication. Deploy
@@ -85,6 +89,12 @@ built provenance even when the workflow later checks out recovery tooling, then 
 manifests and all declared module bytes. Because that smoke runs after Pages publication, a live
 failure marks the workflow failed but does not automatically restore the prior deployment; recovery
 uses the validated manual rollback path.
+
+During the one-generation transition from a pre-integrity build, rollback tooling first validates
+the advertised old set, then adds its identically stamped root theme to that set and regenerates the
+old shell's SRI, integrity map, CSP hash, and runtime pointer before publication. This preserves the
+exact old application bytes while ensuring the deployed rollback shell satisfies the current
+browser boundary.
 
 The index normally consumes only the lightweight, public directory projection required for its
 grouped browse links. Its tested compatibility path loads and validates the full catalogue snapshot
