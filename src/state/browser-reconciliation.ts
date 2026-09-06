@@ -8,10 +8,18 @@ import {
 } from './reconciliation.ts';
 import {
   PRIVATE_STATE_RECOVERY_STORAGE_KEY,
+  PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY,
   PRIVATE_STATE_STORAGE_KEY,
   getBrowserStorage,
   type StorageLike,
 } from './storage.ts';
+import {
+  mergeRecoveryRecords,
+  readRecoveryRecords,
+  recoveryRecordsFromResult,
+  serializeRecoveryRecords,
+  type DurableRecoveryRecord,
+} from './recovery-records.ts';
 
 export interface BrowserReconciliationResult {
   readonly ok: boolean;
@@ -20,9 +28,14 @@ export interface BrowserReconciliationResult {
 }
 
 interface AuthoritySnapshot {
-  readonly raw: { readonly active: string | null; readonly recovery: string | null };
+  readonly raw: {
+    readonly active: string | null;
+    readonly recovery: string | null;
+    readonly recoveryRecords: string | null;
+  };
   readonly active: PrivateState | undefined;
   readonly recovery: PrivateState | undefined;
+  readonly recoveryRecords: readonly DurableRecoveryRecord[];
 }
 
 function readAuthority(
@@ -32,10 +45,16 @@ function readAuthority(
     const raw = {
       active: storage.getItem(PRIVATE_STATE_STORAGE_KEY),
       recovery: storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY),
+      recoveryRecords: storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY),
     };
     const authority = readStateAuthority(raw.active, raw.recovery);
     if (!authority.ok) return authority;
-    return { ok: true, value: { raw, active: authority.active, recovery: authority.recovery } };
+    const recoveryRecords = readRecoveryRecords(raw.recoveryRecords);
+    if (!recoveryRecords.ok) return { ok: false, error: 'LOCAL_STATE_UNREADABLE' };
+    return {
+      ok: true,
+      value: { raw, active: authority.active, recovery: authority.recovery, recoveryRecords: recoveryRecords.value },
+    };
   } catch {
     return { ok: false, error: 'LOCAL_STATE_UNREADABLE' };
   }
@@ -104,23 +123,39 @@ function writeAuthority(
   expected: AuthoritySnapshot['raw'],
   active: PrivateState,
   recovery: PrivateState | undefined,
+  recoveryRecords: readonly DurableRecoveryRecord[],
 ): BrowserReconciliationResult {
   const current = readAuthority(storage);
   if (!current.ok) return { ok: false, changed: false, error: current.error };
-  if (current.value.raw.active !== expected.active || current.value.raw.recovery !== expected.recovery) {
+  if (
+    current.value.raw.active !== expected.active ||
+    current.value.raw.recovery !== expected.recovery ||
+    current.value.raw.recoveryRecords !== expected.recoveryRecords
+  ) {
     return { ok: false, changed: false, error: 'STATE_CHANGED_DURING_OPERATION' };
   }
   const activeText = serialized(active);
   const recoveryText = serialized(recovery);
-  if (activeText === undefined || recoveryText === undefined) {
+  const recoveryRecordsText = serializeRecoveryRecords(recoveryRecords);
+  if (activeText === undefined || recoveryText === undefined || !recoveryRecordsText.ok) {
     return { ok: false, changed: false, error: 'STATE_RECONCILIATION_BLOCKED' };
   }
   const recoveryChanged = recoveryText !== expected.recovery;
+  const recoveryRecordsChanged = recoveryRecordsText.value !== expected.recoveryRecords;
+  const restoreRecoveryRecords = (): boolean =>
+    restoreRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, expected.recoveryRecords);
   try {
+    if (recoveryRecordsChanged) {
+      if (!restoreRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, recoveryRecordsText.value)) {
+        restoreRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, expected.recoveryRecords);
+        return { ok: false, changed: false, error: 'STORAGE_COMMIT_UNCERTAIN' };
+      }
+    }
     if (recoveryChanged) {
       storage.setItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY, recoveryText);
       if (storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY) !== recoveryText) {
         restoreRaw(storage, PRIVATE_STATE_RECOVERY_STORAGE_KEY, expected.recovery);
+        if (recoveryRecordsChanged) restoreRecoveryRecords();
         return { ok: false, changed: false, error: 'STORAGE_COMMIT_UNCERTAIN' };
       }
     }
@@ -128,16 +163,25 @@ function writeAuthority(
   } catch {
     const restoredRecovery =
       !recoveryChanged || restoreRaw(storage, PRIVATE_STATE_RECOVERY_STORAGE_KEY, expected.recovery);
+    const restoredRecords = !recoveryRecordsChanged || restoreRecoveryRecords();
     const restoredActive = restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, expected.active);
-    if (restoredRecovery && restoredActive) return { ok: false, changed: false, error: 'STORAGE_WRITE_FAILED' };
+    if (restoredRecovery && restoredRecords && restoredActive)
+      return { ok: false, changed: false, error: 'STORAGE_WRITE_FAILED' };
     return { ok: false, changed: false, error: 'STORAGE_COMMIT_UNCERTAIN' };
   }
   const after = readAuthority(storage);
-  if (!after.ok || after.value.raw.active !== activeText || after.value.raw.recovery !== recoveryText) {
+  if (
+    !after.ok ||
+    after.value.raw.active !== activeText ||
+    after.value.raw.recovery !== recoveryText ||
+    after.value.raw.recoveryRecords !== recoveryRecordsText.value
+  ) {
     const restoredRecovery =
       !recoveryChanged || restoreRaw(storage, PRIVATE_STATE_RECOVERY_STORAGE_KEY, expected.recovery);
+    const restoredRecords = !recoveryRecordsChanged || restoreRecoveryRecords();
     const restoredActive = restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, expected.active);
-    if (restoredRecovery && restoredActive) return { ok: false, changed: false, error: 'STORAGE_WRITE_FAILED' };
+    if (restoredRecovery && restoredRecords && restoredActive)
+      return { ok: false, changed: false, error: 'STORAGE_WRITE_FAILED' };
     return { ok: false, changed: false, error: 'STORAGE_COMMIT_UNCERTAIN' };
   }
   return { ok: true, changed: true };
@@ -188,7 +232,7 @@ export async function reconcileBrowserState(
       // into active while retaining the newer active state for a future roll-forward.
       // When a migration route exists, the active state is reconciled first so
       // edits made during rollback cannot be silently discarded.
-      return writeAuthority(storage.value, current.value.raw, matchingRecovery, active);
+      return writeAuthority(storage.value, current.value.raw, matchingRecovery, active, current.value.recoveryRecords);
     }
     const result = reconcilePrivateState(active, targetFingerprint, {
       ...reconciliation,
@@ -196,9 +240,19 @@ export async function reconcileBrowserState(
     });
     if (!result.ok) return { ok: false, changed: false, error: result.error };
     const recovery = preserveRecovery(active, result.value);
+    const additions = recoveryRecordsFromResult(active.catalogueFingerprint, result.value);
+    if (!additions.ok) return { ok: false, changed: false, error: 'STATE_RECONCILIATION_BLOCKED' };
+    const mergedRecords = mergeRecoveryRecords(current.value.recoveryRecords, additions.value);
+    if (!mergedRecords.ok) return { ok: false, changed: false, error: 'STATE_RECONCILIATION_BLOCKED' };
     // Each migration rotates the sidecar to the immediately previous active
     // snapshot.  Keeping an older recovery copy would block every later
     // catalogue adoption because there is only one rollback slot.
-    return writeAuthority(storage.value, current.value.raw, result.value.state, recovery ?? current.value.recovery);
+    return writeAuthority(
+      storage.value,
+      current.value.raw,
+      result.value.state,
+      recovery ?? current.value.recovery,
+      mergedRecords.value,
+    );
   });
 }

@@ -1,10 +1,13 @@
 import { serializePrivateState, validatePrivateState, type PrivateState, type StateErrorCode } from './domain.ts';
 import { readStateAuthority } from './authority.ts';
 import { reconcilePrivateState, type ReconciliationContext } from './reconciliation.ts';
+import { readRecoveryRecords } from './recovery-records.ts';
 
 export const PRIVATE_STATE_STORAGE_KEY = 'snoredex-checklist.private-state';
 /** Optional recovery sidecar; the active state key remains legacy-readable for rollback. */
 export const PRIVATE_STATE_RECOVERY_STORAGE_KEY = 'snoredex-checklist.private-state.recovery';
+/** Durable retired/conflict records survive replacement of the one-generation rollback snapshot. */
+export const PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY = 'snoredex-checklist.private-state.recovery-records';
 export const PRIVATE_STATE_LOCK_NAME = 'snoredex-checklist.private-state-write';
 export const PRIVATE_STATE_NOTE_DRAFT_KEY = 'snoredex-checklist.private-state.note-draft';
 export const NOTE_AUTOSAVE_DELAY_MS = 3_000;
@@ -341,12 +344,15 @@ export class OrderedStateStore {
   public read(): PersistenceResult<PrivateState | undefined> {
     let raw: string | null;
     let recoveryRaw: string | null;
+    let recoveryRecordsRaw: string | null;
     try {
       raw = this.storage.getItem(PRIVATE_STATE_STORAGE_KEY);
       recoveryRaw = this.storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY);
+      recoveryRecordsRaw = this.storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY);
     } catch {
       return error('STORAGE_UNAVAILABLE');
     }
+    if (!readRecoveryRecords(recoveryRecordsRaw).ok) return error('LOCAL_STATE_UNREADABLE');
     this.observedRaw = raw;
     this.hasObservedRaw = true;
     const authority = readStateAuthority(raw, recoveryRaw);
@@ -2111,12 +2117,15 @@ export class OrderedStateStore {
     }
     let previous: string | null;
     let previousRecoveryRaw: string | null;
+    let previousRecoveryRecordsRaw: string | null;
     try {
       previous = this.storage.getItem(PRIVATE_STATE_STORAGE_KEY);
       previousRecoveryRaw = this.storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY);
+      previousRecoveryRecordsRaw = this.storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY);
     } catch {
       return error('STORAGE_UNAVAILABLE');
     }
+    if (!readRecoveryRecords(previousRecoveryRecordsRaw).ok) return error('LOCAL_STATE_UNREADABLE');
     if (!this.hasObservedRaw) {
       if (previous !== null) {
         const previousAuthority = readStateAuthority(previous);

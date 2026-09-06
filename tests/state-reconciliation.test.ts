@@ -16,9 +16,11 @@ import {
 import { reconcileBrowserState } from '../src/state/browser-reconciliation.ts';
 import {
   OrderedStateStore,
+  PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY,
   PRIVATE_STATE_RECOVERY_STORAGE_KEY,
   PRIVATE_STATE_STORAGE_KEY,
 } from '../src/state/storage.ts';
+import { readRecoveryRecords } from '../src/state/recovery-records.ts';
 
 const oldFingerprint = `sha256:${'a'.repeat(64)}`;
 const middleFingerprint = `sha256:${'b'.repeat(64)}`;
@@ -796,6 +798,73 @@ test('browser migration rotates an existing recovery snapshot', async () => {
     const recovery = JSON.parse(storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY) ?? 'null') as PrivateState;
     assert.equal(active.catalogueFingerprint, targetFingerprint);
     assert.equal(recovery.items[0]?.note, 'active');
+  } finally {
+    if (localStorageDescriptor === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
+    else Object.defineProperty(globalThis, 'localStorage', localStorageDescriptor);
+    if (navigatorDescriptor === undefined) delete (globalThis as { navigator?: unknown }).navigator;
+    else Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+  }
+});
+
+test('browser migration keeps retired records across an A to B to C chain', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  storage.setItem(
+    PRIVATE_STATE_STORAGE_KEY,
+    JSON.stringify(
+      state(oldFingerprint, [
+        { itemId: oldA, status: 'have', quantityOwned: 3, quantityOrdered: 1, note: 'retired but recoverable' },
+        { itemId: oldB, status: 'ordered', quantityOwned: 0, quantityOrdered: 2, note: 'continues forward' },
+      ]),
+    ),
+  );
+  const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { locks: { request: async (_name: string, callback: () => Promise<unknown>) => callback() } },
+  });
+  try {
+    const first = await reconcileBrowserState(middleFingerprint, new Set([targetB]), {
+      knownSourceItemIds: new Set([oldA, oldB]),
+      migrations: [
+        migration(oldFingerprint, middleFingerprint, [
+          transition(oldA, [], 'retired-1:0', 'none', 'retire-to-orphan'),
+          transition(oldB, [targetB], 'rekey-1:1', 'preserve', 'one-to-one-preserve'),
+        ]),
+      ],
+    });
+    assert.deepEqual(first, { ok: true, changed: true });
+    const firstRecords = readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY));
+    assert.equal(firstRecords.ok, true);
+    if (!firstRecords.ok) return;
+    assert.deepEqual(firstRecords.value, [
+      {
+        sourceFingerprint: oldFingerprint,
+        item: { itemId: oldA, status: 'have', quantityOwned: 3, quantityOrdered: 1, note: 'retired but recoverable' },
+        disposition: 'orphan',
+      },
+    ]);
+
+    const second = await reconcileBrowserState(targetFingerprint, new Set([targetA]), {
+      knownSourceItemIds: new Set([targetB]),
+      migrations: [
+        migration(middleFingerprint, targetFingerprint, [
+          transition(targetB, [targetA], 'rekey-1:1', 'preserve', 'one-to-one-preserve'),
+        ]),
+      ],
+    });
+    assert.deepEqual(second, { ok: true, changed: true });
+    const active = JSON.parse(storage.getItem(PRIVATE_STATE_STORAGE_KEY) ?? 'null') as PrivateState;
+    assert.equal(active.catalogueFingerprint, targetFingerprint);
+    assert.equal(active.items[0]?.itemId, targetA);
+    const secondRecords = readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY));
+    assert.equal(secondRecords.ok, true);
+    if (!secondRecords.ok) return;
+    assert.equal(secondRecords.value.length, 1);
+    assert.equal(secondRecords.value[0]?.sourceFingerprint, oldFingerprint);
+    assert.equal(secondRecords.value[0]?.item.note, 'retired but recoverable');
+    assert.equal(secondRecords.value[0]?.item.quantityOwned, 3);
   } finally {
     if (localStorageDescriptor === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
     else Object.defineProperty(globalThis, 'localStorage', localStorageDescriptor);
