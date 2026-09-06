@@ -120,6 +120,21 @@ class FailSidecarRestoreStorage extends FakeBrowserLocalStorage {
   }
 }
 
+class FinalVerificationDriftStorage extends FakeBrowserLocalStorage {
+  public driftRecovery = false;
+  public readonly driftedRecovery = JSON.stringify(state(oldFingerprint));
+
+  public override setItem(key: string, value: string): void {
+    super.setItem(key, value);
+    if (key === PRIVATE_STATE_STORAGE_KEY) this.driftRecovery = true;
+  }
+
+  public override getItem(key: string): string | null {
+    if (key === PRIVATE_STATE_RECOVERY_STORAGE_KEY && this.driftRecovery) return this.driftedRecovery;
+    return super.getItem(key);
+  }
+}
+
 function transition(
   fromItemId: string,
   toItemIds: readonly string[],
@@ -1101,6 +1116,34 @@ test('attempts every changed sidecar restoration after active promotion fails', 
   });
   assert.equal(storage.recoveryRestoreAttempts, 1);
   assert.equal(storage.recordsRestoreAttempts, 1);
+});
+
+test('reports uncertain when final verification cannot restore every key', async () => {
+  const storage = new FinalVerificationDriftStorage();
+  storage.setItem(
+    PRIVATE_STATE_STORAGE_KEY,
+    JSON.stringify(
+      state(targetFingerprint, [{ itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 }]),
+    ),
+  );
+  storage.driftRecovery = false;
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision: 'd'.repeat(40) });
+  const imported = createPortableBackup(
+    state(targetFingerprint, [{ itemId: targetA, status: 'have', quantityOwned: 2, quantityOrdered: 0 }]),
+    {
+      appRevision: 'd'.repeat(40),
+      exportedAt: '2026-09-06T10:00:00.000Z',
+    },
+  );
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  const plan = lifecycle.prepareImport(imported.value.bytes, targetFingerprint, new Set([targetA]));
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.deepEqual(await lifecycle.commitImport(plan.value, true), {
+    ok: false,
+    error: 'STORAGE_COMMIT_UNCERTAIN',
+  });
 });
 
 test('browser rollback restores matching recovery while preserving newer active state', async () => {

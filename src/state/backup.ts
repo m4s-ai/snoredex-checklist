@@ -463,6 +463,10 @@ function writeAuthority(
   const recoveryRecordsText = serializedRecoveryRecords.value;
   const recoveryChanged = current.value.raw.recovery !== recoveryText;
   const recoveryRecordsChanged = current.value.raw.recoveryRecords !== recoveryRecordsText;
+  const matchesExpectedRaw = (raw: AuthorityRawSnapshot): boolean =>
+    raw.active === expectedRaw.active &&
+    raw.recovery === expectedRaw.recovery &&
+    raw.recoveryRecords === expectedRaw.recoveryRecords;
   const restoreRecoveryRecords = (): boolean =>
     restoreRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, expectedRaw.recoveryRecords);
   const restoreSidecars = (): boolean => {
@@ -518,7 +522,7 @@ function writeAuthority(
   ) {
     if (restoreExpected()) return fail('STORAGE_WRITE_FAILED');
     const afterRestore = readAuthority(storage);
-    if (afterRestore.ok && afterRestore.value.raw.active === expectedRaw.active) return fail('STORAGE_WRITE_FAILED');
+    if (afterRestore.ok && matchesExpectedRaw(afterRestore.value.raw)) return fail('STORAGE_WRITE_FAILED');
     return fail('STORAGE_COMMIT_UNCERTAIN');
   }
   return ok({
