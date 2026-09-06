@@ -1077,6 +1077,34 @@ test('imports a dedicated recovery ledger without changing the active collection
   assert.deepEqual(committed.value.recoveryRecords, records);
 });
 
+test('repairs an unreadable recovery ledger from a validated dedicated backup', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  const active = state(targetFingerprint, [{ itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 }]);
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(active));
+  storage.setItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, '{malformed-ledger');
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision: 'd'.repeat(40) });
+  const records = [
+    {
+      sourceFingerprint: oldFingerprint,
+      item: { itemId: oldA, status: 'have' as const, quantityOwned: 3, quantityOrdered: 0 },
+      disposition: 'orphan' as const,
+    },
+  ];
+  const exported = createRecoveryRecordsBackup(records);
+  assert.equal(exported.ok, true);
+  if (!exported.ok) return;
+  const plan = lifecycle.prepareImport(exported.value.bytes, targetFingerprint, new Set([targetA]));
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.equal(plan.value.recoveryRecordsOnly, true);
+  const committed = await lifecycle.commitImport(plan.value, true);
+  assert.equal(committed.ok, true);
+  if (!committed.ok) return;
+  assert.deepEqual(committed.value.active?.items, active.items);
+  assert.deepEqual(committed.value.recoveryRecords, records);
+  assert.equal(readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY)).ok, true);
+});
+
 test('attempts every changed sidecar restoration after active promotion fails', async () => {
   const storage = new FailSidecarRestoreStorage();
   storage.setItem(
