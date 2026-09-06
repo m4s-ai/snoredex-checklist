@@ -715,6 +715,14 @@ Es wurde hier **kein neuer HTML-Bypass nachgewiesen**. Dies ist ein Wartungs- un
 Vertrauensgrenzenbefund, kein behaupteter Exploit. Die Regeln in AGENTS erlauben den bisherigen
 heuristischen Umfang, verbieten jedoch neue syntaxabhängige Ausnahmen ohne Parsermigration.
 
+Die Verifikation dieses Berichts hat zusätzlich einen reproduzierbaren Fehlalarm gezeigt:
+`/[\s/]on[a-z]+\s*=/iu` wertet die Zeichenfolge `"/oNTY="` innerhalb eines generierten
+SHA-256-SRI-Werts als Inline-Handler. Mit der synthetischen Merge-Revision
+`1e5a71d2286d309ba0fb6e2914a21f3bc341f6c8` baut `build-site.mjs` genau diesen Digest;
+`check-artifact.mjs` bricht danach für `index.html` mit `ARTIFACT_INLINE_HANDLER_PRESENT` ab,
+während der Build desselben Quellstands mit der eigentlichen Head-Revision besteht. Der Fehler
+belegt, dass die semantische HTML-Prüfung aktuell auch von zufälligen Digestzeichen abhängt.
+
 **Vorschlag:** Vor weiterer semantischer Ausweitung ein owning Migration-Issue. HTML-Struktur
 über einen geeigneten gepinnten Parser prüfen und die bereits gesammelten negativen Fixtures
 behalten. Eine kleine, begründete Dev-Abhängigkeit kann weniger Gesamtrisiko verursachen als
@@ -946,23 +954,25 @@ Diese Leitplanken konkretisieren den Auditauftrag; die kanonischen Projektregeln
 
 ## 7. Empfohlene Umsetzungsreihenfolge
 
-Die Pakete sind Vorschläge für Folgeissues, keine bereits eröffneten Aufgaben. Vor Implementierung
-die konkrete Reproduktion am dann aktuellen Stand bestätigen. Kein großes Sammel-PR.
+Die Pakete werden im Master-Issue [#89](https://github.com/m4s-ai/snoredex-checklist/issues/89)
+und den verknüpften Issues #90–#101 verfolgt. Abhängigkeiten, aktueller Status und veränderliche
+Abnahmeentscheidungen gehören in diesen GitHub-Graphen. Vor Implementierung die konkrete
+Reproduktion am dann aktuellen Stand bestätigen. Kein großes Sammel-PR.
 
-| Reihenfolge | Paket                                                        | Zugeordnete Befunde          | Konkretes Ende                                                                           |
-| ----------: | ------------------------------------------------------------ | ---------------------------- | ---------------------------------------------------------------------------------------- |
-|           1 | Mehrgenerationen-Erhaltung absichern                         | A01, relevanter Teil A15/A26 | Reproduktion verliert keine Daten mehr; unsichere Rotation blockiert sicher              |
-|           2 | Beschädigten lokalen Zustand wiederherstellbar machen        | A02, A15/A26                 | Gültiges Backup kann mit Erhaltung der Originale bestätigt übernommen werden             |
-|           3 | Produktionshistorie bei fehlendem Manifest schützen          | A04                          | 404 einer bestehenden Produktion stoppt vor Veröffentlichung                             |
-|           4 | Backup-Verfügbarkeit und Ergebnisfokus korrigieren           | A05/A06                      | Erste Speicherung exportierbar; Filterwechsel hält sinnvollen Fokus                      |
-|           5 | Gelieferte Kartenunterschiede darstellen                     | A03                          | Edition/Größe/Seltenheit/Klasse passend erkennbar, ohne Inferenz                         |
-|           6 | Fortschrittsumfang und Rollbackmatrix entscheiden            | A08/A12                      | Explizite akzeptierte Sollbeschreibung; Voraussetzungen für nächsten Katalogwechsel klar |
-|           7 | Zustandsbenachrichtigungen begrenzen                         | A09                          | Unveränderte Records lösen keine globale Wiederaufbereitung aus                          |
-|           8 | Progressive Ergebnisse erhalten und Suche einmal vorbereiten | A07/A10/A16                  | Neue Zeilen werden ergänzt; Ergebnisdaten einmal abgeleitet                              |
-|           9 | Einstiegsmodule und Typgrenzen bereinigen                    | A11/A14                      | Kleine Homepage; compilergeprüfte Site-/State-APIs                                       |
-|          10 | Fehleransichten und kleine Displaywege verbessern            | A13/A18/A19/A20              | Ehrliche Recovery-/Fehlertexte, kürzerer Weg zur Karte                                   |
-|          11 | Parser-/Workflow-/Kompatibilitätskosten gezielt senken       | A21–A25/A27                  | Echte Duplikate entfernt, bestehende Sicherheits- und Rollbackbeweise erhalten           |
-|          12 | Weitere Datengrößenoptimierung nur nach Messung              | A17                          | Belegte Verbesserung auf langsamem Gerät ohne Vertragsverlust                            |
+| Reihenfolge |                                                    Owning Issue | Zugeordnete Befunde          | Konkretes Ende                                                                           |
+| ----------: | --------------------------------------------------------------: | ---------------------------- | ---------------------------------------------------------------------------------------- |
+|           1 |   [#90](https://github.com/m4s-ai/snoredex-checklist/issues/90) | A01, relevanter Teil A15/A26 | Reproduktion verliert keine Daten mehr; unsichere Rotation blockiert sicher              |
+|           2 |   [#91](https://github.com/m4s-ai/snoredex-checklist/issues/91) | A02, A15/A26                 | Gültiges Backup kann mit Erhaltung der Originale bestätigt übernommen werden             |
+|           3 |   [#92](https://github.com/m4s-ai/snoredex-checklist/issues/92) | A04                          | 404 einer bestehenden Produktion stoppt vor Veröffentlichung                             |
+|           4 |   [#93](https://github.com/m4s-ai/snoredex-checklist/issues/93) | A05/A06                      | Erste Speicherung exportierbar; Filterwechsel hält sinnvollen Fokus                      |
+|           5 |   [#94](https://github.com/m4s-ai/snoredex-checklist/issues/94) | A03                          | Edition/Größe/Seltenheit/Klasse passend erkennbar, ohne Inferenz                         |
+|           6 |   [#95](https://github.com/m4s-ai/snoredex-checklist/issues/95) | A08/A12                      | Explizite akzeptierte Sollbeschreibung; Voraussetzungen für nächsten Katalogwechsel klar |
+|           7 |   [#96](https://github.com/m4s-ai/snoredex-checklist/issues/96) | A09                          | Unveränderte Records lösen keine globale Wiederaufbereitung aus                          |
+|           8 |   [#97](https://github.com/m4s-ai/snoredex-checklist/issues/97) | A07/A10/A16                  | Neue Zeilen werden ergänzt; Ergebnisdaten einmal abgeleitet                              |
+|           9 |   [#98](https://github.com/m4s-ai/snoredex-checklist/issues/98) | A11/A14                      | Kleine Homepage; compilergeprüfte Site-/State-APIs                                       |
+|          10 |   [#99](https://github.com/m4s-ai/snoredex-checklist/issues/99) | A13/A18/A19/A20              | Ehrliche Recovery-/Fehlertexte, kürzerer Weg zur Karte                                   |
+|          11 | [#100](https://github.com/m4s-ai/snoredex-checklist/issues/100) | A21–A25/A27                  | Echte Duplikate entfernt, bestehende Sicherheits- und Rollbackbeweise erhalten           |
+|          12 | [#101](https://github.com/m4s-ai/snoredex-checklist/issues/101) | A17                          | Belegte Verbesserung auf langsamem Gerät ohne Vertragsverlust                            |
 
 Für jedes Paket sollte Luna knapp berichten: auslösendes Szenario, Änderung und warum sie
 ausreicht, Regression vor/nachher, verbleibende Grenze und betroffene Autorität. Das Ziel ist
