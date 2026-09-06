@@ -952,29 +952,29 @@ Diese Leitplanken konkretisieren den Auditauftrag; die kanonischen Projektregeln
     autorisiert sind.** Dieser Auditauftrag selbst autorisiert keine externen Kommentare,
     Freigaben, Merges oder Deployments. Der folgende Umsetzungsauftrag bestimmt die Handlungen.
 
-## 7. Empfohlene Umsetzungsreihenfolge
+## 7. Owning Issues der Befunde
 
 Die Pakete werden im Master-Issue [#89](https://github.com/m4s-ai/snoredex-checklist/issues/89)
 und den verknüpften Issues #90–#101 verfolgt. Abhängigkeiten, aktueller Status und veränderliche
-Abnahmeentscheidungen gehören in diesen GitHub-Graphen. Vor Implementierung die konkrete
-Reproduktion am dann aktuellen Stand bestätigen. Kein großes Sammel-PR.
+Abnahmeentscheidungen gehören in diesen GitHub-Graphen. Die stabile Befundzuordnung ist:
 
-| Reihenfolge |                                                    Owning Issue | Zugeordnete Befunde          | Konkretes Ende                                                                           |
-| ----------: | --------------------------------------------------------------: | ---------------------------- | ---------------------------------------------------------------------------------------- |
-|           1 |   [#90](https://github.com/m4s-ai/snoredex-checklist/issues/90) | A01, relevanter Teil A15/A26 | Reproduktion verliert keine Daten mehr; unsichere Rotation blockiert sicher              |
-|           2 |   [#91](https://github.com/m4s-ai/snoredex-checklist/issues/91) | A02, A15/A26                 | Gültiges Backup kann mit Erhaltung der Originale bestätigt übernommen werden             |
-|           3 |   [#92](https://github.com/m4s-ai/snoredex-checklist/issues/92) | A04                          | 404 einer bestehenden Produktion stoppt vor Veröffentlichung                             |
-|           4 |   [#93](https://github.com/m4s-ai/snoredex-checklist/issues/93) | A05/A06                      | Erste Speicherung exportierbar; Filterwechsel hält sinnvollen Fokus                      |
-|           5 |   [#94](https://github.com/m4s-ai/snoredex-checklist/issues/94) | A03                          | Edition/Größe/Seltenheit/Klasse passend erkennbar, ohne Inferenz                         |
-|           6 |   [#95](https://github.com/m4s-ai/snoredex-checklist/issues/95) | A08/A12                      | Explizite akzeptierte Sollbeschreibung; Voraussetzungen für nächsten Katalogwechsel klar |
-|           7 |   [#96](https://github.com/m4s-ai/snoredex-checklist/issues/96) | A09                          | Unveränderte Records lösen keine globale Wiederaufbereitung aus                          |
-|           8 |   [#97](https://github.com/m4s-ai/snoredex-checklist/issues/97) | A07/A10/A16                  | Neue Zeilen werden ergänzt; Ergebnisdaten einmal abgeleitet                              |
-|           9 |   [#98](https://github.com/m4s-ai/snoredex-checklist/issues/98) | A11/A14                      | Kleine Homepage; compilergeprüfte Site-/State-APIs                                       |
-|          10 |   [#99](https://github.com/m4s-ai/snoredex-checklist/issues/99) | A13/A18/A19/A20              | Ehrliche Recovery-/Fehlertexte, kürzerer Weg zur Karte                                   |
-|          11 | [#100](https://github.com/m4s-ai/snoredex-checklist/issues/100) | A21–A25/A27                  | Echte Duplikate entfernt, bestehende Sicherheits- und Rollbackbeweise erhalten           |
-|          12 | [#101](https://github.com/m4s-ai/snoredex-checklist/issues/101) | A17                          | Belegte Verbesserung auf langsamem Gerät ohne Vertragsverlust                            |
+| Befunde                      | Owning Issue                                                    |
+| ---------------------------- | --------------------------------------------------------------- |
+| A01, relevanter Teil A15/A26 | [#90](https://github.com/m4s-ai/snoredex-checklist/issues/90)   |
+| A02, A15/A26                 | [#91](https://github.com/m4s-ai/snoredex-checklist/issues/91)   |
+| A04                          | [#92](https://github.com/m4s-ai/snoredex-checklist/issues/92)   |
+| A05/A06                      | [#93](https://github.com/m4s-ai/snoredex-checklist/issues/93)   |
+| A03                          | [#94](https://github.com/m4s-ai/snoredex-checklist/issues/94)   |
+| A08/A12                      | [#95](https://github.com/m4s-ai/snoredex-checklist/issues/95)   |
+| A09                          | [#96](https://github.com/m4s-ai/snoredex-checklist/issues/96)   |
+| A07/A10/A16                  | [#97](https://github.com/m4s-ai/snoredex-checklist/issues/97)   |
+| A11/A14                      | [#98](https://github.com/m4s-ai/snoredex-checklist/issues/98)   |
+| A13/A18/A19/A20              | [#99](https://github.com/m4s-ai/snoredex-checklist/issues/99)   |
+| A21–A25/A27                  | [#100](https://github.com/m4s-ai/snoredex-checklist/issues/100) |
+| A17                          | [#101](https://github.com/m4s-ai/snoredex-checklist/issues/101) |
 
-Für jedes Paket sollte Luna knapp berichten: auslösendes Szenario, Änderung und warum sie
+Vor jeder Umsetzung die konkrete Reproduktion am dann aktuellen Stand bestätigen. Für jede
+Umsetzung sollte Luna knapp berichten: auslösendes Szenario, Änderung und warum sie
 ausreicht, Regression vor/nachher, verbleibende Grenze und betroffene Autorität. Das Ziel ist
 eine besser benutzbare und sicherere Checkliste, keine möglichst umfangreiche Refactoringliste.
 
