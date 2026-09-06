@@ -64,18 +64,38 @@ function recordKey(record: DurableRecoveryRecord): string {
   return `${record.sourceFingerprint}\u0000${record.item.itemId}`;
 }
 
+function sameRecord(left: DurableRecoveryRecord, right: DurableRecoveryRecord): boolean {
+  return (
+    left.sourceFingerprint === right.sourceFingerprint &&
+    left.disposition === right.disposition &&
+    left.item.itemId === right.item.itemId &&
+    left.item.status === right.item.status &&
+    left.item.quantityOwned === right.item.quantityOwned &&
+    left.item.quantityOrdered === right.item.quantityOrdered &&
+    left.item.note === right.item.note
+  );
+}
+
 function canonicalRecords(
   records: readonly DurableRecoveryRecord[],
+  options: { readonly rejectDuplicates?: boolean } = {},
 ): RecoveryRecordsResult<readonly DurableRecoveryRecord[]> {
   const byKey = new Map<string, DurableRecoveryRecord>();
   for (const candidate of records) {
     const item = validateItem(candidate.sourceFingerprint, candidate.item);
     if (item === undefined || !validDisposition(candidate.disposition)) return { ok: false };
-    byKey.set(recordKey(candidate), {
+    const normalized: DurableRecoveryRecord = {
       sourceFingerprint: candidate.sourceFingerprint,
       item: { ...item },
       disposition: candidate.disposition,
-    });
+    };
+    const key = recordKey(normalized);
+    const previous = byKey.get(key);
+    if (previous !== undefined) {
+      if (!sameRecord(previous, normalized) || options.rejectDuplicates === true) return { ok: false };
+      continue;
+    }
+    byKey.set(key, normalized);
   }
   return { ok: true, value: [...byKey.values()].sort(compareRecords) };
 }
@@ -110,7 +130,7 @@ export function readRecoveryRecords(raw: string | null): RecoveryRecordsResult<r
       disposition: candidate.disposition,
     });
   }
-  const canonical = canonicalRecords(records);
+  const canonical = canonicalRecords(records, { rejectDuplicates: true });
   if (!canonical.ok || canonical.value.length !== records.length) return { ok: false };
   return canonical;
 }
@@ -144,4 +164,17 @@ export function mergeRecoveryRecords(
   additions: readonly DurableRecoveryRecord[],
 ): RecoveryRecordsResult<readonly DurableRecoveryRecord[]> {
   return canonicalRecords([...existing, ...additions]);
+}
+
+/** Replace an existing local record only when a newer local reconciliation produced it. */
+export function updateRecoveryRecords(
+  existing: readonly DurableRecoveryRecord[],
+  updates: readonly DurableRecoveryRecord[],
+): RecoveryRecordsResult<readonly DurableRecoveryRecord[]> {
+  const current = canonicalRecords(existing, { rejectDuplicates: true });
+  const next = canonicalRecords(updates, { rejectDuplicates: true });
+  if (!current.ok || !next.ok) return { ok: false };
+  const byKey = new Map(current.value.map((record) => [recordKey(record), record]));
+  for (const record of next.value) byKey.set(recordKey(record), record);
+  return { ok: true, value: [...byKey.values()].sort(compareRecords) };
 }

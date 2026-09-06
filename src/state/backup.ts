@@ -1,4 +1,7 @@
 import {
+  PRIVATE_DATASET_ID,
+  PRIVATE_STATE_SCHEMA,
+  PRIVATE_STATE_VERSION,
   serializePrivateState,
   serializePortableState,
   validatePrivateState,
@@ -33,6 +36,7 @@ import {
 export const MAX_PORTABLE_BYTES = 16 * 1024 * 1024;
 export const PRIVATE_BACKUP_SUFFIX = ['.snoredex-', 'private.json'].join('');
 export const SUGGESTED_BACKUP_FILENAME = `snoredex-checklist-backup${PRIVATE_BACKUP_SUFFIX}`;
+export const SUGGESTED_RECOVERY_RECORDS_FILENAME = `snoredex-checklist-recovery-records${PRIVATE_BACKUP_SUFFIX}`;
 
 export const BACKUP_ERROR_CODES = [
   'IMPORT_FILE_TOO_LARGE',
@@ -68,6 +72,15 @@ export interface ExportedBackup {
   readonly byteLength: number;
   readonly state: PrivateState;
   readonly recoveryRecords: readonly DurableRecoveryRecord[];
+  readonly recoveryRecordsBackup: RecoveryRecordsBackup | undefined;
+}
+
+export interface RecoveryRecordsBackup {
+  readonly filename: string;
+  readonly text: string;
+  readonly bytes: Uint8Array;
+  readonly byteLength: number;
+  readonly records: readonly DurableRecoveryRecord[];
 }
 
 export interface BackupExportOptions {
@@ -77,8 +90,12 @@ export interface BackupExportOptions {
   readonly recoveryRecords?: readonly DurableRecoveryRecord[];
 }
 
+export interface RecoveryRecordsBackupOptions {
+  readonly filename?: string;
+}
+
 export interface ImportPreview {
-  readonly mode: 'create' | 'replace';
+  readonly mode: 'create' | 'replace' | 'recovery-records';
   readonly sourceFingerprint: string;
   readonly targetFingerprint: string;
   readonly schemaVersion: string;
@@ -106,6 +123,8 @@ export interface ImportPlan {
   readonly reconciliationRecoveryRecords?: readonly DurableRecoveryRecord[];
   /** Durable records carried by the portable source backup. */
   readonly importedRecoveryRecords?: readonly DurableRecoveryRecord[];
+  /** True when the portable input carries only the durable recovery ledger. */
+  readonly recoveryRecordsOnly?: boolean;
 }
 
 interface AuthorityRawSnapshot {
@@ -158,10 +177,60 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function normalizeRecoveryRecordsFilename(filename: string | undefined): string {
+  if (filename === undefined || !filename.endsWith(PRIVATE_BACKUP_SUFFIX)) {
+    return SUGGESTED_RECOVERY_RECORDS_FILENAME;
+  }
+  const basename = filename.replace(/[\\/\u0000-\u001f\u007f]/g, '_');
+  return basename.endsWith(PRIVATE_BACKUP_SUFFIX) ? basename : SUGGESTED_RECOVERY_RECORDS_FILENAME;
+}
+
+export function createRecoveryRecordsBackup(
+  records: readonly DurableRecoveryRecord[],
+  options: RecoveryRecordsBackupOptions = {},
+): BackupResult<RecoveryRecordsBackup> {
+  const serialized = serializeRecoveryRecords(records);
+  if (!serialized.ok || serialized.value === null) return fail('EXPORT_FAILED');
+  const canonical = readRecoveryRecords(serialized.value);
+  if (!canonical.ok) return fail('EXPORT_FAILED');
+  const bytes = new TextEncoder().encode(serialized.value);
+  if (bytes.byteLength > MAX_PORTABLE_BYTES) return fail('STATE_PORTABLE_LIMIT_EXCEEDED');
+  return ok({
+    filename: normalizeRecoveryRecordsFilename(options.filename),
+    text: serialized.value,
+    bytes,
+    byteLength: bytes.byteLength,
+    records: canonical.value,
+  });
+}
+
+export function parseRecoveryRecordsBackup(input: Uint8Array): BackupResult<{
+  readonly records: readonly DurableRecoveryRecord[];
+  readonly text: string;
+  readonly byteLength: number;
+}> {
+  if (!(input instanceof Uint8Array)) return fail('IMPORT_FILE_READ_FAILED');
+  if (input.byteLength > MAX_PORTABLE_BYTES) return fail('IMPORT_FILE_TOO_LARGE');
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(input);
+  } catch {
+    return fail('IMPORT_INVALID_ENCODING');
+  }
+  const records = readRecoveryRecords(text);
+  if (!records.ok) return fail('IMPORT_INVALID_STATE_DATA');
+  if (records.value.length === 0) return fail('IMPORT_INVALID_STATE_DATA');
+  return ok({ records: records.value, text, byteLength: input.byteLength });
+}
+
 function serializePortableBackup(
   state: PrivateState,
   options: BackupExportOptions,
-): BackupResult<{ readonly text: string; readonly recoveryRecords: readonly DurableRecoveryRecord[] }> {
+): BackupResult<{
+  readonly text: string;
+  readonly recoveryRecords: readonly DurableRecoveryRecord[];
+  readonly recoveryRecordsBackup: RecoveryRecordsBackup | undefined;
+}> {
   const serialized = serializePortableState(state, {
     exportedAt: options.exportedAt ?? new Date().toISOString(),
     appRevision: options.appRevision,
@@ -169,18 +238,15 @@ function serializePortableBackup(
   if (!serialized.ok) return fail('EXPORT_FAILED');
   const records = serializeRecoveryRecords(options.recoveryRecords ?? []);
   if (!records.ok) return fail('EXPORT_FAILED');
-  if (records.value === null) return ok({ text: serialized.value, recoveryRecords: [] });
-  try {
-    const portable = JSON.parse(serialized.value) as Record<string, unknown>;
-    const envelope = JSON.parse(records.value) as { readonly records: readonly DurableRecoveryRecord[] };
-    portable.recoveryRecords = envelope.records;
-    return ok({
-      text: `${JSON.stringify(portable, null, 2)}\n`,
-      recoveryRecords: envelope.records,
-    });
-  } catch {
-    return fail('EXPORT_FAILED');
-  }
+  if (records.value === null)
+    return ok({ text: serialized.value, recoveryRecords: [], recoveryRecordsBackup: undefined });
+  const recoveryRecordsBackup = createRecoveryRecordsBackup(options.recoveryRecords ?? []);
+  if (!recoveryRecordsBackup.ok) return recoveryRecordsBackup;
+  return ok({
+    text: serialized.value,
+    recoveryRecords: recoveryRecordsBackup.value.records,
+    recoveryRecordsBackup: recoveryRecordsBackup.value,
+  });
 }
 
 function normalizeFilename(filename: string | undefined): string {
@@ -208,6 +274,7 @@ export function createPortableBackup(input: unknown, options: BackupExportOption
     byteLength: bytes.byteLength,
     state: state.value,
     recoveryRecords: serialized.value.recoveryRecords,
+    recoveryRecordsBackup: serialized.value.recoveryRecordsBackup,
   });
 }
 
@@ -398,12 +465,17 @@ function writeAuthority(
   const recoveryRecordsChanged = current.value.raw.recoveryRecords !== recoveryRecordsText;
   const restoreRecoveryRecords = (): boolean =>
     restoreRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, expectedRaw.recoveryRecords);
-  const restoreSidecars = (): boolean =>
-    (!recoveryChanged || restoreRaw(storage, PRIVATE_STATE_RECOVERY_STORAGE_KEY, expectedRaw.recovery)) &&
-    (!recoveryRecordsChanged ||
-      restoreRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, expectedRaw.recoveryRecords));
-  const restoreExpected = (): boolean =>
-    restoreSidecars() && restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, expectedRaw.active);
+  const restoreSidecars = (): boolean => {
+    const restoredRecovery =
+      !recoveryChanged || restoreRaw(storage, PRIVATE_STATE_RECOVERY_STORAGE_KEY, expectedRaw.recovery);
+    const restoredRecords = !recoveryRecordsChanged || restoreRecoveryRecords();
+    return restoredRecovery && restoredRecords;
+  };
+  const restoreExpected = (): boolean => {
+    const restoredSidecars = restoreSidecars();
+    const restoredActive = restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, expectedRaw.active);
+    return restoredSidecars && restoredActive;
+  };
   try {
     if (recoveryRecordsChanged) {
       if (!restoreRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, recoveryRecordsText)) {
@@ -541,6 +613,12 @@ export class PrivateStateLifecycle {
     });
   }
 
+  public exportRecoveryRecords(): BackupResult<RecoveryRecordsBackup> {
+    const current = this.read();
+    if (!current.ok) return current;
+    return createRecoveryRecordsBackup(current.value.recoveryRecords);
+  }
+
   public prepareImport(
     bytes: Uint8Array,
     targetFingerprint: string,
@@ -552,7 +630,36 @@ export class PrivateStateLifecycle {
     // catalogue IDs must reach the shared reconciliation gate instead of
     // being mistaken for malformed input and silently discarded.
     const parsed = parsePortableBackup(bytes);
-    if (!parsed.ok) return parsed;
+    if (!parsed.ok) {
+      const recordsBackup = parseRecoveryRecordsBackup(bytes);
+      if (!recordsBackup.ok) return parsed;
+      const preview: ImportPreview = {
+        mode: 'recovery-records',
+        sourceFingerprint: targetFingerprint,
+        targetFingerprint,
+        schemaVersion: PRIVATE_STATE_VERSION,
+        explicitRecordCount: recordsBackup.value.records.length,
+        statusCounts: { need: 0, ordered: 0, have: 0, skip: 0 },
+        quantityOwned: 0,
+        quantityOrdered: 0,
+        noteCount: 0,
+        recordsToReplace: 0,
+      };
+      const candidate = current.value.authority.active ?? {
+        schema: PRIVATE_STATE_SCHEMA,
+        schemaVersion: PRIVATE_STATE_VERSION,
+        datasetId: PRIVATE_DATASET_ID,
+        catalogueFingerprint: targetFingerprint,
+        items: [],
+      };
+      return ok({
+        candidate,
+        preview,
+        expectedRaw: current.value.raw,
+        importedRecoveryRecords: recordsBackup.value.records,
+        recoveryRecordsOnly: true,
+      });
+    }
     // Imported diagnostic metadata is intentionally not persisted as local
     // collection state. The next export gets fresh appRevision/exportedAt.
     const candidate: PrivateState = {
@@ -616,6 +723,20 @@ export class PrivateStateLifecycle {
       const importedRecoveryRecords = plan.importedRecoveryRecords ?? [];
       const validatedImportedRecoveryRecords = serializeRecoveryRecords(importedRecoveryRecords);
       if (!validatedImportedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
+      if (plan.recoveryRecordsOnly === true) {
+        const mergedRecoveryRecords = mergeRecoveryRecords(
+          current.value.authority.recoveryRecords,
+          importedRecoveryRecords,
+        );
+        if (!mergedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
+        return writeAuthority(
+          this.storage,
+          plan.expectedRaw,
+          current.value.authority.active,
+          current.value.authority.recovery,
+          mergedRecoveryRecords.value,
+        );
+      }
       if (
         plan.reconciliationSource !== undefined &&
         plan.reconciliationTargetFingerprint !== undefined &&
