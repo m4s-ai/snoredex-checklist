@@ -23,6 +23,8 @@ import {
 import {
   mergeRecoveryRecords,
   readRecoveryRecords,
+  PRIVATE_STATE_RECOVERY_RECORDS_SCHEMA,
+  PRIVATE_STATE_RECOVERY_RECORDS_VERSION,
   recoveryRecordsFromResult,
   serializeRecoveryRecords,
   type DurableRecoveryRecord,
@@ -65,12 +67,14 @@ export interface ExportedBackup {
   readonly bytes: Uint8Array;
   readonly byteLength: number;
   readonly state: PrivateState;
+  readonly recoveryRecords: readonly DurableRecoveryRecord[];
 }
 
 export interface BackupExportOptions {
   readonly appRevision: unknown;
   readonly exportedAt?: unknown;
   readonly filename?: string;
+  readonly recoveryRecords?: readonly DurableRecoveryRecord[];
 }
 
 export interface ImportPreview {
@@ -100,6 +104,8 @@ export interface ImportPlan {
   readonly reconciliationRecovery?: PrivateState;
   /** Durable records produced by the source-to-target reconciliation. */
   readonly reconciliationRecoveryRecords?: readonly DurableRecoveryRecord[];
+  /** Durable records carried by the portable source backup. */
+  readonly importedRecoveryRecords?: readonly DurableRecoveryRecord[];
 }
 
 interface AuthorityRawSnapshot {
@@ -148,6 +154,35 @@ function byteLength(text: string): number {
   return new TextEncoder().encode(text).byteLength;
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function serializePortableBackup(
+  state: PrivateState,
+  options: BackupExportOptions,
+): BackupResult<{ readonly text: string; readonly recoveryRecords: readonly DurableRecoveryRecord[] }> {
+  const serialized = serializePortableState(state, {
+    exportedAt: options.exportedAt ?? new Date().toISOString(),
+    appRevision: options.appRevision,
+  });
+  if (!serialized.ok) return fail('EXPORT_FAILED');
+  const records = serializeRecoveryRecords(options.recoveryRecords ?? []);
+  if (!records.ok) return fail('EXPORT_FAILED');
+  if (records.value === null) return ok({ text: serialized.value, recoveryRecords: [] });
+  try {
+    const portable = JSON.parse(serialized.value) as Record<string, unknown>;
+    const envelope = JSON.parse(records.value) as { readonly records: readonly DurableRecoveryRecord[] };
+    portable.recoveryRecords = envelope.records;
+    return ok({
+      text: `${JSON.stringify(portable, null, 2)}\n`,
+      recoveryRecords: envelope.records,
+    });
+  } catch {
+    return fail('EXPORT_FAILED');
+  }
+}
+
 function normalizeFilename(filename: string | undefined): string {
   if (filename === undefined || !filename.endsWith(PRIVATE_BACKUP_SUFFIX)) {
     return SUGGESTED_BACKUP_FILENAME;
@@ -162,19 +197,17 @@ export function createPortableBackup(input: unknown, options: BackupExportOption
   const state = validatePrivateState(input);
   if (!state.ok) return fail('EXPORT_FAILED');
   const exportedAt = options.exportedAt ?? new Date().toISOString();
-  const serialized = serializePortableState(state.value, {
-    exportedAt,
-    appRevision: options.appRevision,
-  });
-  if (!serialized.ok) return fail('EXPORT_FAILED');
-  const bytes = new TextEncoder().encode(serialized.value);
+  const serialized = serializePortableBackup(state.value, { ...options, exportedAt });
+  if (!serialized.ok) return serialized;
+  const bytes = new TextEncoder().encode(serialized.value.text);
   if (bytes.byteLength > MAX_PORTABLE_BYTES) return fail('STATE_PORTABLE_LIMIT_EXCEEDED');
   return ok({
     filename: normalizeFilename(options.filename),
-    text: serialized.value,
+    text: serialized.value.text,
     bytes,
     byteLength: bytes.byteLength,
     state: state.value,
+    recoveryRecords: serialized.value.recoveryRecords,
   });
 }
 
@@ -185,6 +218,7 @@ export function parsePortableBackup(
   readonly state: PortablePrivateState;
   readonly text: string;
   readonly byteLength: number;
+  readonly recoveryRecords: readonly DurableRecoveryRecord[];
 }> {
   if (!(input instanceof Uint8Array)) return fail('IMPORT_FILE_READ_FAILED');
   if (input.byteLength > MAX_PORTABLE_BYTES) return fail('IMPORT_FILE_TOO_LARGE');
@@ -200,15 +234,38 @@ export function parsePortableBackup(
   } catch {
     return fail('IMPORT_INVALID_JSON');
   }
-  const state = validatePortableState(candidate, knownItemIds);
+  let stateCandidate = candidate;
+  let recoveryRecords: readonly DurableRecoveryRecord[] = [];
+  if (isObjectRecord(candidate) && Object.prototype.hasOwnProperty.call(candidate, 'recoveryRecords')) {
+    if (!Array.isArray(candidate.recoveryRecords)) return fail('IMPORT_INVALID_STATE_DATA');
+    const parsedRecords = readRecoveryRecords(
+      JSON.stringify({
+        schema: PRIVATE_STATE_RECOVERY_RECORDS_SCHEMA,
+        schemaVersion: PRIVATE_STATE_RECOVERY_RECORDS_VERSION,
+        records: candidate.recoveryRecords,
+      }),
+    );
+    if (!parsedRecords.ok) return fail('IMPORT_INVALID_STATE_DATA');
+    const { recoveryRecords: _ignored, ...portableState } = candidate;
+    stateCandidate = portableState;
+    recoveryRecords = parsedRecords.value;
+  }
+  const state = validatePortableState(stateCandidate, knownItemIds);
   if (!state.ok) return fail(mapStateError(state.error));
-  return ok({ state: state.value, text, byteLength: input.byteLength });
+  return ok({ state: state.value, text, byteLength: input.byteLength, recoveryRecords });
 }
 
 export async function parsePortableBackupFrom(
   read: () => Promise<Uint8Array>,
   knownItemIds?: ReadonlySet<string>,
-): Promise<BackupResult<{ readonly state: PortablePrivateState; readonly text: string; readonly byteLength: number }>> {
+): Promise<
+  BackupResult<{
+    readonly state: PortablePrivateState;
+    readonly text: string;
+    readonly byteLength: number;
+    readonly recoveryRecords: readonly DurableRecoveryRecord[];
+  }>
+> {
   let bytes: Uint8Array;
   try {
     bytes = await read();
@@ -466,14 +523,22 @@ export class PrivateStateLifecycle {
     const current = this.read();
     if (!current.ok) return current;
     if (current.value.active === undefined || current.value.active.items.length === 0) return fail('EXPORT_FAILED');
-    return createPortableBackup(current.value.active, { appRevision: this.appRevision, exportedAt: this.now() });
+    return createPortableBackup(current.value.active, {
+      appRevision: this.appRevision,
+      exportedAt: this.now(),
+      recoveryRecords: current.value.recoveryRecords,
+    });
   }
 
   public exportRecovery(): BackupResult<ExportedBackup> {
     const current = this.read();
     if (!current.ok) return current;
     if (current.value.recovery === undefined) return fail('EXPORT_FAILED');
-    return createPortableBackup(current.value.recovery, { appRevision: this.appRevision, exportedAt: this.now() });
+    return createPortableBackup(current.value.recovery, {
+      appRevision: this.appRevision,
+      exportedAt: this.now(),
+      recoveryRecords: current.value.recoveryRecords,
+    });
   }
 
   public prepareImport(
@@ -500,6 +565,7 @@ export class PrivateStateLifecycle {
     let reconciliation: ReconciliationSuccess | undefined;
     let reconciliationRecovery: PrivateState | undefined;
     let reconciliationRecoveryRecords: readonly DurableRecoveryRecord[] | undefined;
+    const importedRecoveryRecords = parsed.value.recoveryRecords;
     let reconciledCandidate = candidate;
     if (candidate.catalogueFingerprint === targetFingerprint) {
       const checked = validatePrivateState(candidate, knownItemIds);
@@ -535,6 +601,7 @@ export class PrivateStateLifecycle {
       reconciliationKnownItemIds: new Set(knownItemIds),
       ...(reconciliationRecovery === undefined ? {} : { reconciliationRecovery }),
       ...(reconciliationRecoveryRecords === undefined ? {} : { reconciliationRecoveryRecords }),
+      ...(importedRecoveryRecords.length === 0 ? {} : { importedRecoveryRecords }),
     });
   }
 
@@ -546,6 +613,9 @@ export class PrivateStateLifecycle {
       let candidate = plan.candidate;
       let reconciliationRecovery = plan.reconciliationRecovery;
       let reconciliationRecoveryRecords = plan.reconciliationRecoveryRecords;
+      const importedRecoveryRecords = plan.importedRecoveryRecords ?? [];
+      const validatedImportedRecoveryRecords = serializeRecoveryRecords(importedRecoveryRecords);
+      if (!validatedImportedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
       if (
         plan.reconciliationSource !== undefined &&
         plan.reconciliationTargetFingerprint !== undefined &&
@@ -600,10 +670,10 @@ export class PrivateStateLifecycle {
         return fail('STATE_RECONCILIATION_BLOCKED');
       }
       const recovery = reconciliationRecovery ?? existingRecovery;
-      const mergedRecoveryRecords = mergeRecoveryRecords(
-        current.value.authority.recoveryRecords,
-        reconciliationRecoveryRecords ?? [],
-      );
+      const mergedRecoveryRecords = mergeRecoveryRecords(current.value.authority.recoveryRecords, [
+        ...importedRecoveryRecords,
+        ...(reconciliationRecoveryRecords ?? []),
+      ]);
       if (!mergedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
       return writeAuthority(this.storage, plan.expectedRaw, candidate, recovery, mergedRecoveryRecords.value);
     });

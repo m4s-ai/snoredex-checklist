@@ -7,6 +7,7 @@ import {
   type ReconciliationMigration,
   type ReconciliationTransition,
 } from '../src/state/reconciliation.ts';
+import { createPortableBackup, parsePortableBackup } from '../src/state/backup.ts';
 import {
   PRIVATE_DATASET_ID,
   PRIVATE_STATE_SCHEMA,
@@ -20,7 +21,7 @@ import {
   PRIVATE_STATE_RECOVERY_STORAGE_KEY,
   PRIVATE_STATE_STORAGE_KEY,
 } from '../src/state/storage.ts';
-import { readRecoveryRecords } from '../src/state/recovery-records.ts';
+import { readRecoveryRecords, type DurableRecoveryRecord } from '../src/state/recovery-records.ts';
 
 const oldFingerprint = `sha256:${'a'.repeat(64)}`;
 const middleFingerprint = `sha256:${'b'.repeat(64)}`;
@@ -871,6 +872,94 @@ test('browser migration keeps retired records across an A to B to C chain', asyn
     if (navigatorDescriptor === undefined) delete (globalThis as { navigator?: unknown }).navigator;
     else Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
   }
+});
+
+test('browser rollback merges edits to retired records into the durable ledger', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  const source = state(oldFingerprint, [
+    { itemId: oldA, status: 'have', quantityOwned: 1, quantityOrdered: 0, note: 'before rollback' },
+    { itemId: oldB, status: 'ordered', quantityOwned: 0, quantityOrdered: 1, note: 'retained' },
+  ]);
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(source));
+  const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { locks: { request: async (_name: string, callback: () => Promise<unknown>) => callback() } },
+  });
+  const route = migration(oldFingerprint, middleFingerprint, [
+    transition(oldA, [], 'retired-1:0', 'none', 'retire-to-orphan'),
+    transition(oldB, [targetB], 'rekey-1:1', 'preserve', 'one-to-one-preserve'),
+  ]);
+  try {
+    assert.deepEqual(
+      await reconcileBrowserState(middleFingerprint, new Set([targetB]), {
+        knownSourceItemIds: new Set([oldA, oldB]),
+        migrations: [route],
+      }),
+      { ok: true, changed: true },
+    );
+    assert.deepEqual(await reconcileBrowserState(oldFingerprint, new Set([oldA, oldB]), { migrations: [] }), {
+      ok: true,
+      changed: true,
+    });
+    storage.setItem(
+      PRIVATE_STATE_STORAGE_KEY,
+      JSON.stringify(
+        state(oldFingerprint, [
+          { itemId: oldA, status: 'have', quantityOwned: 4, quantityOrdered: 0, note: 'edited during rollback' },
+          { itemId: oldB, status: 'ordered', quantityOwned: 0, quantityOrdered: 1, note: 'retained' },
+        ]),
+      ),
+    );
+    assert.deepEqual(
+      await reconcileBrowserState(middleFingerprint, new Set([targetB]), {
+        knownSourceItemIds: new Set([oldA, oldB]),
+        migrations: [route],
+      }),
+      { ok: true, changed: true },
+    );
+    const records = readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY));
+    assert.equal(records.ok, true);
+    if (!records.ok) return;
+    assert.equal(records.value.length, 1);
+    assert.equal(records.value[0]?.item.note, 'edited during rollback');
+    assert.equal(records.value[0]?.item.quantityOwned, 4);
+  } finally {
+    if (localStorageDescriptor === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
+    else Object.defineProperty(globalThis, 'localStorage', localStorageDescriptor);
+    if (navigatorDescriptor === undefined) delete (globalThis as { navigator?: unknown }).navigator;
+    else Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+  }
+});
+
+test('portable backups round-trip durable recovery records without activating old IDs', () => {
+  const recoveryRecords: readonly DurableRecoveryRecord[] = [
+    {
+      sourceFingerprint: oldFingerprint,
+      item: { itemId: oldA, status: 'have', quantityOwned: 2, quantityOrdered: 0, note: 'portable orphan' },
+      disposition: 'orphan',
+    },
+  ];
+  const exported = createPortableBackup(
+    state(targetFingerprint, [{ itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 }]),
+    {
+      appRevision: 'd'.repeat(40),
+      exportedAt: '2026-09-06T10:00:00.000Z',
+      recoveryRecords,
+    },
+  );
+  assert.equal(exported.ok, true);
+  if (!exported.ok) return;
+  assert.equal(exported.value.text.includes('portable orphan'), true);
+  const parsed = parsePortableBackup(exported.value.bytes, new Set([targetA]));
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(parsed.value.state.items, [
+    { itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 },
+  ]);
+  assert.deepEqual(parsed.value.recoveryRecords, recoveryRecords);
 });
 
 test('browser rollback restores matching recovery while preserving newer active state', async () => {

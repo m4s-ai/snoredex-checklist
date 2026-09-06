@@ -227,6 +227,11 @@ export async function reconcileBrowserState(
         if (reconciledText !== recoveryText) {
           return { ok: false, changed: false, error: 'STATE_RECONCILIATION_CONFLICT' };
         }
+        const additions = recoveryRecordsFromResult(active.catalogueFingerprint, reconciled.value);
+        if (!additions.ok) return { ok: false, changed: false, error: 'STATE_RECONCILIATION_BLOCKED' };
+        const mergedRecords = mergeRecoveryRecords(current.value.recoveryRecords, additions.value);
+        if (!mergedRecords.ok) return { ok: false, changed: false, error: 'STATE_RECONCILIATION_BLOCKED' };
+        return writeAuthority(storage.value, current.value.raw, matchingRecovery, active, mergedRecords.value);
       }
       // A rollback deploy targets the snapshot in the recovery slot. Swap it
       // into active while retaining the newer active state for a future roll-forward.
