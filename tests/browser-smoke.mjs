@@ -856,6 +856,71 @@ try {
         await page.getByText('Backup and recovery', { exact: true }).click();
         const exportButton = page.getByRole('button', { name: 'Export collection' });
         assert.equal(await exportButton.isEnabled(), true, `${name}: export enabled for synthetic state`);
+        const exportRecoveryButton = page.getByRole('button', { name: 'Export recovery snapshot' });
+        const importButton = page.getByRole('button', { name: 'Choose backup to preview' });
+        const clearButton = page.getByRole('button', { name: 'Clear collection' });
+        const restoreButton = page.getByRole('button', { name: 'Restore previous snapshot' });
+        const recoveryStatus = page.locator('[data-recovery-status]');
+        const openRecoveryTools = async () => {
+          await page.reload({ waitUntil: 'networkidle' });
+          await page.getByText('Backup and recovery', { exact: true }).click();
+        };
+        await page.evaluate(() => {
+          localStorage.setItem('snoredex-checklist.private-state', '{malformed');
+          localStorage.removeItem('snoredex-checklist.private-state.recovery');
+          localStorage.removeItem('snoredex-checklist.private-state.recovery-records');
+        });
+        await openRecoveryTools();
+        await recoveryStatus.filter({ hasText: 'Saved collection is unreadable.' }).waitFor();
+        assert.equal(await exportButton.isEnabled(), false, `${name}: unreadable active disables active export`);
+        assert.equal(
+          await exportRecoveryButton.isEnabled(),
+          false,
+          `${name}: unreadable active disables recovery export`,
+        );
+        assert.equal(await clearButton.isEnabled(), false, `${name}: unreadable active disables clear`);
+        assert.equal(await restoreButton.isEnabled(), false, `${name}: unreadable active disables restore`);
+        assert.equal(await importButton.isEnabled(), true, `${name}: unreadable active keeps import available`);
+        await page.evaluate(() => {
+          localStorage.setItem(
+            'snoredex-checklist.private-state',
+            JSON.stringify({ schema: 'snoredex-collection-state', schemaVersion: '9.0.0' }),
+          );
+        });
+        await openRecoveryTools();
+        await recoveryStatus.filter({ hasText: 'Saved collection uses an unsupported format.' }).waitFor();
+        assert.equal(await importButton.isEnabled(), false, `${name}: unsupported active disables import`);
+        assert.equal(await clearButton.isEnabled(), false, `${name}: unsupported active disables clear`);
+        assert.equal(await restoreButton.isEnabled(), false, `${name}: unsupported active disables restore`);
+        await page.evaluate(({ fingerprint, itemId }) => {
+          localStorage.setItem(
+            'snoredex-checklist.private-state',
+            JSON.stringify({
+              schema: 'snoredex-collection-state',
+              schemaVersion: '1.0.0',
+              datasetId: 'snoredex-data/snorlax-current-known',
+              catalogueFingerprint: fingerprint,
+              items: [{ itemId, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],
+            }),
+          );
+          localStorage.setItem('snoredex-checklist.private-state.recovery', '{malformed');
+          localStorage.removeItem('snoredex-checklist.private-state.recovery-records');
+        }, synthetic);
+        await openRecoveryTools();
+        await recoveryStatus.filter({ hasText: 'Recovery snapshot is unreadable.' }).waitFor();
+        assert.equal(await exportButton.isEnabled(), true, `${name}: readable active keeps active export`);
+        assert.equal(
+          await exportRecoveryButton.isEnabled(),
+          false,
+          `${name}: unreadable recovery disables recovery export`,
+        );
+        assert.equal(await clearButton.isEnabled(), false, `${name}: unreadable recovery disables clear`);
+        assert.equal(await restoreButton.isEnabled(), false, `${name}: unreadable recovery disables restore`);
+        assert.equal(await importButton.isEnabled(), true, `${name}: unreadable recovery keeps import available`);
+        await page.evaluate(() => {
+          localStorage.removeItem('snoredex-checklist.private-state.recovery');
+        });
+        await openRecoveryTools();
         const downloadPromise = page.waitForEvent('download');
         await exportButton.click();
         const download = await downloadPromise;

@@ -3,10 +3,10 @@
 > Advisory AST-derived estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (38 production code files).
-Lines: 14,345.
-Function-like nodes: 864.
-McCabe estimate: sum 4,150; mean 4.8; median 2; P90 10; P95 19.
-Hotspots: 84 functions exceed 10; 40 exceed 20.
+Lines: 14,330.
+Function-like nodes: 865.
+McCabe estimate: sum 4,131; mean 4.8; median 2; P90 10; P95 19.
+Hotspots: 83 functions exceed 10; 39 exceed 20.
 
 The report parses each source file with the bundled TypeScript compiler and counts runtime function-like declarations plus structural decision nodes: if/for/while/do/catch/case statements, conditional expressions and logical (&&/||/??) binary expressions. Type-only function signatures and nested function bodies are excluded from their enclosing function. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
 
@@ -20,12 +20,12 @@ The report parses each source file with the bundled TypeScript compiler and coun
 | `src/catalogue/validate.ts:416`           | `validateCatalogueFixture`       |         54 |
 | `src/state/backup.ts:1086`                | `<arrow>`                        |         54 |
 | `scripts/catalogue-release.mjs:127`       | `createCatalogueReleaseManifest` |         50 |
-| `scripts/check-artifact.mjs:568`          | `extractHead`                    |         45 |
+| `scripts/check-artifact.mjs:553`          | `extractHead`                    |         45 |
 | `src/state/backup.ts:754`                 | `writeAuthority`                 |         42 |
 | `src/site/deployment.ts:38`               | `validatePagesDeployment`        |         40 |
 | `src/state/storage.ts:1153`               | `setDraftOwnerState`             |         36 |
 | `src/catalogue/sync.ts:517`               | `parseJournal`                   |         34 |
-| `scripts/check-artifact.mjs:292`          | `stripHtmlComments`              |         32 |
+| `scripts/check-artifact.mjs:277`          | `stripHtmlComments`              |         32 |
 | `src/state/domain.ts:211`                 | `parseState`                     |         32 |
 | `src/catalogue/sync.ts:763`               | `syncCataloguePair`              |         29 |
 | `src/site/app.ts:1218`                    | `refresh`                        |         29 |

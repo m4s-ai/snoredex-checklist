@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join, resolve, relative, posix } from 'node:path';
 import process from 'node:process';
+import { parseFragment } from 'parse5';
 import { SyntaxKind } from 'typescript/unstable/ast';
 import { API } from 'typescript/unstable/sync';
 import {
@@ -263,28 +264,12 @@ function* htmlTags(html) {
 }
 
 function hasInlineEventHandler(html) {
-  for (const { raw } of htmlTags(html)) {
-    let index = 1;
-    if (raw[index] === '/') index += 1;
-    while (index < raw.length && !/[\t\n\f\r />]/u.test(raw[index])) index += 1;
-    while (index < raw.length) {
-      while (index < raw.length && /[\t\n\f\r /]/u.test(raw[index])) index += 1;
-      if (index >= raw.length || raw[index] === '>') break;
-      const start = index;
-      while (index < raw.length && !/[\t\n\f\r />=]/u.test(raw[index])) index += 1;
-      if (/^on[a-z]+$/iu.test(raw.slice(start, index))) return true;
-      while (index < raw.length && /[\t\n\f\r ]/u.test(raw[index])) index += 1;
-      if (raw[index] !== '=') continue;
-      index += 1;
-      while (index < raw.length && /[\t\n\f\r ]/u.test(raw[index])) index += 1;
-      const quote = raw[index] === '"' || raw[index] === "'" ? raw[index++] : undefined;
-      if (quote !== undefined) {
-        while (index < raw.length && raw[index] !== quote) index += 1;
-        if (raw[index] === quote) index += 1;
-      } else {
-        while (index < raw.length && !/[\t\n\f\r >]/u.test(raw[index])) index += 1;
-      }
-    }
+  const nodes = [...parseFragment(html).childNodes];
+  while (nodes.length > 0) {
+    const node = nodes.pop();
+    if (node === undefined) continue;
+    if ('attrs' in node && node.attrs.some(({ name }) => /^on[a-z]+$/iu.test(name))) return true;
+    if ('childNodes' in node) nodes.push(...node.childNodes);
   }
   return false;
 }
@@ -901,7 +886,7 @@ try {
     if (!hasCspMeta) throw new Error(`ARTIFACT_CSP_MISSING: ${page}`);
     if (hasMetaRefresh(withoutComments)) throw new Error(`ARTIFACT_META_REFRESH_PRESENT: ${page}`);
     if (/\b(?:unsafe-inline|unsafe-eval)\b/iu.test(html)) throw new Error(`ARTIFACT_CSP_UNSAFE_DIRECTIVE: ${page}`);
-    if (hasInlineEventHandler(stripHtmlComments(html))) throw new Error(`ARTIFACT_INLINE_HANDLER_PRESENT: ${page}`);
+    if (hasInlineEventHandler(html)) throw new Error(`ARTIFACT_INLINE_HANDLER_PRESENT: ${page}`);
     if (pinnedCatalogue) {
       const expectedImportMap = `<script type="importmap">${bindings.importMap}</script>`;
       if (!withoutComments.includes(expectedImportMap)) throw new Error(`ARTIFACT_RUNTIME_IMPORT_MAP_INVALID: ${page}`);
