@@ -1240,12 +1240,16 @@ function renderRecoveryTools(
     exportRecoveryRecordsButton.disabled = !recordsReadable || current.value.recoveryRecords.length === 0;
     restoreButton.disabled = unsupported || !recoveryReadable || current.value.recovery === undefined;
     const messages: string[] = [];
-    if (current.value.activeError === 'LOCAL_STATE_UNSUPPORTED')
+    if (!activeReadable && !recoveryReadable) {
+      messages.push(
+        'Saved collection and recovery snapshot are unreadable. Only their raw bytes can be retained in quarantine; choose a valid backup to recover them.',
+      );
+    } else if (current.value.activeError === 'LOCAL_STATE_UNSUPPORTED')
       messages.push('Saved collection uses an unsupported format. Open it with a compatible app version.');
     else if (!activeReadable) messages.push('Saved collection is unreadable. Choose a valid backup to recover it.');
     if (current.value.recoveryError === 'LOCAL_STATE_UNSUPPORTED')
       messages.push('Recovery snapshot uses an unsupported format. Open it with a compatible app version.');
-    else if (!recoveryReadable)
+    else if (!recoveryReadable && activeReadable)
       messages.push(
         'Recovery snapshot is unreadable. The collection backup remains available; choose a valid backup to replace it.',
       );

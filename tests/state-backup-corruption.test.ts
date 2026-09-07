@@ -256,6 +256,39 @@ test('repairs wrong-typed recovery-ledger metadata as corruption', async () => {
   );
 });
 
+test('merges a valid recovery ledger without quarantining it beside unreadable authority', async () => {
+  const storage = new FakeStorage();
+  const brokenActive = '{broken-active';
+  const existing = createRecoveryRecordsBackup([
+    {
+      sourceFingerprint: fingerprint,
+      item: { itemId: itemA, status: 'have', quantityOwned: 1, quantityOrdered: 0 },
+      disposition: 'orphan',
+    },
+  ]);
+  const imported = createRecoveryRecordsBackup([
+    {
+      sourceFingerprint: otherFingerprint,
+      item: { itemId: itemA, status: 'have', quantityOwned: 2, quantityOrdered: 0 },
+      disposition: 'orphan',
+    },
+  ]);
+  assert.equal(existing.ok, true);
+  assert.equal(imported.ok, true);
+  if (!existing.ok || !imported.ok) return;
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, brokenActive);
+  storage.values.set(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, existing.value.text);
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision, now: () => exportedAt });
+  const plan = lifecycle.prepareImport(imported.value.bytes, fingerprint, knownItemIds);
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.equal((await lifecycle.commitImport(plan.value, true)).ok, true);
+  assert.equal(storage.getItem(PRIVATE_STATE_STORAGE_KEY), brokenActive);
+  assert.equal(storage.values.has(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY), false);
+  assert.equal(storage.values.has(PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY), false);
+  assert.equal(storage.values.get(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY)?.includes(otherFingerprint), true);
+});
+
 test('uses the normal merge path for a valid existing recovery ledger', async () => {
   const storage = new FakeStorage();
   storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state('active')));

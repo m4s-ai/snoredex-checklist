@@ -686,10 +686,11 @@ function preserveUnreadableAuthority(
   return verified.ok && verified.value === serialized ? ok(undefined) : fail('STORAGE_COMMIT_UNCERTAIN');
 }
 
-function writeRecoveryRecordsRepair(
+function writeRecoveryRecordsOnly(
   storage: StorageLike,
   expectedRaw: AuthorityRawSnapshot,
   recoveryRecords: readonly DurableRecoveryRecord[],
+  preserveUnreadableLedger: boolean,
 ): BackupResult<LifecycleSuccess> {
   const current = readAuthorityPartsWithoutRecoveryRecords(storage);
   if (!current.ok) return current;
@@ -700,8 +701,10 @@ function writeRecoveryRecordsRepair(
   ) {
     return fail('STATE_CHANGED_DURING_OPERATION');
   }
-  const preserved = preserveUnreadableRecoveryRecords(storage, current.value.raw.recoveryRecords);
-  if (!preserved.ok) return preserved;
+  if (preserveUnreadableLedger) {
+    const preserved = preserveUnreadableRecoveryRecords(storage, current.value.raw.recoveryRecords);
+    if (!preserved.ok) return preserved;
+  }
   const serialized = serializeRecoveryRecords(recoveryRecords);
   if (!serialized.ok || serialized.value === null) return fail('STATE_RECONCILIATION_BLOCKED');
   try {
@@ -729,6 +732,14 @@ function writeRecoveryRecordsRepair(
     recoveryRecords: after.value.authority.recoveryRecords,
     changed: true,
   });
+}
+
+function writeRecoveryRecordsRepair(
+  storage: StorageLike,
+  expectedRaw: AuthorityRawSnapshot,
+  recoveryRecords: readonly DurableRecoveryRecord[],
+): BackupResult<LifecycleSuccess> {
+  return writeRecoveryRecordsOnly(storage, expectedRaw, recoveryRecords, true);
 }
 
 function writeAuthority(
@@ -1084,11 +1095,13 @@ export class PrivateStateLifecycle {
           importedRecoveryRecords,
         );
         if (!mergedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
-        if (
-          current.value.authority.activeError === undefined &&
-          current.value.authority.recoveryError === undefined &&
-          current.value.authority.recoveryRecordsError === undefined
-        ) {
+        if (current.value.authority.recoveryRecordsError === undefined) {
+          if (
+            current.value.authority.activeError !== undefined ||
+            current.value.authority.recoveryError !== undefined
+          ) {
+            return writeRecoveryRecordsOnly(this.storage, plan.expectedRaw, mergedRecoveryRecords.value, false);
+          }
           return writeAuthority(
             this.storage,
             plan.expectedRaw,
