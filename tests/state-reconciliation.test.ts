@@ -90,6 +90,18 @@ class QuotaActiveWriteStorage extends FakeBrowserLocalStorage {
   }
 }
 
+class QuotaRecoveryRepairStorage extends FakeBrowserLocalStorage {
+  public failNextRecords = false;
+
+  public override setItem(key: string, value: string): void {
+    if (key === PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY && this.failNextRecords) {
+      this.failNextRecords = false;
+      throw Object.assign(new Error('quota'), { name: 'QuotaExceededError' });
+    }
+    super.setItem(key, value);
+  }
+}
+
 class FailSidecarRestoreStorage extends FakeBrowserLocalStorage {
   public failActive = false;
   public failRecoveryRestore = false;
@@ -1218,6 +1230,46 @@ test('reconciled recovery records supersede stale local ledger entries', async (
   assert.equal(records.value[0]?.item.quantityOwned, 4);
 });
 
+test('restoring a recovery snapshot updates stale ledger records', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state(targetFingerprint)));
+  storage.setItem(
+    PRIVATE_STATE_RECOVERY_STORAGE_KEY,
+    JSON.stringify(state(oldFingerprint, [{ itemId: oldA, status: 'have', quantityOwned: 4, quantityOrdered: 0 }])),
+  );
+  const staleRecord = {
+    sourceFingerprint: oldFingerprint,
+    item: { itemId: oldA, status: 'have' as const, quantityOwned: 1, quantityOrdered: 0 },
+    disposition: 'orphan' as const,
+  };
+  storage.setItem(
+    PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY,
+    JSON.stringify({ schema: 'snoredex-private-state-recovery-records', schemaVersion: 1, records: [staleRecord] }),
+  );
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision: 'd'.repeat(40),
+    reconciliation: {
+      knownSourceItemIds: new Set([oldA]),
+      migrations: [
+        migration(oldFingerprint, targetFingerprint, [transition(oldA, [], 'retired-1:0', 'none', 'retire-to-orphan')]),
+      ],
+    },
+  });
+  const restored = await lifecycle.restore(true, targetFingerprint, new Set());
+  assert.equal(restored.ok, true);
+  const records = readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY));
+  assert.equal(records.ok, true);
+  if (!records.ok) return;
+  assert.equal(records.value[0]?.item.quantityOwned, 4);
+});
+
+test('rejects present empty recovery-ledger payloads', () => {
+  assert.deepEqual(readRecoveryRecords(null), { ok: true, value: [] });
+  assert.equal(readRecoveryRecords('').ok, false);
+  assert.equal(readRecoveryRecords('  \n').ok, false);
+  assert.equal(readRecoveryRecords('null').ok, false);
+});
+
 test('durable recovery merges fail closed on unequal identity collisions', () => {
   const existing: DurableRecoveryRecord = {
     sourceFingerprint: oldFingerprint,
@@ -1312,6 +1364,32 @@ test('repairs an unreadable recovery ledger from a validated dedicated backup', 
     entries?: unknown;
   };
   assert.deepEqual(quarantine.entries, ['{malformed-ledger']);
+});
+
+test('preserves quota classification during recovery-ledger repair', async () => {
+  const storage = new QuotaRecoveryRepairStorage();
+  const active = state(targetFingerprint, [{ itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 }]);
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(active));
+  storage.setItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, '{malformed-ledger');
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision: 'd'.repeat(40) });
+  const records = [
+    {
+      sourceFingerprint: oldFingerprint,
+      item: { itemId: oldA, status: 'have' as const, quantityOwned: 3, quantityOrdered: 0 },
+      disposition: 'orphan' as const,
+    },
+  ];
+  const exported = createRecoveryRecordsBackup(records);
+  assert.equal(exported.ok, true);
+  if (!exported.ok) return;
+  const plan = lifecycle.prepareImport(exported.value.bytes, targetFingerprint, new Set([targetA]));
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  storage.failNextRecords = true;
+  assert.deepEqual(await lifecycle.commitImport(plan.value, true), {
+    ok: false,
+    error: 'STORAGE_QUOTA_EXCEEDED',
+  });
 });
 
 test('keeps every unreadable recovery ledger quarantine across repeated repairs', async () => {

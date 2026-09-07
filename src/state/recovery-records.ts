@@ -101,7 +101,7 @@ function canonicalRecords(
 }
 
 export function readRecoveryRecords(raw: string | null): RecoveryRecordsResult<readonly DurableRecoveryRecord[]> {
-  if (raw === null || raw.trim() === '' || raw.trim() === 'null') return { ok: true, value: [] };
+  if (raw === null) return { ok: true, value: [] };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw) as unknown;

@@ -532,9 +532,11 @@ function writeRecoveryRecordsRepair(
   if (!serialized.ok || serialized.value === null) return fail('STATE_RECONCILIATION_BLOCKED');
   try {
     storage.setItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, serialized.value);
-  } catch {
+  } catch (cause) {
     const restored = restoreRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, expectedRaw.recoveryRecords);
-    return fail(restored ? 'STORAGE_WRITE_FAILED' : 'STORAGE_COMMIT_UNCERTAIN');
+    return fail(
+      restored ? (isQuotaError(cause) ? 'STORAGE_QUOTA_EXCEEDED' : 'STORAGE_WRITE_FAILED') : 'STORAGE_COMMIT_UNCERTAIN',
+    );
   }
   const after = readAuthority(storage);
   if (
@@ -1019,31 +1021,29 @@ export class PrivateStateLifecycle {
         candidate = result.value.state;
       }
       if (active === undefined || active.items.length === 0) {
-        const mergedRecoveryRecords = mergeRecoveryRecords(
-          current.value.authority.recoveryRecords,
-          preservedRecoveryRecords,
-        );
+        const mergedRecoveryRecords = mergeRecoveryRecords(current.value.authority.recoveryRecords, []);
         if (!mergedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
+        const updatedRecoveryRecords = updateRecoveryRecords(mergedRecoveryRecords.value, preservedRecoveryRecords);
+        if (!updatedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
         return promoteRecovery(
           this.storage,
           current.value.raw,
           candidate,
           preservedRecovery,
-          mergedRecoveryRecords.value,
+          updatedRecoveryRecords.value,
         );
       }
       if (preservedRecovery !== undefined) return fail('STATE_RECONCILIATION_BLOCKED');
-      const mergedRecoveryRecords = mergeRecoveryRecords(
-        current.value.authority.recoveryRecords,
-        preservedRecoveryRecords,
-      );
+      const mergedRecoveryRecords = mergeRecoveryRecords(current.value.authority.recoveryRecords, []);
       if (!mergedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
+      const updatedRecoveryRecords = updateRecoveryRecords(mergedRecoveryRecords.value, preservedRecoveryRecords);
+      if (!updatedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
       return writeAuthority(
         this.storage,
         current.value.raw,
         candidate,
         preservedRecovery ?? active,
-        mergedRecoveryRecords.value,
+        updatedRecoveryRecords.value,
       );
     });
   }
