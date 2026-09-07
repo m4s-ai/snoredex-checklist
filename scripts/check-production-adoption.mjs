@@ -17,13 +17,23 @@ const targetFingerprint = lock?.catalogueFingerprint;
 const pageUrl = 'https://m4s-ai.github.io/snoredex-checklist/';
 const deploymentMode = process.env.SNOREDEX_DEPLOYMENT_MODE ?? 'adopt';
 const currentDeploymentPath = process.env.SNOREDEX_CURRENT_DEPLOYMENT_PATH;
+const currentProvenancePath = process.env.SNOREDEX_CURRENT_PROVENANCE_PATH;
 const legacyCurrentFingerprint = process.env.SNOREDEX_CURRENT_CATALOGUE_FINGERPRINT;
 const bootstrapAuthorization = process.env.SNOREDEX_BOOTSTRAP_AUTHORIZED;
 const hasCurrentDeployment = currentDeploymentPath !== undefined && currentDeploymentPath !== '';
+const hasCurrentProvenance = currentProvenancePath !== undefined && currentProvenancePath !== '';
 let currentDeployment;
+let currentProvenance;
 if (hasCurrentDeployment) {
   try {
     currentDeployment = JSON.parse(await readFile(currentDeploymentPath, 'utf8'));
+  } catch {
+    throw new Error('PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT');
+  }
+}
+if (hasCurrentProvenance) {
+  try {
+    currentProvenance = JSON.parse(await readFile(currentProvenancePath, 'utf8'));
   } catch {
     throw new Error('PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT');
   }
@@ -52,6 +62,45 @@ const isPublishedDeployment = (value) =>
   isDigest(value?.migrationByteSha256) &&
   isByteLength(value?.migrationByteLength) &&
   isSourceHistory(value?.sourceFingerprints);
+const isPublishedProvenance = (value) => {
+  const catalogue = value?.catalogue;
+  const lock = catalogue?.lock;
+  return (
+    value?.schema === 'snoredex-site-provenance' &&
+    value?.schemaVersion === '1.0.0' &&
+    isCommit(value?.appRevision) &&
+    catalogue?.mode === 'pinned-snapshot' &&
+    isCommit(catalogue?.sourceCommit) &&
+    catalogue?.sourceRepository === 'https://github.com/m4s-ai/snoredex-data' &&
+    catalogue?.contractVersion === '1.0.0' &&
+    isDigest(catalogue?.catalogueFingerprint) &&
+    isDigest(catalogue?.catalogueByteSha256) &&
+    isByteLength(catalogue?.catalogueByteLength) &&
+    isDigest(catalogue?.migrationByteSha256) &&
+    isByteLength(catalogue?.migrationByteLength) &&
+    lock?.producerRevision === catalogue.sourceCommit &&
+    lock?.sourceRepository === catalogue.sourceRepository &&
+    lock?.contractVersion === catalogue.contractVersion &&
+    lock?.catalogueFingerprint === catalogue.catalogueFingerprint &&
+    lock?.catalogueByteSha256 === catalogue.catalogueByteSha256 &&
+    lock?.catalogueByteLength === catalogue.catalogueByteLength &&
+    lock?.migrationByteSha256 === catalogue.migrationByteSha256 &&
+    lock?.migrationByteLength === catalogue.migrationByteLength
+  );
+};
+const matchesPublishedProvenance = (deployment, provenance) => {
+  const catalogue = provenance?.catalogue;
+  return (
+    deployment?.appRevision === provenance?.appRevision &&
+    deployment?.producerRevision === catalogue?.sourceCommit &&
+    deployment?.contractVersion === catalogue?.contractVersion &&
+    deployment?.catalogueFingerprint === catalogue?.catalogueFingerprint &&
+    deployment?.catalogueByteSha256 === catalogue?.catalogueByteSha256 &&
+    deployment?.catalogueByteLength === catalogue?.catalogueByteLength &&
+    deployment?.migrationByteSha256 === catalogue?.migrationByteSha256 &&
+    deployment?.migrationByteLength === catalogue?.migrationByteLength
+  );
+};
 if (
   bootstrapAuthorization !== undefined &&
   bootstrapAuthorization !== '' &&
@@ -65,7 +114,15 @@ if (deploymentMode !== 'adopt' && deploymentMode !== 'rollback') {
 if (hasCurrentFingerprint && !/^sha256:[0-9a-f]{64}$/u.test(currentFingerprint)) {
   throw new Error('PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_FINGERPRINT');
 }
-if (hasCurrentDeployment && (!hasCurrentFingerprint || !isPublishedDeployment(currentDeployment))) {
+if (
+  (hasCurrentDeployment &&
+    (!hasCurrentFingerprint ||
+      !isPublishedDeployment(currentDeployment) ||
+      !hasCurrentProvenance ||
+      !isPublishedProvenance(currentProvenance) ||
+      !matchesPublishedProvenance(currentDeployment, currentProvenance))) ||
+  (hasCurrentProvenance && !hasCurrentDeployment)
+) {
   throw new Error('PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT');
 }
 if (deploymentMode === 'rollback') {

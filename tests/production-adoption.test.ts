@@ -146,6 +146,11 @@ test('production adoption validates the reviewed target migration without requir
   assert.match(workflow, /description: Explicitly authorize first publication when no production manifest exists/u);
   assert.match(workflow, /bootstrap authorization requires workflow_dispatch/u);
   assert.match(workflow, /state=missing/u);
+  assert.match(workflow, /provenance_status=.*provenance\.json/u);
+  assert.match(
+    workflow,
+    /SNOREDEX_CURRENT_PROVENANCE_PATH: \$\{\{ steps\.current-production\.outputs\.provenance_path \}\}/u,
+  );
   assert.match(
     workflow,
     /SNOREDEX_BOOTSTRAP_AUTHORIZED: \$\{\{ steps\.deployment-inputs\.outputs\.bootstrap_authorized \}\}/u,
@@ -393,8 +398,48 @@ test('production adoption validates the reviewed target migration without requir
       sourceFingerprints: [target, reviewedSourceFingerprint],
       catalogueFingerprint: target,
     };
+    type DeploymentFixture = {
+      appRevision: string;
+      producerRevision: string;
+      contractVersion: string;
+      catalogueFingerprint: string;
+      catalogueByteSha256: string;
+      catalogueByteLength: number;
+      migrationByteSha256: string;
+      migrationByteLength: number;
+      sourceFingerprints: string[];
+    };
+    const provenanceFor = (deployment: DeploymentFixture) => ({
+      schema: 'snoredex-site-provenance',
+      schemaVersion: '1.0.0',
+      appRevision: deployment.appRevision,
+      catalogue: {
+        mode: 'pinned-snapshot',
+        sourceCommit: deployment.producerRevision,
+        sourceRepository: 'https://github.com/m4s-ai/snoredex-data',
+        contractVersion: deployment.contractVersion,
+        catalogueFingerprint: deployment.catalogueFingerprint,
+        catalogueByteSha256: deployment.catalogueByteSha256,
+        catalogueByteLength: deployment.catalogueByteLength,
+        migrationByteSha256: deployment.migrationByteSha256,
+        migrationByteLength: deployment.migrationByteLength,
+        lock: {
+          ...lock,
+          producerRevision: deployment.producerRevision,
+          contractVersion: deployment.contractVersion,
+          catalogueFingerprint: deployment.catalogueFingerprint,
+          catalogueByteSha256: deployment.catalogueByteSha256,
+          catalogueByteLength: deployment.catalogueByteLength,
+          migrationByteSha256: deployment.migrationByteSha256,
+          migrationByteLength: deployment.migrationByteLength,
+        },
+      },
+    });
     const runAgainstManifest = async (value: string | object) => {
       await writeFile(currentManifestPath, typeof value === 'string' ? value : JSON.stringify(value), 'utf8');
+      if (typeof value !== 'string') {
+        await writeFile(provenancePath, JSON.stringify(provenanceFor(value as DeploymentFixture)));
+      }
       return spawnSync(process.execPath, [scriptPath], {
         cwd: root,
         encoding: 'utf8',
@@ -402,6 +447,7 @@ test('production adoption validates the reviewed target migration without requir
           ...process.env,
           SNOREDEX_DEPLOYMENT_MODE: 'adopt',
           SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+          SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
           SNOREDEX_BOOTSTRAP_AUTHORIZED: 'false',
         },
       });
@@ -430,7 +476,29 @@ test('production adoption validates the reviewed target migration without requir
       `${inconsistentHistory.stdout}${inconsistentHistory.stderr}`,
       /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
     );
+    await writeFile(
+      currentManifestPath,
+      JSON.stringify({ ...currentDeployment, catalogueFingerprint: reviewedSourceFingerprint }),
+      'utf8',
+    );
+    await writeFile(provenancePath, JSON.stringify(provenanceFor(currentDeployment)));
+    const mismatchedTuple = spawnSync(process.execPath, [scriptPath], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_DEPLOYMENT_MODE: 'adopt',
+        SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+        SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+      },
+    });
+    assert.notEqual(mismatchedTuple.status, 0);
+    assert.match(
+      `${mismatchedTuple.stdout}${mismatchedTuple.stderr}`,
+      /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
+    );
     await writeFile(currentManifestPath, JSON.stringify(currentDeployment), 'utf8');
+    await writeFile(provenancePath, JSON.stringify(provenanceFor(currentDeployment)));
     const rollback = spawnSync(process.execPath, [scriptPath], {
       cwd: root,
       encoding: 'utf8',
@@ -438,6 +506,7 @@ test('production adoption validates the reviewed target migration without requir
         ...process.env,
         SNOREDEX_DEPLOYMENT_MODE: 'rollback',
         SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+        SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
       },
     });
     assert.equal(rollback.status, 0, `${rollback.stdout}${rollback.stderr}`);
@@ -449,15 +518,18 @@ test('production adoption validates the reviewed target migration without requir
         ...process.env,
         SNOREDEX_DEPLOYMENT_MODE: 'adopt',
         SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+        SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
       },
     });
     assert.equal(fromBothSources.status, 0, `${fromBothSources.stdout}${fromBothSources.stderr}`);
 
-    await writeFile(
-      currentManifestPath,
-      JSON.stringify({ ...currentDeployment, sourceFingerprints: [], catalogueFingerprint: reviewedSourceFingerprint }),
-      'utf8',
-    );
+    const emptyRecoveryDeployment = {
+      ...currentDeployment,
+      sourceFingerprints: [],
+      catalogueFingerprint: reviewedSourceFingerprint,
+    };
+    await writeFile(currentManifestPath, JSON.stringify(emptyRecoveryDeployment), 'utf8');
+    await writeFile(provenancePath, JSON.stringify(provenanceFor(emptyRecoveryDeployment)));
     const fromEmptyRecoverySet = spawnSync(process.execPath, [scriptPath], {
       cwd: root,
       encoding: 'utf8',
@@ -465,19 +537,18 @@ test('production adoption validates the reviewed target migration without requir
         ...process.env,
         SNOREDEX_DEPLOYMENT_MODE: 'adopt',
         SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+        SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
       },
     });
     assert.equal(fromEmptyRecoverySet.status, 0, `${fromEmptyRecoverySet.stdout}${fromEmptyRecoverySet.stderr}`);
 
-    await writeFile(
-      currentManifestPath,
-      JSON.stringify({
-        ...currentDeployment,
-        sourceFingerprints: [target, `sha256:${'b'.repeat(64)}`],
-        catalogueFingerprint: target,
-      }),
-      'utf8',
-    );
+    const missingSourceDeployment = {
+      ...currentDeployment,
+      sourceFingerprints: [target, `sha256:${'b'.repeat(64)}`],
+      catalogueFingerprint: target,
+    };
+    await writeFile(currentManifestPath, JSON.stringify(missingSourceDeployment), 'utf8');
+    await writeFile(provenancePath, JSON.stringify(provenanceFor(missingSourceDeployment)));
     const missingSourceRoute = spawnSync(process.execPath, [scriptPath], {
       cwd: root,
       encoding: 'utf8',
@@ -485,6 +556,7 @@ test('production adoption validates the reviewed target migration without requir
         ...process.env,
         SNOREDEX_DEPLOYMENT_MODE: 'adopt',
         SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+        SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
       },
     });
     assert.notEqual(missingSourceRoute.status, 0);

@@ -121,7 +121,9 @@ jobs:
         run: |
           set -euo pipefail
           manifest="$RUNNER_TEMP/current-deployment.json"
+          provenance="$RUNNER_TEMP/current-provenance.json"
           rm -f "$manifest"
+          rm -f "$provenance"
           set +e
           http_status="$(curl --silent --show-error --location --output "$manifest" --write-out '%{http_code}' "$SNOREDEX_PAGE_URL/deployment.json")"
           curl_status=$?
@@ -130,13 +132,24 @@ jobs:
             rm -f "$manifest"
             echo "state=unavailable" >> "$GITHUB_OUTPUT"
             echo "manifest=" >> "$GITHUB_OUTPUT"
+            echo "provenance=" >> "$GITHUB_OUTPUT"
           elif [[ "$http_status" == "200" ]]; then
-            echo "state=available" >> "$GITHUB_OUTPUT"
-            echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
+            provenance_status="$(curl --silent --show-error --location --output "$provenance" --write-out '%{http_code}' "$SNOREDEX_PAGE_URL/provenance.json")"
+            if [[ "$provenance_status" == "200" ]]; then
+              echo "state=available" >> "$GITHUB_OUTPUT"
+              echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
+              echo "provenance=$provenance" >> "$GITHUB_OUTPUT"
+            else
+              rm -f "$manifest" "$provenance"
+              echo "state=unavailable" >> "$GITHUB_OUTPUT"
+              echo "manifest=" >> "$GITHUB_OUTPUT"
+              echo "provenance=" >> "$GITHUB_OUTPUT"
+            fi
           else
-            rm -f "$manifest"
+            rm -f "$manifest" "$provenance"
             echo "state=unavailable" >> "$GITHUB_OUTPUT"
             echo "manifest=" >> "$GITHUB_OUTPUT"
+            echo "provenance=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Validate adoption and stage committed pair
@@ -150,6 +163,7 @@ jobs:
           PRODUCER_REVISION: ${{ steps.producer.outputs.revision }}
           CURRENT_DEPLOYMENT_STATE: ${{ steps.current-production.outputs.state }}
           CURRENT_DEPLOYMENT_PATH: ${{ steps.current-production.outputs.manifest }}
+          CURRENT_PROVENANCE_PATH: ${{ steps.current-production.outputs.provenance }}
         run: |
           set -euo pipefail
           set +e
@@ -170,7 +184,7 @@ jobs:
             sync_status=$?
             if [[ "$sync_status" -eq 0 ]]; then
               if [[ -n "$CURRENT_DEPLOYMENT_PATH" ]]; then
-                SNOREDEX_CURRENT_DEPLOYMENT_PATH="$CURRENT_DEPLOYMENT_PATH" node scripts/check-production-adoption.mjs
+                SNOREDEX_CURRENT_DEPLOYMENT_PATH="$CURRENT_DEPLOYMENT_PATH" SNOREDEX_CURRENT_PROVENANCE_PATH="$CURRENT_PROVENANCE_PATH" node scripts/check-production-adoption.mjs
               else
                 node scripts/check-production-adoption.mjs
               fi

@@ -219,13 +219,21 @@ jobs:
             echo "catalogue_fingerprint=" >> "$GITHUB_OUTPUT"
             echo "app_revision=" >> "$GITHUB_OUTPUT"
             echo "manifest_path=" >> "$GITHUB_OUTPUT"
+            echo "provenance_path=" >> "$GITHUB_OUTPUT"
             echo "state=missing" >> "$GITHUB_OUTPUT"
           elif [[ "$status" == "200" ]]; then
+            provenance="$RUNNER_TEMP/current-provenance.json"
+            provenance_status="$(curl --silent --show-error --location --output "$provenance" --write-out '%{http_code}' "$SNOREDEX_PAGE_URL/provenance.json")"
+            if [[ "$provenance_status" != "200" ]]; then
+              echo "current production provenance unavailable (HTTP $provenance_status)"
+              exit 1
+            fi
             fingerprint="$(node --input-type=module -e 'import fs from "node:fs"; const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).catalogueFingerprint; if (!/^sha256:[0-9a-f]{64}$/.test(value ?? "")) process.exit(1); process.stdout.write(value);' "$manifest")"
             app_revision="$(node --input-type=module -e 'import fs from "node:fs"; const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).appRevision; if (!/^[0-9a-f]{40}$/.test(value ?? "")) process.exit(1); process.stdout.write(value);' "$manifest")"
             echo "catalogue_fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
             echo "app_revision=$app_revision" >> "$GITHUB_OUTPUT"
             echo "manifest_path=$manifest" >> "$GITHUB_OUTPUT"
+            echo "provenance_path=$provenance" >> "$GITHUB_OUTPUT"
             echo "state=present" >> "$GITHUB_OUTPUT"
           else
             echo "current production deployment manifest unavailable (HTTP $status)"
@@ -293,6 +301,7 @@ jobs:
         env:
           SNOREDEX_DEPLOYMENT_MODE: ${{ steps.deployment-inputs.outputs.deployment_mode }}
           SNOREDEX_CURRENT_DEPLOYMENT_PATH: ${{ steps.current-production.outputs.manifest_path }}
+          SNOREDEX_CURRENT_PROVENANCE_PATH: ${{ steps.current-production.outputs.provenance_path }}
           SNOREDEX_BOOTSTRAP_AUTHORIZED: ${{ steps.deployment-inputs.outputs.bootstrap_authorized }}
         run: node scripts/check-production-adoption.mjs
       - name: Run browser and accessibility gates

@@ -227,6 +227,7 @@ test('workflow gates exact producer bytes, skips duplicate releases and preserve
             exit 1`),
   );
   assert.match(workflow, /SNOREDEX_CURRENT_DEPLOYMENT_PATH="\$CURRENT_DEPLOYMENT_PATH"/u);
+  assert.match(workflow, /SNOREDEX_CURRENT_PROVENANCE_PATH="\$CURRENT_PROVENANCE_PATH"/u);
   assert.match(workflow, /CATALOGUE_UPDATE_BLOCKED_CURRENT_DEPLOYMENT/u);
   assert.doesNotMatch(workflow, /state=missing/u);
   assert.match(workflow, /gh release list --exclude-drafts/u);

@@ -3,10 +3,10 @@
 > Advisory AST-derived estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (38 production code files).
-Lines: 13,917.
-Function-like nodes: 854.
-McCabe estimate: sum 3,987; mean 4.7; median 2; P90 10; P95 18.
-Hotspots: 80 functions exceed 10; 37 exceed 20.
+Lines: 13,974.
+Function-like nodes: 856.
+McCabe estimate: sum 4,015; mean 4.7; median 2; P90 10; P95 19.
+Hotspots: 81 functions exceed 10; 37 exceed 20.
 
 The report parses each source file with the bundled TypeScript compiler and counts runtime function-like declarations plus structural decision nodes: if/for/while/do/catch/case statements, conditional expressions and logical (&&/||/??) binary expressions. Type-only function signatures and nested function bodies are excluded from their enclosing function. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
 
