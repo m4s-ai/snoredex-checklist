@@ -18,8 +18,13 @@ import {
   collectorNumberLabel,
   imageScopeLabel,
   itemCueLabel,
+  itemIdentityCueKey,
+  itemIdentityCueLabel,
+  itemKindLabel,
   linkValues,
   presentText,
+  rarityEvidenceLabel,
+  rarityLabel,
   safeExternalUrl,
 } from './item-presentation.js';
 import { readPrivateState, type PrivateStateRead } from './private-state.js';
@@ -137,15 +142,6 @@ function presentationLabel(values: readonly (string | null | undefined)[], fallb
   return parts.join(' · ') || fallback;
 }
 
-function itemFinishCue(item: SnapshotItem): string | undefined {
-  const finish = typeof item.finish === 'string' ? presentationLabel([item.finish], '') : '';
-  const family = typeof item.finishFamily === 'string' ? presentationLabel([item.finishFamily], '') : '';
-  if (finish && family && finish !== family) return `Finish: ${finish} · Finish family: ${family}`;
-  if (finish) return `Finish: ${finish}`;
-  if (family) return `Finish family: ${family}`;
-  return undefined;
-}
-
 function itemCardLabel(item: SnapshotItem): string {
   const cardName = presentationLabel([item.cardName], 'Unnamed item');
   const localCardName = typeof item.localCardName === 'string' ? presentationLabel([item.localCardName], '') : '';
@@ -155,8 +151,13 @@ function itemCardLabel(item: SnapshotItem): string {
 function itemRowCollisionKey(item: SnapshotItem, includeEdition = true): string {
   const card = itemCardLabel(item);
   const set = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], '');
-  const visibleIdentity = [card, set, itemFinishCue(item)].filter(Boolean).join(' · ');
-  return [item.localizationId, includeEdition ? (item.setEditionId ?? '') : '', visibleIdentity].join('\u0000');
+  const visibleIdentity = [card, set, itemIdentityCueLabel(item)].filter(Boolean).join(' · ');
+  return [
+    item.localizationId,
+    includeEdition ? (item.setEditionId ?? '') : '',
+    visibleIdentity,
+    itemIdentityCueKey(item),
+  ].join('\u0000');
 }
 
 function itemRowCollisionCounts(items: readonly SnapshotItem[], includeEdition = true): Map<string, number> {
@@ -628,9 +629,15 @@ function renderItemDetails(item: SnapshotItem, catalogue: CatalogueSnapshot, sco
   appendDetail(dl, 'Locality', localization?.locality ?? item.localizationId);
   appendDetail(dl, 'Language', localization?.languageTag ?? 'Not recorded');
   appendDetail(dl, 'Image scope', scopeLabel);
-  appendDetail(dl, 'Item class', item.itemKind);
+  appendDetail(dl, 'Item class', itemKindLabel(item));
+  appendDetail(dl, 'Edition', item.edition, 'Not recorded');
+  appendDetail(dl, 'Edition assignment', item.editionAssignmentStatus, 'Not recorded');
   appendDetail(dl, 'Producer evidence', item.finishVerificationStatus);
   appendDetail(dl, 'Completeness', item.completenessStatus);
+  appendDetail(dl, 'Rarity', rarityLabel(item), 'Not recorded');
+  appendDetail(dl, 'Rarity evidence', rarityEvidenceLabel(item), 'Not recorded');
+  appendDetail(dl, 'Card size', item.cardSize, 'Not recorded');
+  appendDetail(dl, 'Error class', item.errorClass, 'Not recorded');
   appendDetail(dl, 'Technical finish', item.finish, 'Not recorded');
   appendDetail(dl, 'Finish family', item.finishFamily, 'Not recorded');
   appendDetail(dl, 'Foil pattern', item.foilPattern, 'Not recorded');
@@ -1370,16 +1377,16 @@ function renderItemRow(
   identity.append(text('strong', presentText(item.cardName) ?? 'Unnamed item'));
   const localCardName = presentText(item.localCardName);
   if (localCardName) identity.append(text('span', localCardName, 'item-local-name'));
+  identity.append(text('span', itemIdentityCueLabel(item), 'item-identity-cue'));
   const set = presentationLabel([item.localSetCode, item.localSetName], '');
   const setDisplay = [set, setIdentity].filter(Boolean).join(' · ');
   if (setDisplay) identity.append(text('span', ` · ${setDisplay}`));
   if (ownerLabel) identity.append(text('span', ` · ${ownerLabel}`));
   content.append(identity);
-  const metadataValues = [collectorNumberLabel(item), itemFinishCue(item)].filter(
-    (value): value is string => value !== undefined,
-  );
+  const metadataValues = [collectorNumberLabel(item)].filter((value): value is string => value !== undefined);
   if (metadataValues.length > 0) content.append(text('div', metadataValues.join(' · '), 'item-meta'));
   const tags = text('div', undefined, 'item-tags');
+  tags.append(text('span', itemKindLabel(item), 'item-cue'));
   tags.append(text('span', itemCueLabel(item), 'item-cue'));
   if (inactive) tags.append(text('span', 'Inactive', 'item-cue'));
   content.append(tags);
