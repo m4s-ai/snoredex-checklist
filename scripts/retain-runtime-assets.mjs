@@ -266,6 +266,7 @@ if (previousPath) {
 const result = {
   schema: 'snoredex-site-module-manifest',
   schemaVersion: '2.0.0',
+  publicationFormat: 'provenance-history-v1',
   appRevision: active.runtime.appRevision,
   runtimeAssetSet: active.pointer,
   retainedRuntimeAssetSets: retained ? [retained] : [],

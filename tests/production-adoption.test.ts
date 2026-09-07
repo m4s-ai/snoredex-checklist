@@ -156,6 +156,12 @@ test('production adoption validates the reviewed target migration without requir
   );
   assert.match(
     workflow,
+    /SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: \$\{\{ steps\.current-production\.outputs\.module_manifest_path \}\}/u,
+  );
+  assert.match(script, /SNOREDEX_CURRENT_MODULE_MANIFEST_PATH/u);
+  assert.match(manifestScript, /publicationFormat: 'provenance-history-v1'/u);
+  assert.match(
+    workflow,
     /SNOREDEX_BOOTSTRAP_AUTHORIZED: \$\{\{ steps\.deployment-inputs\.outputs\.bootstrap_authorized \}\}/u,
   );
   assert.match(workflow, /required: false/u);
@@ -224,6 +230,7 @@ test('production adoption validates the reviewed target migration without requir
   const temporaryDirectory = await mkdtemp(resolve(tmpdir(), 'snoredex-adoption-'));
   try {
     const currentManifestPath = resolve(temporaryDirectory, 'deployment.json');
+    const moduleManifestPath = resolve(temporaryDirectory, 'module-manifest.json');
     const previousAppRevision = 'b'.repeat(40);
     const appRevision = 'a'.repeat(40);
     const runtime = {
@@ -442,10 +449,17 @@ test('production adoption validates the reviewed target migration without requir
       },
       sourceFingerprints: [...deployment.sourceFingerprints],
     });
+    const moduleManifestFor = (deployment: DeploymentFixture, marked = true) => ({
+      schema: 'snoredex-site-module-manifest',
+      schemaVersion: '2.0.0',
+      ...(marked ? { publicationFormat: 'provenance-history-v1' } : {}),
+      appRevision: deployment.appRevision,
+    });
     const runAgainstManifest = async (value: string | object) => {
       await writeFile(currentManifestPath, typeof value === 'string' ? value : JSON.stringify(value), 'utf8');
       if (typeof value !== 'string') {
         await writeFile(provenancePath, JSON.stringify(provenanceFor(value as DeploymentFixture)));
+        await writeFile(moduleManifestPath, JSON.stringify(moduleManifestFor(value as DeploymentFixture, false)));
       }
       return spawnSync(process.execPath, [scriptPath], {
         cwd: root,
@@ -455,6 +469,7 @@ test('production adoption validates the reviewed target migration without requir
           SNOREDEX_DEPLOYMENT_MODE: 'adopt',
           SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
           SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+          SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: moduleManifestPath,
           SNOREDEX_BOOTSTRAP_AUTHORIZED: 'false',
         },
       });
@@ -466,6 +481,7 @@ test('production adoption validates the reviewed target migration without requir
         ...process.env,
         SNOREDEX_DEPLOYMENT_MODE: 'adopt',
         SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+        SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: moduleManifestPath,
         SNOREDEX_BOOTSTRAP_AUTHORIZED: 'true',
       },
     });
@@ -509,6 +525,7 @@ test('production adoption validates the reviewed target migration without requir
         SNOREDEX_DEPLOYMENT_MODE: 'adopt',
         SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
         SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+        SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: moduleManifestPath,
       },
     });
     assert.notEqual(mismatchedHistory.status, 0);
@@ -518,6 +535,7 @@ test('production adoption validates the reviewed target migration without requir
     );
     const legacyDeployment = { ...currentDeployment, appRevision: 'ac8a5c5eb76439d5b024564b694a20447722a2df' };
     await writeFile(currentManifestPath, JSON.stringify(legacyDeployment));
+    await writeFile(moduleManifestPath, JSON.stringify(moduleManifestFor(legacyDeployment, false)));
     await writeFile(
       provenancePath,
       JSON.stringify({ ...provenanceFor(legacyDeployment), sourceFingerprints: undefined }),
@@ -530,6 +548,7 @@ test('production adoption validates the reviewed target migration without requir
         SNOREDEX_DEPLOYMENT_MODE: 'adopt',
         SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
         SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+        SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: moduleManifestPath,
       },
     });
     assert.equal(legacyProvenance.status, 0, `${legacyProvenance.stdout}${legacyProvenance.stderr}`);
@@ -551,6 +570,7 @@ test('production adoption validates the reviewed target migration without requir
         SNOREDEX_DEPLOYMENT_MODE: 'adopt',
         SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
         SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+        SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: moduleManifestPath,
       },
     });
     assert.notEqual(postUpgradeMissingHistory.status, 0);
@@ -572,6 +592,7 @@ test('production adoption validates the reviewed target migration without requir
         SNOREDEX_DEPLOYMENT_MODE: 'adopt',
         SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
         SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+        SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: moduleManifestPath,
       },
     });
     assert.notEqual(markedLegacyMissingHistory.status, 0);
@@ -593,6 +614,7 @@ test('production adoption validates the reviewed target migration without requir
         SNOREDEX_DEPLOYMENT_MODE: 'adopt',
         SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
         SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+        SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: moduleManifestPath,
       },
     });
     assert.notEqual(mismatchedTuple.status, 0);
@@ -610,6 +632,7 @@ test('production adoption validates the reviewed target migration without requir
         SNOREDEX_DEPLOYMENT_MODE: 'rollback',
         SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
         SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+        SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: moduleManifestPath,
       },
     });
     assert.equal(rollback.status, 0, `${rollback.stdout}${rollback.stderr}`);
@@ -622,6 +645,7 @@ test('production adoption validates the reviewed target migration without requir
         SNOREDEX_DEPLOYMENT_MODE: 'adopt',
         SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
         SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+        SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: moduleManifestPath,
       },
     });
     assert.equal(fromBothSources.status, 0, `${fromBothSources.stdout}${fromBothSources.stderr}`);
@@ -641,6 +665,7 @@ test('production adoption validates the reviewed target migration without requir
         SNOREDEX_DEPLOYMENT_MODE: 'adopt',
         SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
         SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+        SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: moduleManifestPath,
       },
     });
     assert.equal(fromEmptyRecoverySet.status, 0, `${fromEmptyRecoverySet.stdout}${fromEmptyRecoverySet.stderr}`);
@@ -660,6 +685,7 @@ test('production adoption validates the reviewed target migration without requir
         SNOREDEX_DEPLOYMENT_MODE: 'adopt',
         SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
         SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+        SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: moduleManifestPath,
       },
     });
     assert.notEqual(missingSourceRoute.status, 0);

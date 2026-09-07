@@ -254,8 +254,10 @@ jobs:
             set +e
             provenance_status="$(curl --silent --show-error --location --output "$provenance" --write-out '%{http_code}' "$SNOREDEX_PAGE_URL/provenance.json")"
             provenance_curl_status=$?
+            module_manifest_status="$(curl --silent --show-error --location --output "$module_manifest" --write-out '%{http_code}' "$SNOREDEX_PAGE_URL/assets/module-manifest.json")"
+            module_manifest_curl_status=$?
             set -e
-            if [[ "$provenance_curl_status" -ne 0 || "$provenance_status" != "200" ]]; then
+            if [[ "$provenance_curl_status" -ne 0 || "$module_manifest_curl_status" -ne 0 || "$provenance_status" != "200" || "$module_manifest_status" != "200" ]]; then
               echo "current production provenance unavailable (HTTP $provenance_status)"
               exit 1
             fi
@@ -265,6 +267,7 @@ jobs:
             echo "app_revision=$app_revision" >> "$GITHUB_OUTPUT"
             echo "manifest_path=$manifest" >> "$GITHUB_OUTPUT"
             echo "provenance_path=$provenance" >> "$GITHUB_OUTPUT"
+            echo "module_manifest_path=$module_manifest" >> "$GITHUB_OUTPUT"
             echo "state=present" >> "$GITHUB_OUTPUT"
           else
             echo "current production deployment manifest unavailable (HTTP $status)"
@@ -333,6 +336,7 @@ jobs:
           SNOREDEX_DEPLOYMENT_MODE: ${{ steps.deployment-inputs.outputs.deployment_mode }}
           SNOREDEX_CURRENT_DEPLOYMENT_PATH: ${{ steps.current-production.outputs.manifest_path }}
           SNOREDEX_CURRENT_PROVENANCE_PATH: ${{ steps.current-production.outputs.provenance_path }}
+          SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: ${{ steps.current-production.outputs.module_manifest_path }}
           SNOREDEX_BOOTSTRAP_AUTHORIZED: ${{ steps.deployment-inputs.outputs.bootstrap_authorized }}
         run: node scripts/check-production-adoption.mjs
       - name: Run browser and accessibility gates

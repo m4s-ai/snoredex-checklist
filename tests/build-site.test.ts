@@ -181,6 +181,7 @@ test('stamps the exact app revision into served shells and module', async () => 
     const moduleManifest = JSON.parse(moduleManifestText);
     assert.equal(moduleManifest.schema, 'snoredex-site-module-manifest');
     assert.equal(moduleManifest.schemaVersion, '2.0.0');
+    assert.equal(moduleManifest.publicationFormat, 'provenance-history-v1');
     assert.equal(moduleManifest.appRevision, revision);
     assert.equal(moduleManifest.runtimeAssetSet.path, `runtime/${revision}`);
     assert.deepEqual(moduleManifest.retainedRuntimeAssetSets, []);

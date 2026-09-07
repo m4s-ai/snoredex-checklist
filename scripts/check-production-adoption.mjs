@@ -18,12 +18,15 @@ const pageUrl = 'https://m4s-ai.github.io/snoredex-checklist/';
 const deploymentMode = process.env.SNOREDEX_DEPLOYMENT_MODE ?? 'adopt';
 const currentDeploymentPath = process.env.SNOREDEX_CURRENT_DEPLOYMENT_PATH;
 const currentProvenancePath = process.env.SNOREDEX_CURRENT_PROVENANCE_PATH;
+const currentModuleManifestPath = process.env.SNOREDEX_CURRENT_MODULE_MANIFEST_PATH;
 const legacyCurrentFingerprint = process.env.SNOREDEX_CURRENT_CATALOGUE_FINGERPRINT;
 const bootstrapAuthorization = process.env.SNOREDEX_BOOTSTRAP_AUTHORIZED;
 const hasCurrentDeployment = currentDeploymentPath !== undefined && currentDeploymentPath !== '';
 const hasCurrentProvenance = currentProvenancePath !== undefined && currentProvenancePath !== '';
+const hasCurrentModuleManifest = currentModuleManifestPath !== undefined && currentModuleManifestPath !== '';
 let currentDeployment;
 let currentProvenance;
+let currentModuleManifest;
 if (hasCurrentDeployment) {
   try {
     currentDeployment = JSON.parse(await readFile(currentDeploymentPath, 'utf8'));
@@ -34,6 +37,13 @@ if (hasCurrentDeployment) {
 if (hasCurrentProvenance) {
   try {
     currentProvenance = JSON.parse(await readFile(currentProvenancePath, 'utf8'));
+  } catch {
+    throw new Error('PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT');
+  }
+}
+if (hasCurrentModuleManifest) {
+  try {
+    currentModuleManifest = JSON.parse(await readFile(currentModuleManifestPath, 'utf8'));
   } catch {
     throw new Error('PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT');
   }
@@ -50,6 +60,11 @@ const isSourceHistory = (value) =>
   (Array.isArray(value) && value.every((entry) => isDigest(entry)) && new Set(value).size === value.length);
 const publicationFormat = 'provenance-history-v1';
 const isPublicationFormat = (value) => value === undefined || value === publicationFormat;
+const isPublishedModuleManifest = (value) =>
+  value?.schema === 'snoredex-site-module-manifest' &&
+  value?.schemaVersion === '2.0.0' &&
+  isCommit(value?.appRevision) &&
+  isPublicationFormat(value?.publicationFormat);
 const isPublishedDeployment = (value) =>
   value?.schema === 'snoredex-checklist-deployment' &&
   value?.schemaVersion === '1.0.0' &&
@@ -98,11 +113,15 @@ const matchesPublishedProvenance = (deployment, provenance) => {
   // canonical history in deployment.json. During the first upgrade, derive it
   // from that validated manifest and require the two published records to agree.
   const publishedSourceFingerprints =
-    provenance?.sourceFingerprints === undefined && deployment?.publicationFormat === undefined
+    provenance?.sourceFingerprints === undefined &&
+    deployment?.publicationFormat === undefined &&
+    currentModuleManifest?.publicationFormat === undefined
       ? deployment?.sourceFingerprints
       : provenance?.sourceFingerprints;
   return (
     deployment?.appRevision === provenance?.appRevision &&
+    (currentModuleManifest?.publicationFormat !== publicationFormat ||
+      currentModuleManifest?.appRevision === deployment?.appRevision) &&
     deployment?.producerRevision === catalogue?.sourceCommit &&
     deployment?.contractVersion === catalogue?.contractVersion &&
     deployment?.catalogueFingerprint === catalogue?.catalogueFingerprint &&
@@ -133,7 +152,9 @@ if (
     (!hasCurrentFingerprint ||
       !isPublishedDeployment(currentDeployment) ||
       !hasCurrentProvenance ||
+      !hasCurrentModuleManifest ||
       !isPublishedProvenance(currentProvenance) ||
+      !isPublishedModuleManifest(currentModuleManifest) ||
       !matchesPublishedProvenance(currentDeployment, currentProvenance))) ||
   (hasCurrentProvenance && !hasCurrentDeployment)
 ) {

@@ -262,6 +262,7 @@ try {
       {
         schema: 'snoredex-site-module-manifest',
         schemaVersion: '2.0.0',
+        publicationFormat: 'provenance-history-v1',
         appRevision: gitRevision,
         runtimeAssetSet,
         retainedRuntimeAssetSets: [],
