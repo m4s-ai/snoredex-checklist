@@ -180,7 +180,7 @@ test('production adoption validates the reviewed target migration without requir
   assert.doesNotMatch(workflow, /git merge-base --is-ancestor/u);
   assert.match(
     workflow,
-    /name: Require reviewed producer migration target\s+if: steps\.deployment-inputs\.outputs\.deployment_mode == 'adopt'/u,
+    /name: Require reviewed producer migration target\s+if: steps\.deployment-inputs\.outputs\.deployment_mode == 'adopt' \|\| steps\.deployment-inputs\.outputs\.deployment_mode == 'rollback'/u,
   );
 
   const run = (currentFingerprint?: string, bootstrapAuthorized = false) => {
@@ -658,6 +658,25 @@ test('production adoption validates the reviewed target migration without requir
       },
     });
     assert.equal(rollback.status, 0, `${rollback.stdout}${rollback.stderr}`);
+
+    await writeFile(currentManifestPath, JSON.stringify({ ...currentDeployment, sourceFingerprints: [] }));
+    const rollbackWithTruncatedHistory = spawnSync(process.execPath, [scriptPath], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_DEPLOYMENT_MODE: 'rollback',
+        SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+        SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+        SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: moduleManifestPath,
+      },
+    });
+    assert.notEqual(rollbackWithTruncatedHistory.status, 0);
+    assert.match(
+      `${rollbackWithTruncatedHistory.stdout}${rollbackWithTruncatedHistory.stderr}`,
+      /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
+    );
+    await writeFile(currentManifestPath, JSON.stringify(currentDeployment), 'utf8');
 
     const fromBothSources = spawnSync(process.execPath, [scriptPath], {
       cwd: root,

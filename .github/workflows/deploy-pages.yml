@@ -331,7 +331,7 @@ jobs:
           }
           NODE
       - name: Require reviewed producer migration target
-        if: steps.deployment-inputs.outputs.deployment_mode == 'adopt'
+        if: steps.deployment-inputs.outputs.deployment_mode == 'adopt' || steps.deployment-inputs.outputs.deployment_mode == 'rollback'
         env:
           SNOREDEX_DEPLOYMENT_MODE: ${{ steps.deployment-inputs.outputs.deployment_mode }}
           SNOREDEX_CURRENT_DEPLOYMENT_PATH: ${{ steps.current-production.outputs.manifest_path }}
