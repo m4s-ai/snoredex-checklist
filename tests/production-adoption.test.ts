@@ -241,6 +241,7 @@ test('production adoption validates the reviewed target migration without requir
     const moduleManifestPath = resolve(temporaryDirectory, 'module-manifest.json');
     const previousAppRevision = 'b'.repeat(40);
     const appRevision = 'a'.repeat(40);
+    const legacyAppRevision = 'ac8a5c5eb76439d5b024564b694a20447722a2df';
     const runtime = {
       appRevision,
       producerRevision: lock.producerRevision,
@@ -429,6 +430,7 @@ test('production adoption validates the reviewed target migration without requir
       migrationByteSha256: string;
       migrationByteLength: number;
       sourceFingerprints: string[];
+      runtimeAssetSet?: { appRevision: string; path: string; manifestSha256: string; manifestByteLength: number };
     };
     const provenanceFor = (deployment: DeploymentFixture) => ({
       schema: 'snoredex-site-provenance',
@@ -462,6 +464,7 @@ test('production adoption validates the reviewed target migration without requir
       schemaVersion: '2.0.0',
       ...(marked ? { publicationFormat: 'provenance-history-v1' } : {}),
       appRevision: deployment.appRevision,
+      runtimeAssetSet: deployment.runtimeAssetSet,
     });
     const runAgainstManifest = async (value: string | object) => {
       await writeFile(currentManifestPath, typeof value === 'string' ? value : JSON.stringify(value), 'utf8');
@@ -541,7 +544,15 @@ test('production adoption validates the reviewed target migration without requir
       `${mismatchedHistory.stdout}${mismatchedHistory.stderr}`,
       /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
     );
-    const legacyDeployment = { ...currentDeployment, appRevision: 'ac8a5c5eb76439d5b024564b694a20447722a2df' };
+    const legacyDeployment = {
+      ...currentDeployment,
+      appRevision: legacyAppRevision,
+      runtimeAssetSet: {
+        ...currentDeployment.runtimeAssetSet,
+        appRevision: legacyAppRevision,
+        path: `runtime/${legacyAppRevision}`,
+      },
+    };
     await writeFile(currentManifestPath, JSON.stringify(legacyDeployment));
     await writeFile(moduleManifestPath, JSON.stringify(moduleManifestFor(legacyDeployment, false)));
     await writeFile(
@@ -560,6 +571,30 @@ test('production adoption validates the reviewed target migration without requir
       },
     });
     assert.equal(legacyProvenance.status, 0, `${legacyProvenance.stdout}${legacyProvenance.stderr}`);
+    await writeFile(
+      moduleManifestPath,
+      JSON.stringify({
+        ...moduleManifestFor(legacyDeployment, false),
+        runtimeAssetSet: { ...legacyDeployment.runtimeAssetSet, manifestSha256: `sha256:${'d'.repeat(64)}` },
+      }),
+    );
+    const staleLegacyModule = spawnSync(process.execPath, [scriptPath], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_DEPLOYMENT_MODE: 'adopt',
+        SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+        SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+        SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: moduleManifestPath,
+      },
+    });
+    assert.notEqual(staleLegacyModule.status, 0);
+    assert.match(
+      `${staleLegacyModule.stdout}${staleLegacyModule.stderr}`,
+      /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
+    );
+    await writeFile(moduleManifestPath, JSON.stringify(moduleManifestFor(legacyDeployment, false)));
     await writeFile(
       moduleManifestPath,
       JSON.stringify({ ...moduleManifestFor(legacyDeployment, false), appRevision: currentDeployment.appRevision }),
@@ -585,6 +620,11 @@ test('production adoption validates the reviewed target migration without requir
       ...currentDeployment,
       appRevision: '934acd3d5d29202b728e164584749d0675666b463',
       publicationFormat: 'provenance-history-v1',
+      runtimeAssetSet: {
+        ...currentDeployment.runtimeAssetSet,
+        appRevision: '934acd3d5d29202b728e164584749d0675666b463',
+        path: 'runtime/934acd3d5d29202b728e164584749d0675666b463',
+      },
     };
     await writeFile(currentManifestPath, JSON.stringify(postUpgradeDeployment));
     await writeFile(

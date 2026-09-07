@@ -60,10 +60,16 @@ const isSourceHistory = (value) =>
   (Array.isArray(value) && value.every((entry) => isDigest(entry)) && new Set(value).size === value.length);
 const publicationFormat = 'provenance-history-v1';
 const isPublicationFormat = (value) => value === undefined || value === publicationFormat;
+const isRuntimeAssetSetPointer = (value, appRevision) =>
+  value?.appRevision === appRevision &&
+  value?.path === `runtime/${appRevision}` &&
+  isDigest(value?.manifestSha256) &&
+  isByteLength(value?.manifestByteLength);
 const isPublishedModuleManifest = (value) =>
   value?.schema === 'snoredex-site-module-manifest' &&
   value?.schemaVersion === '2.0.0' &&
   isCommit(value?.appRevision) &&
+  isRuntimeAssetSetPointer(value?.runtimeAssetSet, value?.appRevision) &&
   isPublicationFormat(value?.publicationFormat);
 const isPublishedDeployment = (value) =>
   value?.schema === 'snoredex-checklist-deployment' &&
@@ -79,6 +85,7 @@ const isPublishedDeployment = (value) =>
   isDigest(value?.migrationByteSha256) &&
   isByteLength(value?.migrationByteLength) &&
   isPublicationFormat(value?.publicationFormat) &&
+  isRuntimeAssetSetPointer(value?.runtimeAssetSet, value?.appRevision) &&
   isSourceHistory(value?.sourceFingerprints);
 const isPublishedProvenance = (value) => {
   const catalogue = value?.catalogue;
@@ -121,6 +128,7 @@ const matchesPublishedProvenance = (deployment, provenance) => {
   return (
     deployment?.appRevision === provenance?.appRevision &&
     currentModuleManifest?.appRevision === deployment?.appRevision &&
+    JSON.stringify(deployment?.runtimeAssetSet) === JSON.stringify(currentModuleManifest?.runtimeAssetSet) &&
     deployment?.producerRevision === catalogue?.sourceCommit &&
     deployment?.contractVersion === catalogue?.contractVersion &&
     deployment?.catalogueFingerprint === catalogue?.catalogueFingerprint &&
