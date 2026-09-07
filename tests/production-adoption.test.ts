@@ -282,6 +282,29 @@ test('upgrades a transitional pointer whose publication ID predates manifest bin
       import(`../scripts/retain-runtime-assets.mjs?divergent=${Date.now()}`),
       /RUNTIME_PREVIOUS_MANIFEST_INVALID/u,
     );
+    await writeFile(
+      previousPath,
+      JSON.stringify({
+        schema: 'snoredex-checklist-deployment',
+        schemaVersion: '1.0.0',
+        pageUrl: 'https://m4s-ai.github.io/snoredex-checklist/',
+        publishedAt: '2026-08-30T00:00:00.000Z',
+        appRevision: currentRevision,
+        producerRevision: lock.producerRevision,
+        contractVersion: '1.0.0',
+        catalogueFingerprint: lock.catalogueFingerprint,
+        catalogueByteSha256: lock.catalogueByteSha256,
+        catalogueByteLength: lock.catalogueByteLength,
+        migrationByteSha256: lock.migrationByteSha256,
+        migrationByteLength: lock.migrationByteLength,
+        runtimeAssetSet: { ...oldPointer, publicationId: 'pages-previous' },
+        sourceFingerprints: [lock.catalogueFingerprint],
+      }),
+    );
+    await assert.rejects(
+      import(`../scripts/retain-runtime-assets.mjs?same-revision=${Date.now()}`),
+      /RUNTIME_PREVIOUS_POINTER_INVALID/u,
+    );
   } finally {
     globalThis.fetch = originalFetch;
     process.argv.length = 0;

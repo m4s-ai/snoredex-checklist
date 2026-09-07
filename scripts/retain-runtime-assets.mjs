@@ -221,35 +221,44 @@ function previousTuple(previous, currentRuntime) {
   return tuple;
 }
 
-async function retainPublishedSet(previous, currentRuntime, publicationId) {
-  const candidate = previous.appRevision === currentRuntime.appRevision ? previous.rollback : previous;
-  if (!candidate) return undefined;
+async function fetchPublishedRuntimeSet(candidate, currentRuntime) {
   const runtime = previousTuple(candidate, currentRuntime);
   const publishedPointer = candidate.runtimeAssetSet;
+  if (publishedPointer === undefined) return { runtime, publishedPointer };
+  if (!validateRuntimeAssetSetPointer(publishedPointer, candidate.appRevision)) {
+    throw new Error('RUNTIME_PREVIOUS_POINTER_INVALID');
+  }
+  const fetched = await fetchJson(`assets/${publishedPointer.path}/manifest.json`);
+  const transitionalPublicationBinding =
+    publishedPointer.publicationId !== undefined && fetched.value.publicationId === undefined;
+  if (
+    fetched.bytes.byteLength !== publishedPointer.manifestByteLength ||
+    sha256(fetched.bytes) !== publishedPointer.manifestSha256 ||
+    !validateRuntimeAssetSetManifest(fetched.value, runtime) ||
+    (!transitionalPublicationBinding && fetched.value.publicationId !== publishedPointer.publicationId)
+  ) {
+    throw new Error('RUNTIME_PREVIOUS_MANIFEST_INVALID');
+  }
+  const fetchedModules = await Promise.all(
+    fetched.value.modules.map(async (module) => {
+      const bytes = await fetchBytes(`assets/${publishedPointer.path}/${module.path}`);
+      if (bytes.byteLength !== module.byteLength || sha256(bytes) !== module.sha256) {
+        throw new Error('RUNTIME_PREVIOUS_MODULE_INVALID');
+      }
+      return { module, bytes };
+    }),
+  );
+  return { runtime, publishedPointer, fetched, fetchedModules, transitionalPublicationBinding };
+}
+
+async function retainPublishedSet(previous, currentRuntime, publicationId) {
+  const previousPublished = await fetchPublishedRuntimeSet(previous, currentRuntime);
+  const candidate = previous.appRevision === currentRuntime.appRevision ? previous.rollback : previous;
+  if (!candidate) return undefined;
+  const published =
+    candidate === previous ? previousPublished : await fetchPublishedRuntimeSet(candidate, currentRuntime);
+  const { runtime, publishedPointer, fetched, fetchedModules, transitionalPublicationBinding } = published;
   if (publishedPointer !== undefined) {
-    if (!validateRuntimeAssetSetPointer(publishedPointer, candidate.appRevision)) {
-      throw new Error('RUNTIME_PREVIOUS_POINTER_INVALID');
-    }
-    const fetched = await fetchJson(`assets/${publishedPointer.path}/manifest.json`);
-    const transitionalPublicationBinding =
-      publishedPointer.publicationId !== undefined && fetched.value.publicationId === undefined;
-    if (
-      fetched.bytes.byteLength !== publishedPointer.manifestByteLength ||
-      sha256(fetched.bytes) !== publishedPointer.manifestSha256 ||
-      !validateRuntimeAssetSetManifest(fetched.value, runtime) ||
-      (!transitionalPublicationBinding && fetched.value.publicationId !== publishedPointer.publicationId)
-    ) {
-      throw new Error('RUNTIME_PREVIOUS_MANIFEST_INVALID');
-    }
-    const fetchedModules = await Promise.all(
-      fetched.value.modules.map(async (module) => {
-        const bytes = await fetchBytes(`assets/${publishedPointer.path}/${module.path}`);
-        if (bytes.byteLength !== module.byteLength || sha256(bytes) !== module.sha256) {
-          throw new Error('RUNTIME_PREVIOUS_MODULE_INVALID');
-        }
-        return { module, bytes };
-      }),
-    );
     if (candidate.catalogueFingerprint !== currentRuntime.catalogueFingerprint) return undefined;
     const directory = join(assets, ...publishedPointer.path.split('/'));
     await mkdir(directory, { recursive: true });
