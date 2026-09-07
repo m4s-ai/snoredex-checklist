@@ -674,7 +674,7 @@ function preserveUnreadableAuthority(
   };
   const active = append(parsed.value.active, activeRaw);
   if (!active.ok) return active;
-  const recovery = append(parsed.value.recovery, recoveryRaw);
+  const recovery = append(parsed.value.recovery, activeRaw === recoveryRaw ? null : recoveryRaw);
   if (!recovery.ok) return recovery;
   const next: CorruptionQuarantine = {
     schema: AUTHORITY_QUARANTINE_SCHEMA,

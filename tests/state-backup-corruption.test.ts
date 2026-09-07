@@ -108,6 +108,32 @@ test('imports over unreadable authority only after quarantining both original by
   });
 });
 
+test('quarantines a broken authority envelope only once when both components fail', async () => {
+  const storage = new FakeStorage();
+  const envelope = JSON.stringify({
+    schema: 'snoredex-private-state-authority',
+    schemaVersion: 1,
+    active: '{broken-active}',
+    recovery: '{broken-recovery}',
+  });
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, envelope);
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision, now: () => exportedAt });
+  const imported = importedState();
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  const plan = lifecycle.prepareImport(imported.value.bytes, fingerprint, knownItemIds);
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+
+  assert.equal((await lifecycle.commitImport(plan.value, true)).ok, true);
+  assert.deepEqual(JSON.parse(storage.values.get(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY) ?? 'null'), {
+    schema: 'snoredex-private-state-authority-quarantine',
+    schemaVersion: 2,
+    active: [envelope],
+    recovery: [],
+  });
+});
+
 test('retains readable active state as recovery when only recovery is malformed', async () => {
   const storage = new FakeStorage();
   const brokenRecovery = '{broken-recovery';
