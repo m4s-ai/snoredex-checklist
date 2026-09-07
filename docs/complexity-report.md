@@ -3,25 +3,25 @@
 > Advisory AST-derived estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (38 production code files).
-Lines: 14,247.
-Function-like nodes: 860.
-McCabe estimate: sum 4,086; mean 4.8; median 2; P90 10; P95 19.
-Hotspots: 82 functions exceed 10; 38 exceed 20.
+Lines: 14,264.
+Function-like nodes: 861.
+McCabe estimate: sum 4,091; mean 4.8; median 2; P90 10; P95 19.
+Hotspots: 82 functions exceed 10; 39 exceed 20.
 
 The report parses each source file with the bundled TypeScript compiler and counts runtime function-like declarations plus structural decision nodes: if/for/while/do/catch/case statements, conditional expressions and logical (&&/||/??) binary expressions. Type-only function signatures and nested function bodies are excluded from their enclosing function. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
 
 | Location                                  | Function                         | Complexity |
 | ----------------------------------------- | -------------------------------- | ---------: |
 | `src/site/catalogue.ts:223`               | `validateSnapshot`               |         90 |
-| `src/site/app.ts:1455`                    | `renderResults`                  |         75 |
+| `src/site/app.ts:1459`                    | `renderResults`                  |         75 |
 | `src/state/storage.ts:716`                | `persistPendingNoteDraft`        |         75 |
 | `src/state/reconciliation.ts:515`         | `reconcilePrivateState`          |         58 |
 | `src/catalogue/validate.ts:235`           | `validateSemantics`              |         56 |
 | `src/catalogue/validate.ts:416`           | `validateCatalogueFixture`       |         54 |
-| `src/state/backup.ts:1066`                | `<arrow>`                        |         54 |
+| `src/state/backup.ts:1077`                | `<arrow>`                        |         54 |
 | `scripts/catalogue-release.mjs:127`       | `createCatalogueReleaseManifest` |         50 |
 | `scripts/check-artifact.mjs:541`          | `extractHead`                    |         45 |
-| `src/state/backup.ts:734`                 | `writeAuthority`                 |         42 |
+| `src/state/backup.ts:745`                 | `writeAuthority`                 |         42 |
 | `src/site/deployment.ts:38`               | `validatePagesDeployment`        |         40 |
 | `src/state/storage.ts:1153`               | `setDraftOwnerState`             |         36 |
 | `src/catalogue/sync.ts:517`               | `parseJournal`                   |         34 |
