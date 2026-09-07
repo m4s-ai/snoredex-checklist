@@ -169,6 +169,10 @@ jobs:
             exit 1
           fi
           git cat-file -e "$CONSUMER_REVISION^{commit}"
+      - name: Preserve current adoption guard
+        env:
+          WORKFLOW_REVISION: ${{ github.sha }}
+        run: git show "$WORKFLOW_REVISION:scripts/check-production-adoption.mjs" > "$RUNNER_TEMP/check-production-adoption.mjs"
       - name: Check out consumer revision
         env:
           CONSUMER_REVISION: ${{ steps.deployment-inputs.outputs.consumer_revision }}
@@ -338,7 +342,7 @@ jobs:
           SNOREDEX_CURRENT_PROVENANCE_PATH: ${{ steps.current-production.outputs.provenance_path }}
           SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: ${{ steps.current-production.outputs.module_manifest_path }}
           SNOREDEX_BOOTSTRAP_AUTHORIZED: ${{ steps.deployment-inputs.outputs.bootstrap_authorized }}
-        run: node scripts/check-production-adoption.mjs
+        run: node "$RUNNER_TEMP/check-production-adoption.mjs"
       - name: Run browser and accessibility gates
         run: |
           npm run test:browser

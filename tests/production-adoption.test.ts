@@ -169,6 +169,11 @@ test('production adoption validates the reviewed target migration without requir
   assert.match(workflow, /consumer_revision="\$\{CONSUMER_REVISION_INPUT:-\$WORKFLOW_REVISION\}"/u);
   assert.match(
     workflow,
+    /git show "\$WORKFLOW_REVISION:scripts\/check-production-adoption\.mjs" > "\$RUNNER_TEMP\/check-production-adoption\.mjs"/u,
+  );
+  assert.match(workflow, /run: node "\$RUNNER_TEMP\/check-production-adoption\.mjs"/u);
+  assert.match(
+    workflow,
     /SNOREDEX_EXPECTED_GITHUB_SHA: \$\{\{ steps\.deployment-inputs\.outputs\.consumer_revision \}\}/u,
   );
   const deployedSmokeStep = workflow.slice(workflow.indexOf('- name: Smoke-test deployed Pages site'));
