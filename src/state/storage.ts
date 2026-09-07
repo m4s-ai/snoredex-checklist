@@ -11,6 +11,8 @@ export const PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY = 'snoredex-checklist.pr
 /** Exact unreadable ledger bytes are quarantined before a validated repair replaces them. */
 export const PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY =
   'snoredex-checklist.private-state.recovery-records.quarantine';
+/** Malformed active/recovery authority bytes are retained before a confirmed repair. */
+export const PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY = 'snoredex-checklist.private-state.authority.quarantine';
 export const PRIVATE_STATE_LOCK_NAME = 'snoredex-checklist.private-state-write';
 export const PRIVATE_STATE_NOTE_DRAFT_KEY = 'snoredex-checklist.private-state.note-draft';
 export const NOTE_AUTOSAVE_DELAY_MS = 3_000;

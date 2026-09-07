@@ -3,27 +3,27 @@
 > Advisory AST-derived estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (38 production code files).
-Lines: 13,877.
-Function-like nodes: 847.
-McCabe estimate: sum 3,961; mean 4.7; median 2; P90 10; P95 18.
-Hotspots: 79 functions exceed 10; 37 exceed 20.
+Lines: 14,102.
+Function-like nodes: 853.
+McCabe estimate: sum 4,031; mean 4.7; median 2; P90 10; P95 19.
+Hotspots: 80 functions exceed 10; 38 exceed 20.
 
 The report parses each source file with the bundled TypeScript compiler and counts runtime function-like declarations plus structural decision nodes: if/for/while/do/catch/case statements, conditional expressions and logical (&&/||/??) binary expressions. Type-only function signatures and nested function bodies are excluded from their enclosing function. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
 
 | Location                                  | Function                         | Complexity |
 | ----------------------------------------- | -------------------------------- | ---------: |
 | `src/site/catalogue.ts:223`               | `validateSnapshot`               |         90 |
-| `src/site/app.ts:1400`                    | `renderResults`                  |         75 |
-| `src/state/storage.ts:714`                | `persistPendingNoteDraft`        |         75 |
+| `src/site/app.ts:1415`                    | `renderResults`                  |         75 |
+| `src/state/storage.ts:716`                | `persistPendingNoteDraft`        |         75 |
 | `src/state/reconciliation.ts:515`         | `reconcilePrivateState`          |         58 |
 | `src/catalogue/validate.ts:235`           | `validateSemantics`              |         56 |
 | `src/catalogue/validate.ts:416`           | `validateCatalogueFixture`       |         54 |
+| `src/state/backup.ts:998`                 | `<arrow>`                        |         51 |
 | `scripts/catalogue-release.mjs:127`       | `createCatalogueReleaseManifest` |         50 |
 | `scripts/check-artifact.mjs:541`          | `extractHead`                    |         45 |
-| `src/state/backup.ts:560`                 | `writeAuthority`                 |         41 |
+| `src/state/backup.ts:670`                 | `writeAuthority`                 |         42 |
 | `src/site/deployment.ts:38`               | `validatePagesDeployment`        |         40 |
-| `src/state/backup.ts:874`                 | `<arrow>`                        |         40 |
-| `src/state/storage.ts:1151`               | `setDraftOwnerState`             |         36 |
+| `src/state/storage.ts:1153`               | `setDraftOwnerState`             |         36 |
 | `src/catalogue/sync.ts:517`               | `parseJournal`                   |         34 |
 | `scripts/check-artifact.mjs:265`          | `stripHtmlComments`              |         32 |
 | `src/state/domain.ts:211`                 | `parseState`                     |         32 |

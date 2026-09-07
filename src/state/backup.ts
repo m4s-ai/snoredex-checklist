@@ -10,11 +10,12 @@ import {
   type PortablePrivateState,
   type StateErrorCode,
 } from './domain.ts';
-import { readStateAuthority, type AuthorityReadResult } from './authority.ts';
+import { readStateAuthorityParts, type AuthorityReadResult, type StateAuthorityParts } from './authority.ts';
 import {
   PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY,
   PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY,
   PRIVATE_STATE_RECOVERY_STORAGE_KEY,
+  PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY,
   PRIVATE_STATE_STORAGE_KEY,
   type StorageLike,
 } from './storage.ts';
@@ -373,13 +374,14 @@ export function buildImportPreview(
   current: PrivateState | undefined,
   targetFingerprint: string | undefined,
   reconciliation?: ReconciliationReport,
+  currentPresent = current !== undefined,
 ): BackupResult<ImportPreview> {
   if (typeof targetFingerprint !== 'string' || state.catalogueFingerprint !== targetFingerprint) {
     return fail('STATE_FINGERPRINT_UNSUPPORTED');
   }
   const totals = aggregate(state);
   return ok({
-    mode: current === undefined || current.items.length === 0 ? 'create' : 'replace',
+    mode: !currentPresent || (current !== undefined && current.items.length === 0) ? 'create' : 'replace',
     sourceFingerprint: reconciliation?.sourceFingerprint ?? state.catalogueFingerprint,
     targetFingerprint,
     schemaVersion: state.schemaVersion,
@@ -401,11 +403,29 @@ type ReadAuthority = Extract<AuthorityReadResult, { ok: true }> & {
   readonly recoveryRecords: readonly DurableRecoveryRecord[];
 };
 
-type ReadAuthorityWithoutRecoveryRecords = Extract<AuthorityReadResult, { ok: true }>;
+interface ReadAuthorityParts extends StateAuthorityParts {
+  readonly recoveryRecords: readonly DurableRecoveryRecord[];
+  readonly recoveryRecordsError?: 'LOCAL_STATE_UNREADABLE';
+}
 
-function readAuthorityWithoutRecoveryRecords(storage: StorageLike): BackupResult<{
+interface AuthorityReadSnapshot {
   readonly raw: AuthorityRawSnapshot;
-  readonly authority: ReadAuthorityWithoutRecoveryRecords;
+  readonly authority: ReadAuthorityParts;
+}
+
+interface CorruptionQuarantine {
+  readonly schema: 'snoredex-private-state-authority-quarantine';
+  readonly schemaVersion: 1;
+  readonly active: string | null;
+  readonly recovery: string | null;
+}
+
+const AUTHORITY_QUARANTINE_SCHEMA = 'snoredex-private-state-authority-quarantine' as const;
+const AUTHORITY_QUARANTINE_VERSION = 1 as const;
+
+function readAuthorityPartsWithoutRecoveryRecords(storage: StorageLike): BackupResult<{
+  readonly raw: AuthorityRawSnapshot;
+  readonly authority: StateAuthorityParts;
 }> {
   const active = readRaw(storage, PRIVATE_STATE_STORAGE_KEY);
   if (!active.ok) return active;
@@ -413,26 +433,44 @@ function readAuthorityWithoutRecoveryRecords(storage: StorageLike): BackupResult
   if (!recovery.ok) return recovery;
   const recoveryRecords = readRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY);
   if (!recoveryRecords.ok) return recoveryRecords;
-  const authority = readStateAuthority(active.value, recovery.value);
-  return authority.ok
-    ? ok({
-        raw: { active: active.value, recovery: recovery.value, recoveryRecords: recoveryRecords.value },
-        authority,
-      })
-    : fail(authority.error);
+  return ok({
+    raw: { active: active.value, recovery: recovery.value, recoveryRecords: recoveryRecords.value },
+    authority: readStateAuthorityParts(active.value, recovery.value),
+  });
+}
+
+function readAuthorityParts(storage: StorageLike): BackupResult<AuthorityReadSnapshot> {
+  const withoutRecords = readAuthorityPartsWithoutRecoveryRecords(storage);
+  if (!withoutRecords.ok) return withoutRecords;
+  const parsedRecoveryRecords = readRecoveryRecords(withoutRecords.value.raw.recoveryRecords);
+  return ok({
+    raw: withoutRecords.value.raw,
+    authority: {
+      ...withoutRecords.value.authority,
+      recoveryRecords: parsedRecoveryRecords.ok ? parsedRecoveryRecords.value : [],
+      ...(parsedRecoveryRecords.ok ? {} : { recoveryRecordsError: 'LOCAL_STATE_UNREADABLE' as const }),
+    },
+  });
 }
 
 function readAuthority(storage: StorageLike): BackupResult<{
   readonly raw: AuthorityRawSnapshot;
   readonly authority: ReadAuthority;
 }> {
-  const withoutRecords = readAuthorityWithoutRecoveryRecords(storage);
-  if (!withoutRecords.ok) return withoutRecords;
-  const parsedRecoveryRecords = readRecoveryRecords(withoutRecords.value.raw.recoveryRecords);
-  if (!parsedRecoveryRecords.ok) return fail('LOCAL_STATE_UNREADABLE');
+  const parts = readAuthorityParts(storage);
+  if (!parts.ok) return parts;
+  if (parts.value.authority.activeError !== undefined) return fail(parts.value.authority.activeError);
+  if (parts.value.authority.recoveryError !== undefined) return fail(parts.value.authority.recoveryError);
+  if (parts.value.authority.recoveryRecordsError !== undefined) return fail(parts.value.authority.recoveryRecordsError);
   return ok({
-    raw: withoutRecords.value.raw,
-    authority: { ...withoutRecords.value.authority, recoveryRecords: parsedRecoveryRecords.value },
+    raw: parts.value.raw,
+    authority: {
+      ok: true,
+      active: parts.value.authority.active,
+      recovery: parts.value.authority.recovery,
+      enveloped: parts.value.authority.enveloped,
+      recoveryRecords: parts.value.authority.recoveryRecords,
+    },
   });
 }
 
@@ -512,12 +550,84 @@ function preserveUnreadableRecoveryRecords(storage: StorageLike, raw: string | n
   return verified.ok && verified.value === next ? ok(undefined) : fail('STORAGE_COMMIT_UNCERTAIN');
 }
 
+function readAuthorityQuarantine(raw: string | null): BackupResult<CorruptionQuarantine> {
+  if (raw === null) {
+    return ok({
+      schema: AUTHORITY_QUARANTINE_SCHEMA,
+      schemaVersion: AUTHORITY_QUARANTINE_VERSION,
+      active: null,
+      recovery: null,
+    });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return fail('LOCAL_STATE_UNREADABLE');
+  }
+  if (
+    !isObjectRecord(parsed) ||
+    parsed.schema !== AUTHORITY_QUARANTINE_SCHEMA ||
+    parsed.schemaVersion !== AUTHORITY_QUARANTINE_VERSION ||
+    (parsed.active !== null && typeof parsed.active !== 'string') ||
+    (parsed.recovery !== null && typeof parsed.recovery !== 'string')
+  ) {
+    return fail('LOCAL_STATE_UNREADABLE');
+  }
+  return ok({
+    schema: AUTHORITY_QUARANTINE_SCHEMA,
+    schemaVersion: AUTHORITY_QUARANTINE_VERSION,
+    active: parsed.active as string | null,
+    recovery: parsed.recovery as string | null,
+  });
+}
+
+function serializeAuthorityQuarantine(value: CorruptionQuarantine): string {
+  return `${JSON.stringify(value)}\n`;
+}
+
+/** Preserve malformed authority bytes without allowing a later repair to overwrite a different copy. */
+function preserveUnreadableAuthority(
+  storage: StorageLike,
+  activeRaw: string | null,
+  recoveryRaw: string | null,
+): BackupResult<void> {
+  if (activeRaw === null && recoveryRaw === null) return ok(undefined);
+  const existing = readRaw(storage, PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY);
+  if (!existing.ok) return existing;
+  const parsed = readAuthorityQuarantine(existing.value);
+  if (!parsed.ok) return parsed;
+  if (
+    (activeRaw !== null && parsed.value.active !== null && parsed.value.active !== activeRaw) ||
+    (recoveryRaw !== null && parsed.value.recovery !== null && parsed.value.recovery !== recoveryRaw)
+  ) {
+    return fail('STORAGE_WRITE_FAILED');
+  }
+  const next: CorruptionQuarantine = {
+    schema: AUTHORITY_QUARANTINE_SCHEMA,
+    schemaVersion: AUTHORITY_QUARANTINE_VERSION,
+    active: activeRaw ?? parsed.value.active,
+    recovery: recoveryRaw ?? parsed.value.recovery,
+  };
+  const serialized = serializeAuthorityQuarantine(next);
+  if (existing.value === serialized) return ok(undefined);
+  try {
+    storage.setItem(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY, serialized);
+  } catch (cause) {
+    const verified = readRaw(storage, PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY);
+    if (verified.ok && verified.value === serialized) return ok(undefined);
+    return fail(isQuotaError(cause) ? 'STORAGE_QUOTA_EXCEEDED' : 'STORAGE_WRITE_FAILED');
+  }
+  const verified = readRaw(storage, PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY);
+  return verified.ok && verified.value === serialized ? ok(undefined) : fail('STORAGE_COMMIT_UNCERTAIN');
+}
+
 function writeRecoveryRecordsRepair(
   storage: StorageLike,
   expectedRaw: AuthorityRawSnapshot,
   recoveryRecords: readonly DurableRecoveryRecord[],
 ): BackupResult<LifecycleSuccess> {
-  const current = readAuthorityWithoutRecoveryRecords(storage);
+  const current = readAuthorityPartsWithoutRecoveryRecords(storage);
   if (!current.ok) return current;
   if (
     current.value.raw.active !== expectedRaw.active ||
@@ -538,7 +648,7 @@ function writeRecoveryRecordsRepair(
       restored ? (isQuotaError(cause) ? 'STORAGE_QUOTA_EXCEEDED' : 'STORAGE_WRITE_FAILED') : 'STORAGE_COMMIT_UNCERTAIN',
     );
   }
-  const after = readAuthority(storage);
+  const after = readAuthorityParts(storage);
   if (
     !after.ok ||
     after.value.raw.active !== expectedRaw.active ||
@@ -563,13 +673,20 @@ function writeAuthority(
   active: PrivateState | undefined,
   recovery: PrivateState | undefined,
   recoveryRecords: readonly DurableRecoveryRecord[],
+  currentSnapshot?: AuthorityReadSnapshot,
 ): BackupResult<LifecycleSuccess> {
-  const current = readAuthority(storage);
-  if (!current.ok) return current;
+  let current: AuthorityReadSnapshot;
+  if (currentSnapshot !== undefined) {
+    current = currentSnapshot;
+  } else {
+    const read = readAuthorityParts(storage);
+    if (!read.ok) return read;
+    current = read.value;
+  }
   if (
-    current.value.raw.active !== expectedRaw.active ||
-    current.value.raw.recovery !== expectedRaw.recovery ||
-    current.value.raw.recoveryRecords !== expectedRaw.recoveryRecords
+    current.raw.active !== expectedRaw.active ||
+    current.raw.recovery !== expectedRaw.recovery ||
+    current.raw.recoveryRecords !== expectedRaw.recoveryRecords
   ) {
     return fail('STATE_CHANGED_DURING_OPERATION');
   }
@@ -582,9 +699,9 @@ function writeAuthority(
   const serializedRecoveryRecords = serializeRecoveryRecords(recoveryRecords);
   if (!serializedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
   const recoveryRecordsText = serializedRecoveryRecords.value;
-  const activeChanged = current.value.raw.active !== activeText;
-  const recoveryChanged = current.value.raw.recovery !== recoveryText;
-  const recoveryRecordsChanged = current.value.raw.recoveryRecords !== recoveryRecordsText;
+  const activeChanged = current.raw.active !== activeText;
+  const recoveryChanged = current.raw.recovery !== recoveryText;
+  const recoveryRecordsChanged = current.raw.recoveryRecords !== recoveryRecordsText;
   const matchesExpectedRaw = (raw: AuthorityRawSnapshot): boolean =>
     raw.active === expectedRaw.active &&
     raw.recovery === expectedRaw.recovery &&
@@ -628,7 +745,7 @@ function writeAuthority(
       if (storage.getItem(PRIVATE_STATE_STORAGE_KEY) !== activeText) {
         const restoredSidecars = restoreSidecars();
         const restoredActive = restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, expectedRaw.active);
-        const afterFailure = readAuthority(storage);
+        const afterFailure = readAuthorityParts(storage);
         if (
           (restoredSidecars && restoredActive) ||
           (restoredSidecars && afterFailure.ok && afterFailure.value.raw.active === expectedRaw.active)
@@ -641,7 +758,7 @@ function writeAuthority(
   } catch (cause) {
     const restoredSidecars = restoreSidecars();
     const restoredActive = restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, expectedRaw.active);
-    const afterFailure = readAuthority(storage);
+    const afterFailure = readAuthorityParts(storage);
     if (
       (restoredSidecars && restoredActive) ||
       (restoredSidecars && afterFailure.ok && afterFailure.value.raw.active === expectedRaw.active)
@@ -658,7 +775,7 @@ function writeAuthority(
     after.value.raw.recoveryRecords !== recoveryRecordsText
   ) {
     if (restoreExpected()) return fail('STORAGE_WRITE_FAILED');
-    const afterRestore = readAuthority(storage);
+    const afterRestore = readAuthorityParts(storage);
     if (afterRestore.ok && matchesExpectedRaw(afterRestore.value.raw)) return fail('STORAGE_WRITE_FAILED');
     return fail('STORAGE_COMMIT_UNCERTAIN');
   }
@@ -677,11 +794,12 @@ function promoteRecovery(
   active: PrivateState,
   recovery: PrivateState | undefined,
   recoveryRecords: readonly DurableRecoveryRecord[],
+  currentSnapshot?: AuthorityReadSnapshot,
 ): BackupResult<LifecycleSuccess> {
   // Recovery promotion is the same three-key transaction as any other
   // authority update. Keeping one commit path makes rollback and restore
   // preserve the durable record ledger under every write failure.
-  return writeAuthority(storage, expectedRaw, active, recovery, recoveryRecords);
+  return writeAuthority(storage, expectedRaw, active, recovery, recoveryRecords, currentSnapshot);
 }
 
 async function exclusive<T>(storage: StorageLike, callback: () => T): Promise<T> {
@@ -721,42 +839,54 @@ export class PrivateStateLifecycle {
     readonly active: PrivateState | undefined;
     readonly recovery: PrivateState | undefined;
     readonly recoveryRecords: readonly DurableRecoveryRecord[];
+    readonly activeError?: 'LOCAL_STATE_UNSUPPORTED' | 'LOCAL_STATE_UNREADABLE';
+    readonly recoveryError?: 'LOCAL_STATE_UNSUPPORTED' | 'LOCAL_STATE_UNREADABLE';
+    readonly recoveryRecordsError?: 'LOCAL_STATE_UNREADABLE';
   }> {
-    const result = readAuthority(this.storage);
-    return result.ok
-      ? ok({
-          active: result.value.authority.active,
-          recovery: result.value.authority.recovery,
-          recoveryRecords: result.value.authority.recoveryRecords,
-        })
-      : result;
+    const result = readAuthorityParts(this.storage);
+    if (!result.ok) return result;
+    return ok({
+      active: result.value.authority.active,
+      recovery: result.value.authority.recovery,
+      recoveryRecords: result.value.authority.recoveryRecords,
+      ...(result.value.authority.activeError === undefined ? {} : { activeError: result.value.authority.activeError }),
+      ...(result.value.authority.recoveryError === undefined
+        ? {}
+        : { recoveryError: result.value.authority.recoveryError }),
+      ...(result.value.authority.recoveryRecordsError === undefined
+        ? {}
+        : { recoveryRecordsError: result.value.authority.recoveryRecordsError }),
+    });
   }
 
   public exportActive(): BackupResult<ExportedBackup> {
     const current = this.read();
     if (!current.ok) return current;
+    if (current.value.activeError !== undefined) return fail(current.value.activeError);
     if (current.value.active === undefined || current.value.active.items.length === 0) return fail('EXPORT_FAILED');
     return createPortableBackup(current.value.active, {
       appRevision: this.appRevision,
       exportedAt: this.now(),
-      recoveryRecords: current.value.recoveryRecords,
+      recoveryRecords: current.value.recoveryRecordsError === undefined ? current.value.recoveryRecords : [],
     });
   }
 
   public exportRecovery(): BackupResult<ExportedBackup> {
     const current = this.read();
     if (!current.ok) return current;
+    if (current.value.recoveryError !== undefined) return fail(current.value.recoveryError);
     if (current.value.recovery === undefined) return fail('EXPORT_FAILED');
     return createPortableBackup(current.value.recovery, {
       appRevision: this.appRevision,
       exportedAt: this.now(),
-      recoveryRecords: current.value.recoveryRecords,
+      recoveryRecords: current.value.recoveryRecordsError === undefined ? current.value.recoveryRecords : [],
     });
   }
 
   public exportRecoveryRecords(): BackupResult<RecoveryRecordsBackup> {
     const current = this.read();
     if (!current.ok) return current;
+    if (current.value.recoveryRecordsError !== undefined) return fail(current.value.recoveryRecordsError);
     return createRecoveryRecordsBackup(current.value.recoveryRecords);
   }
 
@@ -802,21 +932,14 @@ export class PrivateStateLifecycle {
         recoveryRecordsOnly: true,
       });
     };
-    const current = readAuthority(this.storage);
-    if (!current.ok) {
-      if (recordsBackup === undefined || !recordsBackup.ok) return current;
-      const withoutRecords = readAuthorityWithoutRecoveryRecords(this.storage);
-      if (!withoutRecords.ok) return current;
-      return recoveryRecordsPlan(
-        withoutRecords.value.raw,
-        withoutRecords.value.authority.active,
-        recordsBackup.value.records,
-      );
-    }
     if (!parsed.ok) {
       if (recordsBackup === undefined || !recordsBackup.ok) return parsed;
+      const current = readAuthorityParts(this.storage);
+      if (!current.ok) return current;
       return recoveryRecordsPlan(current.value.raw, current.value.authority.active, recordsBackup.value.records);
     }
+    const current = readAuthorityParts(this.storage);
+    if (!current.ok) return current;
     // Imported diagnostic metadata is intentionally not persisted as local
     // collection state. The next export gets fresh appRevision/exportedAt.
     const candidate: PrivateState = {
@@ -853,6 +976,7 @@ export class PrivateStateLifecycle {
       current.value.authority.active,
       targetFingerprint,
       reconciliation?.report,
+      current.value.raw.active !== null,
     );
     if (!preview.ok) return preview;
     return ok({
@@ -876,25 +1000,31 @@ export class PrivateStateLifecycle {
       const validatedImportedRecoveryRecords = serializeRecoveryRecords(importedRecoveryRecords);
       if (!validatedImportedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
       if (plan.recoveryRecordsOnly === true) {
-        const current = readAuthority(this.storage);
-        if (current.ok) {
-          const mergedRecoveryRecords = mergeRecoveryRecords(
-            current.value.authority.recoveryRecords,
-            importedRecoveryRecords,
-          );
-          if (!mergedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
-          return writeAuthority(
-            this.storage,
-            plan.expectedRaw,
-            current.value.authority.active,
-            current.value.authority.recovery,
-            mergedRecoveryRecords.value,
-          );
+        const current = readAuthorityParts(this.storage);
+        if (!current.ok) return current;
+        if (
+          current.value.raw.active !== plan.expectedRaw.active ||
+          current.value.raw.recovery !== plan.expectedRaw.recovery ||
+          current.value.raw.recoveryRecords !== plan.expectedRaw.recoveryRecords
+        ) {
+          return fail('STATE_CHANGED_DURING_OPERATION');
         }
-        return writeRecoveryRecordsRepair(this.storage, plan.expectedRaw, importedRecoveryRecords);
+        const mergedRecoveryRecords = mergeRecoveryRecords(
+          current.value.authority.recoveryRecords,
+          importedRecoveryRecords,
+        );
+        if (!mergedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
+        return writeRecoveryRecordsRepair(this.storage, plan.expectedRaw, mergedRecoveryRecords.value);
       }
-      const current = readAuthority(this.storage);
+      const current = readAuthorityParts(this.storage);
       if (!current.ok) return current;
+      if (
+        current.value.raw.active !== plan.expectedRaw.active ||
+        current.value.raw.recovery !== plan.expectedRaw.recovery ||
+        current.value.raw.recoveryRecords !== plan.expectedRaw.recoveryRecords
+      ) {
+        return fail('STATE_CHANGED_DURING_OPERATION');
+      }
       let candidate = plan.candidate;
       let reconciliationRecovery = plan.reconciliationRecovery;
       let reconciliationRecoveryRecords = plan.reconciliationRecoveryRecords;
@@ -963,7 +1093,24 @@ export class PrivateStateLifecycle {
         plan.reconciliationSource?.catalogueFingerprint,
       );
       if (!mergedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
-      return writeAuthority(this.storage, plan.expectedRaw, candidate, recovery, mergedRecoveryRecords.value);
+      const preservedAuthority = preserveUnreadableAuthority(
+        this.storage,
+        current.value.authority.activeError === undefined ? null : current.value.raw.active,
+        current.value.authority.recoveryError === undefined ? null : current.value.raw.recovery,
+      );
+      if (!preservedAuthority.ok) return preservedAuthority;
+      if (current.value.authority.recoveryRecordsError !== undefined) {
+        const preservedRecords = preserveUnreadableRecoveryRecords(this.storage, current.value.raw.recoveryRecords);
+        if (!preservedRecords.ok) return preservedRecords;
+      }
+      return writeAuthority(
+        this.storage,
+        plan.expectedRaw,
+        candidate,
+        recovery,
+        mergedRecoveryRecords.value,
+        current.value,
+      );
     });
   }
 
@@ -993,8 +1140,9 @@ export class PrivateStateLifecycle {
   ): Promise<LifecycleResult> {
     if (!confirmed) return ok({ active: undefined, recovery: undefined, recoveryRecords: [], changed: false });
     return exclusive(this.storage, () => {
-      const current = readAuthority(this.storage);
+      const current = readAuthorityParts(this.storage);
       if (!current.ok) return current;
+      if (current.value.authority.recoveryError !== undefined) return fail(current.value.authority.recoveryError);
       const recovery = current.value.authority.recovery;
       if (recovery === undefined) return fail('EXPORT_FAILED');
       const validatedRecovery = validatePrivateState(recovery);
@@ -1023,6 +1171,16 @@ export class PrivateStateLifecycle {
           preservedItems.length === 0 ? undefined : { ...validatedRecovery.value, items: preservedItems };
         candidate = result.value.state;
       }
+      const preservedAuthority = preserveUnreadableAuthority(
+        this.storage,
+        current.value.authority.activeError === undefined ? null : current.value.raw.active,
+        null,
+      );
+      if (!preservedAuthority.ok) return preservedAuthority;
+      if (current.value.authority.recoveryRecordsError !== undefined) {
+        const preservedRecords = preserveUnreadableRecoveryRecords(this.storage, current.value.raw.recoveryRecords);
+        if (!preservedRecords.ok) return preservedRecords;
+      }
       if (active === undefined || active.items.length === 0) {
         const mergedRecoveryRecords = mergeRecoveryRecords(current.value.authority.recoveryRecords, []);
         if (!mergedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
@@ -1038,6 +1196,7 @@ export class PrivateStateLifecycle {
           candidate,
           preservedRecovery,
           updatedRecoveryRecords.value,
+          current.value,
         );
       }
       if (preservedRecovery !== undefined) return fail('STATE_RECONCILIATION_BLOCKED');
@@ -1055,6 +1214,7 @@ export class PrivateStateLifecycle {
         candidate,
         preservedRecovery ?? active,
         updatedRecoveryRecords.value,
+        current.value,
       );
     });
   }

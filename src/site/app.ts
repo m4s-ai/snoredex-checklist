@@ -66,6 +66,9 @@ interface BackupReadState {
   readonly active: { readonly items: readonly unknown[] } | undefined;
   readonly recovery: { readonly items: readonly unknown[] } | undefined;
   readonly recoveryRecords: readonly unknown[];
+  readonly activeError?: string;
+  readonly recoveryError?: string;
+  readonly recoveryRecordsError?: string;
 }
 
 type BackupResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: string };
@@ -1217,11 +1220,23 @@ function renderRecoveryTools(
       return;
     }
     const activeCount = current.value.active?.items.length ?? 0;
-    exportButton.disabled = activeCount === 0;
-    clearButton.disabled = activeCount === 0;
-    exportRecoveryButton.disabled = current.value.recovery === undefined;
-    exportRecoveryRecordsButton.disabled = current.value.recoveryRecords.length === 0;
-    restoreButton.disabled = current.value.recovery === undefined;
+    const activeReadable = current.value.activeError === undefined;
+    const recoveryReadable = current.value.recoveryError === undefined;
+    const recordsReadable = current.value.recoveryRecordsError === undefined;
+    exportButton.disabled = !activeReadable || activeCount === 0;
+    clearButton.disabled = !activeReadable || !recoveryReadable || !recordsReadable || activeCount === 0;
+    exportRecoveryButton.disabled = !recoveryReadable || current.value.recovery === undefined;
+    exportRecoveryRecordsButton.disabled = !recordsReadable || current.value.recoveryRecords.length === 0;
+    restoreButton.disabled = !recoveryReadable || current.value.recovery === undefined;
+    const messages: string[] = [];
+    if (!activeReadable) messages.push('Saved collection is unreadable. Choose a valid backup to recover it.');
+    if (!recoveryReadable)
+      messages.push(
+        'Recovery snapshot is unreadable. The collection backup remains available; choose a valid backup to replace it.',
+      );
+    if (!recordsReadable)
+      messages.push('Recovery ledger is unreadable. A valid backup can replace it after confirmation.');
+    setStatus(messages.join(' '));
   };
   exportButton.addEventListener('click', () => {
     const result = lifecycle.exportActive();
