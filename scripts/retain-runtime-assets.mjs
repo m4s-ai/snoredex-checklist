@@ -16,6 +16,12 @@ const root = resolve(process.cwd(), process.argv[2] ?? 'dist/site');
 const assets = join(root, 'assets');
 const pageUrl = process.env.SNOREDEX_PAGE_URL;
 const previousPath = process.env.SNOREDEX_CURRENT_DEPLOYMENT_PATH;
+const publicationId = process.env.SNOREDEX_PUBLICATION_ID;
+const publicationIdPattern = /^[a-z0-9][a-z0-9._-]{1,127}$/u;
+
+if (publicationId !== undefined && !publicationIdPattern.test(publicationId)) {
+  throw new Error('RUNTIME_PUBLICATION_ID_INVALID');
+}
 
 function isModulePath(value) {
   return (
@@ -258,6 +264,12 @@ async function retainPublishedSet(previous, currentRuntime) {
 const provenance = await readJson(join(root, 'provenance.json'), 'RUNTIME_PROVENANCE_INVALID');
 const moduleManifest = await readJson(join(assets, 'module-manifest.json'), 'RUNTIME_ACTIVE_MANIFEST_INVALID');
 const active = await loadActiveSet(provenance, moduleManifest);
+const effectivePublicationId = publicationId ?? provenance.publicationId;
+if (effectivePublicationId !== undefined && !publicationIdPattern.test(effectivePublicationId)) {
+  throw new Error('RUNTIME_PUBLICATION_ID_INVALID');
+}
+const activePointer =
+  effectivePublicationId === undefined ? active.pointer : { ...active.pointer, publicationId: effectivePublicationId };
 let retained;
 if (previousPath) {
   const previous = await readJson(previousPath, 'RUNTIME_PREVIOUS_DEPLOYMENT_INVALID');
@@ -267,12 +279,19 @@ const result = {
   schema: 'snoredex-site-module-manifest',
   schemaVersion: '2.0.0',
   publicationFormat: 'provenance-history-v1',
-  publicationId: provenance.publicationId,
+  publicationId: effectivePublicationId,
   appRevision: active.runtime.appRevision,
-  runtimeAssetSet: active.pointer,
+  runtimeAssetSet: activePointer,
   retainedRuntimeAssetSets: retained ? [retained] : [],
   legacyModules: active.legacyModules,
 };
+if (effectivePublicationId !== undefined) {
+  await writeFile(
+    join(root, 'provenance.json'),
+    `${JSON.stringify({ ...provenance, publicationId: effectivePublicationId }, null, 2)}\n`,
+    'utf8',
+  );
+}
 await writeFile(join(assets, 'module-manifest.json'), `${JSON.stringify(result, null, 2)}\n`, 'utf8');
 console.log(
   `runtime assets retained: active ${active.runtime.appRevision}; rollback ${retained?.appRevision ?? 'none'}`,

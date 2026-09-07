@@ -71,7 +71,8 @@ test('upgrades a validated pre-integrity rollback shell before publication', asy
       writeFile(resolve(directory, 'collection/index.html'), shell('../')),
     ]);
 
-    const env = { ...process.env };
+    const publicationId = 'pages-test-rollback-1';
+    const env: NodeJS.ProcessEnv = { ...process.env, SNOREDEX_PUBLICATION_ID: publicationId };
     delete env.SNOREDEX_CURRENT_DEPLOYMENT_PATH;
     delete env.SNOREDEX_PAGE_URL;
     const result = spawnSync(process.execPath, [resolve(root, 'scripts/retain-runtime-assets.mjs'), directory], {
@@ -81,9 +82,26 @@ test('upgrades a validated pre-integrity rollback shell before publication', asy
     });
     assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
     const promotedModuleManifest = JSON.parse(await readFile(resolve(assets, 'module-manifest.json'), 'utf8'));
+    const promotedProvenance = JSON.parse(await readFile(resolve(directory, 'provenance.json'), 'utf8'));
     const promotedRuntimeManifest = JSON.parse(
       await readFile(resolve(assets, promotedModuleManifest.runtimeAssetSet.path, 'manifest.json'), 'utf8'),
     );
+    assert.equal(promotedProvenance.publicationId, publicationId);
+    assert.equal(promotedModuleManifest.publicationId, publicationId);
+    assert.equal(promotedModuleManifest.runtimeAssetSet.publicationId, publicationId);
+    const deploymentResult = spawnSync(
+      process.execPath,
+      [resolve(root, 'scripts/create-deployment-manifest.mjs'), directory],
+      {
+        cwd: root,
+        encoding: 'utf8',
+        env: { ...env, SNOREDEX_PAGE_URL: 'https://m4s-ai.github.io/snoredex-checklist/' },
+      },
+    );
+    assert.equal(deploymentResult.status, 0, `${deploymentResult.stdout}${deploymentResult.stderr}`);
+    const deployment = JSON.parse(await readFile(resolve(directory, 'deployment.json'), 'utf8'));
+    assert.equal(deployment.publicationId, publicationId);
+    assert.deepEqual(deployment.runtimeAssetSet, promotedModuleManifest.runtimeAssetSet);
     assert.ok(promotedRuntimeManifest.modules.some((module: { path: string }) => module.path === 'theme.js'));
     assert.equal(await validateRuntimeAssetSetDirectory(assets, promotedModuleManifest.runtimeAssetSet, runtime), true);
     for (const page of ['index.html', 'collection/index.html']) {
