@@ -7,6 +7,7 @@ import {
   finishCueLabel,
   evidenceCueLabel,
   imageScopeLabel,
+  itemIdentityCueKey,
   itemIdentityCueLabel,
   itemCueLabel,
   itemKindLabel,
@@ -36,6 +37,10 @@ test('keeps item presentation labels explicit and distinct', () => {
       rarity: { display: 'Holo Rare', evidenceStatus: 'source-backed' },
     }),
     'Edition: 1st Edition · Finish: holo · Finish family: foil · Foil: master-ball · Markings: edition-stamp/print-identity: EDIZIONE 1 · Size: standard · Rarity: Holo Rare · Verified printing',
+  );
+  assert.notEqual(
+    itemIdentityCueKey({ ...verified, markings: [{ kind: 'a/b', role: 'c', text: 'd' }] }),
+    itemIdentityCueKey({ ...verified, markings: [{ kind: 'a', role: 'b/c', text: 'd' }] }),
   );
   assert.equal(finishCueLabel({ ...verified, finish: null, finishFamily: null }), undefined);
   assert.equal(rarityLabel(verified), undefined);

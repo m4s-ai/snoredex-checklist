@@ -18,6 +18,7 @@ import {
   collectorNumberLabel,
   imageScopeLabel,
   itemCueLabel,
+  itemIdentityCueKey,
   itemIdentityCueLabel,
   itemKindLabel,
   linkValues,
@@ -151,7 +152,12 @@ function itemRowCollisionKey(item: SnapshotItem, includeEdition = true): string 
   const card = itemCardLabel(item);
   const set = presentationLabel([item.localSetCode, item.localSetName, item.collectorNumber], '');
   const visibleIdentity = [card, set, itemIdentityCueLabel(item)].filter(Boolean).join(' · ');
-  return [item.localizationId, includeEdition ? (item.setEditionId ?? '') : '', visibleIdentity].join('\u0000');
+  return [
+    item.localizationId,
+    includeEdition ? (item.setEditionId ?? '') : '',
+    visibleIdentity,
+    itemIdentityCueKey(item),
+  ].join('\u0000');
 }
 
 function itemRowCollisionCounts(items: readonly SnapshotItem[], includeEdition = true): Map<string, number> {

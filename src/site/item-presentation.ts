@@ -55,17 +55,29 @@ export function rarityEvidenceLabel(item: SnapshotItem): string | undefined {
   return rarity === undefined ? undefined : presentText((rarity as Record<string, unknown>).evidenceStatus);
 }
 
-function markingsCueLabel(item: SnapshotItem): string | undefined {
-  if (!Array.isArray(item.markings)) return undefined;
-  const values = item.markings
-    .map((marking) => {
+type MarkingCuePart = readonly [string | null, string | null, string | null];
+
+function markingCueParts(item: SnapshotItem): MarkingCuePart[] {
+  if (!Array.isArray(item.markings)) return [];
+  return item.markings
+    .map((marking): MarkingCuePart | undefined => {
       if (typeof marking !== 'object' || marking === null || Array.isArray(marking)) return undefined;
       const row = marking as Record<string, unknown>;
-      const kindAndRole = [presentText(row.kind), presentText(row.role)]
-        .filter((value): value is string => value !== undefined)
-        .join('/');
-      const value = presentText(row.text);
-      return [kindAndRole, value].filter((part): part is string => part !== '').join(': ') || undefined;
+      const kind = presentText(row.kind) ?? null;
+      const role = presentText(row.role) ?? null;
+      const value = presentText(row.text) ?? null;
+      return kind === null && role === null && value === null ? undefined : [kind, role, value];
+    })
+    .filter((value): value is MarkingCuePart => value !== undefined);
+}
+
+function markingsCueLabel(item: SnapshotItem): string | undefined {
+  const values = markingCueParts(item)
+    .map(([kind, role, value]) => {
+      const kindAndRole = [kind, role].filter((part): part is string => part !== null).join('/');
+      return (
+        [kindAndRole, value].filter((part): part is string => part !== null && part !== '').join(': ') || undefined
+      );
     })
     .filter((value): value is string => Boolean(value));
   return values.length > 0 ? `Markings: ${values.join(', ')}` : undefined;
@@ -88,6 +100,20 @@ export function itemIdentityCueLabel(item: SnapshotItem): string {
     itemKindLabel(item),
   ].filter((value): value is string => value !== undefined);
   return parts.join(' · ');
+}
+
+/** Stable structured identity for collision handling; keep it separate from display formatting. */
+export function itemIdentityCueKey(item: SnapshotItem): string {
+  return JSON.stringify({
+    edition: presentText(item.edition) ?? null,
+    finish: presentText(item.finish) ?? null,
+    finishFamily: presentText(item.finishFamily) ?? null,
+    foilPattern: presentText(item.foilPattern) ?? null,
+    markings: markingCueParts(item),
+    cardSize: presentText(item.cardSize) ?? null,
+    rarity: rarityLabel(item) ?? null,
+    itemKind: presentText(item.itemKind) ?? null,
+  });
 }
 
 export function itemCueLabel(item: SnapshotItem): string {
