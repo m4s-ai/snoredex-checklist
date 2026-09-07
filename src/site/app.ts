@@ -71,6 +71,9 @@ interface BackupReadState {
   readonly active: { readonly items: readonly unknown[] } | undefined;
   readonly recovery: { readonly items: readonly unknown[] } | undefined;
   readonly recoveryRecords: readonly unknown[];
+  readonly activeError?: string;
+  readonly recoveryError?: string;
+  readonly recoveryRecordsError?: string;
 }
 
 type BackupResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: string };
@@ -1004,6 +1007,14 @@ function recoveryErrorMessage(error: string): string {
   return RECOVERY_ERROR_MESSAGES[error] ?? 'The collection operation failed; the current state was not changed.';
 }
 
+function hasUnsupportedRecoveryState(value: BackupReadState): boolean {
+  return (
+    value.activeError === 'LOCAL_STATE_UNSUPPORTED' ||
+    value.recoveryError === 'LOCAL_STATE_UNSUPPORTED' ||
+    value.recoveryRecordsError === 'LOCAL_STATE_UNSUPPORTED'
+  );
+}
+
 function appendRecoveryField(list: HTMLElement, label: string, value: unknown): void {
   list.append(text('dt', label), text('dd', value));
 }
@@ -1065,6 +1076,7 @@ function renderImportPreview(
   plan: BackupPlan,
   onConfirm: () => void,
   onCancel: () => void,
+  warningOverride?: string,
 ): void {
   const preview = text('div', undefined, 'recovery-preview');
   const heading = text(
@@ -1114,9 +1126,10 @@ function renderImportPreview(
   }
   const warning = text(
     'p',
-    plan.preview.mode === 'recovery-records'
-      ? 'This is a non-mutating preview. Applying it merges the validated durable recovery ledger without activating retired item IDs.'
-      : 'This is a non-mutating preview. Applying it replaces the current collection after an explicit confirmation and creates a recovery backup first.',
+    warningOverride ??
+      (plan.preview.mode === 'recovery-records'
+        ? 'This is a non-mutating preview. Applying it merges the validated durable recovery ledger without activating retired item IDs.'
+        : 'This is a non-mutating preview. Applying it replaces the current collection after an explicit confirmation and creates a recovery backup first.'),
   );
   const actions = text('div', undefined, 'recovery-preview-actions');
   const apply = text(
@@ -1216,6 +1229,7 @@ function renderRecoveryTools(
         exportButton,
         exportRecoveryButton,
         exportRecoveryRecordsButton,
+        importButton,
         clearButton,
         restoreButton,
       ])
@@ -1224,11 +1238,41 @@ function renderRecoveryTools(
       return;
     }
     const activeCount = current.value.active?.items.length ?? 0;
-    exportButton.disabled = activeCount === 0;
-    clearButton.disabled = activeCount === 0;
-    exportRecoveryButton.disabled = current.value.recovery === undefined;
-    exportRecoveryRecordsButton.disabled = current.value.recoveryRecords.length === 0;
-    restoreButton.disabled = current.value.recovery === undefined;
+    const activeCollectionAvailable = current.value.active !== undefined && activeCount > 0;
+    const activeReadable = current.value.activeError === undefined;
+    const recoveryReadable = current.value.recoveryError === undefined;
+    const recordsReadable = current.value.recoveryRecordsError === undefined;
+    const unsupported = hasUnsupportedRecoveryState(current.value);
+    exportButton.disabled = !activeReadable || activeCount === 0;
+    importButton.disabled = unsupported;
+    clearButton.disabled = !activeReadable || !recoveryReadable || !recordsReadable || activeCount === 0;
+    exportRecoveryButton.disabled = !recoveryReadable || current.value.recovery === undefined;
+    exportRecoveryRecordsButton.disabled = !recordsReadable || current.value.recoveryRecords.length === 0;
+    restoreButton.disabled = unsupported || !recoveryReadable || current.value.recovery === undefined;
+    const messages: string[] = [];
+    if (unsupported) {
+      if (current.value.activeError === 'LOCAL_STATE_UNSUPPORTED')
+        messages.push('Saved collection uses an unsupported format. Open it with a compatible app version.');
+      if (current.value.recoveryError === 'LOCAL_STATE_UNSUPPORTED')
+        messages.push('Recovery snapshot uses an unsupported format. Open it with a compatible app version.');
+      if (current.value.recoveryRecordsError === 'LOCAL_STATE_UNSUPPORTED')
+        messages.push('Recovery ledger uses an unsupported format. Open it with a compatible app version.');
+    } else if (!activeReadable && !recoveryReadable) {
+      messages.push(
+        'Saved collection and recovery snapshot are unreadable. Only their raw bytes can be retained in quarantine; choose a valid backup to recover them.',
+      );
+    } else if (!activeReadable) messages.push('Saved collection is unreadable. Choose a valid backup to recover it.');
+    if (!unsupported && !recoveryReadable && activeReadable && activeCollectionAvailable)
+      messages.push(
+        'Recovery snapshot is unreadable. The collection backup remains available; choose a valid backup to replace it.',
+      );
+    else if (!unsupported && !recoveryReadable && activeReadable)
+      messages.push(
+        'Recovery snapshot is unreadable and no active collection is available. Its raw bytes can be retained in quarantine before a valid backup replaces it.',
+      );
+    if (!unsupported && !recordsReadable)
+      messages.push('Recovery ledger is unreadable. A valid backup can replace it after confirmation.');
+    setStatus(messages.join(' '));
   };
   exportButton.addEventListener('click', () => {
     const result = lifecycle.exportActive();
@@ -1270,10 +1314,30 @@ function renderRecoveryTools(
     });
   });
   restoreButton.addEventListener('click', () => {
-    void confirmationDialog(
-      'Restore previous snapshot?',
-      'The current collection will be retained as the recovery snapshot before restore.',
-    ).then((confirmed) => {
+    const current = lifecycle.read();
+    if (!current.ok) {
+      setStatus(recoveryErrorMessage(current.error));
+      return;
+    }
+    if (hasUnsupportedRecoveryState(current.value)) {
+      setStatus(recoveryErrorMessage('LOCAL_STATE_UNSUPPORTED'));
+      return;
+    }
+    const noReadableActive =
+      current.value.activeError === undefined &&
+      (current.value.active === undefined || current.value.active.items.length === 0);
+    const snapshotMessage =
+      current.value.activeError !== undefined
+        ? 'The unreadable active bytes will be preserved in quarantine. The valid recovery snapshot will replace them.'
+        : noReadableActive
+          ? 'No readable current collection is available to retain. The valid recovery snapshot will replace it and be consumed.'
+          : 'The current collection will be retained as the recovery snapshot before restore.';
+    const ledgerMessage =
+      current.value.recoveryRecordsError === undefined
+        ? ''
+        : ' The unreadable recovery ledger will be preserved in quarantine and rebuilt from this restore.';
+    const confirmationMessage = `${snapshotMessage}${ledgerMessage}`;
+    void confirmationDialog('Restore previous snapshot?', confirmationMessage).then((confirmed) => {
       if (!confirmed) return;
       setStatus('Restoring collection…');
       void lifecycle.restore(true, targetFingerprint, knownItemIds).then((result) => {
@@ -1305,11 +1369,45 @@ function renderRecoveryTools(
           return;
         }
         plan = result.value;
+        const current = lifecycle.read();
+        const activeCollectionAvailable =
+          current.ok && current.value.active !== undefined && current.value.active.items.length > 0;
+        const cannotCreateCurrentRecovery =
+          !current.ok ||
+          current.value.activeError !== undefined ||
+          (!activeCollectionAvailable && current.value.recovery === undefined);
+        const previewWarning =
+          plan.preview.mode === 'recovery-records' || !cannotCreateCurrentRecovery
+            ? undefined
+            : 'This is a non-mutating preview. Applying it replaces the current collection; unreadable local bytes are preserved in quarantine, and no readable recovery backup from the current collection can be guaranteed.';
         renderImportPreview(
           previewContainer,
           plan,
           () => {
             if (plan === undefined) return;
+            const current = lifecycle.read();
+            if (!current.ok) {
+              setStatus(recoveryErrorMessage(current.error));
+              return;
+            }
+            if (hasUnsupportedRecoveryState(current.value)) {
+              setStatus(recoveryErrorMessage('LOCAL_STATE_UNSUPPORTED'));
+              return;
+            }
+            const replacingUnreadableActive =
+              plan.preview.mode !== 'recovery-records' && current.value.activeError !== undefined;
+            const replacingUnreadableRecovery =
+              plan.preview.mode !== 'recovery-records' && current.value.recoveryError !== undefined;
+            const replacingBothUnreadable = replacingUnreadableActive && replacingUnreadableRecovery;
+            const activeCollectionAvailable =
+              current.value.active !== undefined && current.value.active.items.length > 0;
+            const replacingWithoutReadableActive =
+              plan.preview.mode !== 'recovery-records' &&
+              current.value.activeError === undefined &&
+              !activeCollectionAvailable &&
+              current.value.recovery === undefined;
+            const replacingWithoutReadableRecovery =
+              replacingWithoutReadableActive && current.value.recoveryError !== undefined;
             void confirmationDialog(
               plan.preview.mode === 'replace'
                 ? 'Replace collection?'
@@ -1318,7 +1416,15 @@ function renderRecoveryTools(
                   : 'Import collection?',
               plan.preview.mode === 'recovery-records'
                 ? 'The preview is valid. Confirm to merge the durable recovery ledger.'
-                : 'The preview is valid. Confirm to create a recovery backup and atomically apply this collection.',
+                : replacingBothUnreadable
+                  ? 'The saved collection and recovery snapshot are unreadable. Their original bytes will be preserved in quarantine before this backup replaces both components.'
+                  : replacingUnreadableActive
+                    ? 'The saved collection is unreadable. Its original bytes will be preserved in quarantine before this backup replaces it.'
+                    : replacingWithoutReadableRecovery
+                      ? 'No readable collection is available. The unreadable recovery bytes will be preserved in quarantine before this backup replaces it.'
+                      : replacingWithoutReadableActive
+                        ? 'No readable collection is available to retain. This backup will be applied without a readable recovery backup from the current state.'
+                        : 'The preview is valid. Confirm to create a recovery backup and atomically apply this collection.',
             ).then((confirmed) => {
               if (!confirmed || plan === undefined) return;
               setStatus('Applying collection…');
@@ -1336,6 +1442,7 @@ function renderRecoveryTools(
             clearPreview();
             setStatus('Import preview cancelled.');
           },
+          previewWarning,
         );
         setStatus('Review the backup preview before applying it.');
       })

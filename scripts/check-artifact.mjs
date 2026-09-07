@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join, resolve, relative, posix } from 'node:path';
 import process from 'node:process';
+import { parse } from 'parse5';
 import { SyntaxKind } from 'typescript/unstable/ast';
 import { API } from 'typescript/unstable/sync';
 import {
@@ -260,6 +261,18 @@ function* htmlTags(html) {
     index = tag.end;
     if (index <= start) index = start + 1;
   }
+}
+
+function hasInlineEventHandler(html) {
+  const nodes = [parse(html)];
+  while (nodes.length > 0) {
+    const node = nodes.pop();
+    if (node === undefined) continue;
+    if ('attrs' in node && node.attrs.some(({ name }) => /^on[a-z]+$/iu.test(name))) return true;
+    if ('childNodes' in node) nodes.push(...node.childNodes);
+    if ('content' in node) nodes.push(node.content);
+  }
+  return false;
 }
 
 function stripHtmlComments(html) {
@@ -874,7 +887,7 @@ try {
     if (!hasCspMeta) throw new Error(`ARTIFACT_CSP_MISSING: ${page}`);
     if (hasMetaRefresh(withoutComments)) throw new Error(`ARTIFACT_META_REFRESH_PRESENT: ${page}`);
     if (/\b(?:unsafe-inline|unsafe-eval)\b/iu.test(html)) throw new Error(`ARTIFACT_CSP_UNSAFE_DIRECTIVE: ${page}`);
-    if (/[\s/]on[a-z]+\s*=/iu.test(html)) throw new Error(`ARTIFACT_INLINE_HANDLER_PRESENT: ${page}`);
+    if (hasInlineEventHandler(html)) throw new Error(`ARTIFACT_INLINE_HANDLER_PRESENT: ${page}`);
     if (pinnedCatalogue) {
       const expectedImportMap = `<script type="importmap">${bindings.importMap}</script>`;
       if (!withoutComments.includes(expectedImportMap)) throw new Error(`ARTIFACT_RUNTIME_IMPORT_MAP_INVALID: ${page}`);

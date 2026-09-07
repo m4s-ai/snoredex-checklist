@@ -848,3 +848,42 @@ test('rejects slash-separated inline event-handler attributes', async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('rejects document and template inline event-handler attributes', async () => {
+  for (const [name, indexMeta, indexScript] of [
+    [
+      'document',
+      `<html onclick="alert(1)"><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
+      '',
+    ],
+    [
+      'template',
+      `<head><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
+      '<template><img onerror="alert(1)"></template><script src="theme.js"></script>',
+    ],
+  ]) {
+    const directory = await mkdtemp(join(tmpdir(), `snoredex-artifact-${name}-handler-test-`));
+    try {
+      await writeValidArtifact(directory, { indexMeta, indexScript });
+      const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+      assert.notEqual(result.status, 0);
+      assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_INLINE_HANDLER_PRESENT: index\.html/u);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test('ignores slash sequences in integrity hashes', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-integrity-hash-test-'));
+  try {
+    await writeValidArtifact(directory, {
+      indexScript: '<script src="theme.js" integrity="sha256-qjUqluBms9R+o/opdG5PNMtd/6Ia/oNUqgIOxpTPFrM="></script>',
+    });
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+    assert.match(`${result.stdout}${result.stderr}`, /artifact ok:/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
