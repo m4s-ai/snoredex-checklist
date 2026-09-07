@@ -30,10 +30,12 @@ test('keeps item presentation labels explicit and distinct', () => {
       edition: '1st Edition',
       finish: 'holo',
       finishFamily: 'foil',
+      foilPattern: 'master-ball',
+      markings: [{ kind: 'edition-stamp', text: 'EDIZIONE 1' }],
       cardSize: 'standard',
       rarity: { display: 'Holo Rare', evidenceStatus: 'source-backed' },
     }),
-    'Edition: 1st Edition · Finish: holo · Finish family: foil · Size: standard · Rarity: Holo Rare · Verified printing',
+    'Edition: 1st Edition · Finish: holo · Finish family: foil · Foil: master-ball · Markings: edition-stamp: EDIZIONE 1 · Size: standard · Rarity: Holo Rare · Verified printing',
   );
   assert.equal(finishCueLabel({ ...verified, finish: null, finishFamily: null }), undefined);
   assert.equal(rarityLabel(verified), undefined);

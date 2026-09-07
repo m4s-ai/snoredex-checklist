@@ -55,6 +55,20 @@ export function rarityEvidenceLabel(item: SnapshotItem): string | undefined {
   return rarity === undefined ? undefined : presentText((rarity as Record<string, unknown>).evidenceStatus);
 }
 
+function markingsCueLabel(item: SnapshotItem): string | undefined {
+  if (!Array.isArray(item.markings)) return undefined;
+  const values = item.markings
+    .map((marking) => {
+      if (typeof marking !== 'object' || marking === null || Array.isArray(marking)) return undefined;
+      const row = marking as Record<string, unknown>;
+      return [presentText(row.kind), presentText(row.text)]
+        .filter((value): value is string => value !== undefined)
+        .join(': ');
+    })
+    .filter((value): value is string => Boolean(value));
+  return values.length > 0 ? `Markings: ${values.join(', ')}` : undefined;
+}
+
 function identityPart(label: string, value: unknown): string | undefined {
   const normalized = presentText(value);
   return normalized ? `${label}: ${normalized}` : undefined;
@@ -65,6 +79,8 @@ export function itemIdentityCueLabel(item: SnapshotItem): string {
   const parts = [
     identityPart('Edition', item.edition),
     finishCueLabel(item),
+    identityPart('Foil', item.foilPattern),
+    markingsCueLabel(item),
     identityPart('Size', item.cardSize),
     identityPart('Rarity', rarityLabel(item)),
     itemKindLabel(item),
