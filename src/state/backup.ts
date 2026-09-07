@@ -460,8 +460,10 @@ function readAuthorityParts(storage: StorageLike): BackupResult<AuthorityReadSna
     const hasVersion = isObjectRecord(parsed) && Object.prototype.hasOwnProperty.call(parsed, 'schemaVersion');
     const unsupportedEnvelope =
       isObjectRecord(parsed) &&
-      ((hasSchema && parsed.schema !== PRIVATE_STATE_RECOVERY_RECORDS_SCHEMA) ||
-        (hasVersion && parsed.schemaVersion !== PRIVATE_STATE_RECOVERY_RECORDS_VERSION));
+      ((hasSchema && typeof parsed.schema === 'string' && parsed.schema !== PRIVATE_STATE_RECOVERY_RECORDS_SCHEMA) ||
+        (hasVersion &&
+          typeof parsed.schemaVersion === 'number' &&
+          parsed.schemaVersion !== PRIVATE_STATE_RECOVERY_RECORDS_VERSION));
     recoveryRecordsError = unsupportedEnvelope ? 'LOCAL_STATE_UNSUPPORTED' : 'LOCAL_STATE_UNREADABLE';
   }
   return ok({

@@ -237,6 +237,25 @@ test('rejects unsupported recovery-ledger schemas instead of repairing them', ()
   assert.equal(storage.values.has(PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY), false);
 });
 
+test('repairs wrong-typed recovery-ledger metadata as corruption', async () => {
+  const storage = new FakeStorage();
+  const malformedLedger = JSON.stringify({ schema: null, schemaVersion: '1', records: [] });
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state('active')));
+  storage.values.set(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, malformedLedger);
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision, now: () => exportedAt });
+  const imported = importedState();
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  const plan = lifecycle.prepareImport(imported.value.bytes, fingerprint, knownItemIds);
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.equal((await lifecycle.commitImport(plan.value, true)).ok, true);
+  assert.deepEqual(
+    JSON.parse(storage.values.get(PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY) ?? 'null').entries,
+    [malformedLedger],
+  );
+});
+
 test('uses the normal merge path for a valid existing recovery ledger', async () => {
   const storage = new FakeStorage();
   storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state('active')));
