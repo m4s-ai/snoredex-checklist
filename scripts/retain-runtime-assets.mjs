@@ -223,7 +223,7 @@ function previousTuple(previous, currentRuntime) {
 
 async function retainPublishedSet(previous, currentRuntime, publicationId) {
   const candidate = previous.appRevision === currentRuntime.appRevision ? previous.rollback : previous;
-  if (!candidate || candidate.catalogueFingerprint !== currentRuntime.catalogueFingerprint) return undefined;
+  if (!candidate) return undefined;
   const runtime = previousTuple(candidate, currentRuntime);
   const publishedPointer = candidate.runtimeAssetSet;
   if (publishedPointer !== undefined) {
@@ -241,14 +241,20 @@ async function retainPublishedSet(previous, currentRuntime, publicationId) {
     ) {
       throw new Error('RUNTIME_PREVIOUS_MANIFEST_INVALID');
     }
+    const fetchedModules = await Promise.all(
+      fetched.value.modules.map(async (module) => {
+        const bytes = await fetchBytes(`assets/${publishedPointer.path}/${module.path}`);
+        if (bytes.byteLength !== module.byteLength || sha256(bytes) !== module.sha256) {
+          throw new Error('RUNTIME_PREVIOUS_MODULE_INVALID');
+        }
+        return { module, bytes };
+      }),
+    );
+    if (candidate.catalogueFingerprint !== currentRuntime.catalogueFingerprint) return undefined;
     const directory = join(assets, ...publishedPointer.path.split('/'));
     await mkdir(directory, { recursive: true });
     await writeFile(join(directory, 'manifest.json'), fetched.bytes);
-    for (const module of fetched.value.modules) {
-      const bytes = await fetchBytes(`assets/${publishedPointer.path}/${module.path}`);
-      if (bytes.byteLength !== module.byteLength || sha256(bytes) !== module.sha256) {
-        throw new Error('RUNTIME_PREVIOUS_MODULE_INVALID');
-      }
+    for (const { module, bytes } of fetchedModules) {
       const destination = join(directory, ...module.path.split('/'));
       await mkdir(dirname(destination), { recursive: true });
       await writeFile(destination, bytes);
@@ -266,6 +272,7 @@ async function retainPublishedSet(previous, currentRuntime, publicationId) {
     return publishedPointer;
   }
 
+  if (candidate.catalogueFingerprint !== currentRuntime.catalogueFingerprint) return undefined;
   const fetchedManifest = await fetchJson('assets/module-manifest.json');
   const legacy = fetchedManifest.value;
   if (
