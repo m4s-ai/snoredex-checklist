@@ -1000,6 +1000,14 @@ function recoveryErrorMessage(error: string): string {
   return RECOVERY_ERROR_MESSAGES[error] ?? 'The collection operation failed; the current state was not changed.';
 }
 
+function hasUnsupportedRecoveryState(value: BackupReadState): boolean {
+  return (
+    value.activeError === 'LOCAL_STATE_UNSUPPORTED' ||
+    value.recoveryError === 'LOCAL_STATE_UNSUPPORTED' ||
+    value.recoveryRecordsError === 'LOCAL_STATE_UNSUPPORTED'
+  );
+}
+
 function appendRecoveryField(list: HTMLElement, label: string, value: unknown): void {
   list.append(text('dt', label), text('dd', value));
 }
@@ -1212,6 +1220,7 @@ function renderRecoveryTools(
         exportButton,
         exportRecoveryButton,
         exportRecoveryRecordsButton,
+        importButton,
         clearButton,
         restoreButton,
       ])
@@ -1223,18 +1232,26 @@ function renderRecoveryTools(
     const activeReadable = current.value.activeError === undefined;
     const recoveryReadable = current.value.recoveryError === undefined;
     const recordsReadable = current.value.recoveryRecordsError === undefined;
+    const unsupported = hasUnsupportedRecoveryState(current.value);
     exportButton.disabled = !activeReadable || activeCount === 0;
+    importButton.disabled = unsupported;
     clearButton.disabled = !activeReadable || !recoveryReadable || !recordsReadable || activeCount === 0;
     exportRecoveryButton.disabled = !recoveryReadable || current.value.recovery === undefined;
     exportRecoveryRecordsButton.disabled = !recordsReadable || current.value.recoveryRecords.length === 0;
-    restoreButton.disabled = !recoveryReadable || current.value.recovery === undefined;
+    restoreButton.disabled = unsupported || !recoveryReadable || current.value.recovery === undefined;
     const messages: string[] = [];
-    if (!activeReadable) messages.push('Saved collection is unreadable. Choose a valid backup to recover it.');
-    if (!recoveryReadable)
+    if (current.value.activeError === 'LOCAL_STATE_UNSUPPORTED')
+      messages.push('Saved collection uses an unsupported format. Open it with a compatible app version.');
+    else if (!activeReadable) messages.push('Saved collection is unreadable. Choose a valid backup to recover it.');
+    if (current.value.recoveryError === 'LOCAL_STATE_UNSUPPORTED')
+      messages.push('Recovery snapshot uses an unsupported format. Open it with a compatible app version.');
+    else if (!recoveryReadable)
       messages.push(
         'Recovery snapshot is unreadable. The collection backup remains available; choose a valid backup to replace it.',
       );
-    if (!recordsReadable)
+    if (current.value.recoveryRecordsError === 'LOCAL_STATE_UNSUPPORTED')
+      messages.push('Recovery ledger uses an unsupported format. Open it with a compatible app version.');
+    else if (!recordsReadable)
       messages.push('Recovery ledger is unreadable. A valid backup can replace it after confirmation.');
     setStatus(messages.join(' '));
   };
@@ -1283,6 +1300,10 @@ function renderRecoveryTools(
       setStatus(recoveryErrorMessage(current.error));
       return;
     }
+    if (hasUnsupportedRecoveryState(current.value)) {
+      setStatus(recoveryErrorMessage('LOCAL_STATE_UNSUPPORTED'));
+      return;
+    }
     const confirmationMessage =
       current.value.activeError === undefined
         ? 'The current collection will be retained as the recovery snapshot before restore.'
@@ -1327,6 +1348,10 @@ function renderRecoveryTools(
             const current = lifecycle.read();
             if (!current.ok) {
               setStatus(recoveryErrorMessage(current.error));
+              return;
+            }
+            if (hasUnsupportedRecoveryState(current.value)) {
+              setStatus(recoveryErrorMessage('LOCAL_STATE_UNSUPPORTED'));
               return;
             }
             const replacingUnreadableActive =

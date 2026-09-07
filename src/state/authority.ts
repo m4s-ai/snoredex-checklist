@@ -1,4 +1,12 @@
-import { serializePrivateState, validatePrivateState, type PrivateState, type StateResult } from './domain.ts';
+import {
+  PRIVATE_STATE_SCHEMA,
+  PRIVATE_STATE_VERSION,
+  serializePrivateState,
+  validatePrivateState,
+  type PrivateState,
+  type StateErrorCode,
+  type StateResult,
+} from './domain.ts';
 
 /**
  * The persisted value is kept backwards compatible with the state-only value
@@ -53,7 +61,7 @@ function readRecoverySidecar(raw: string | null): PrivateState | undefined | Aut
   }
   const recovery = validatePrivateState(value);
   if (recovery.ok) return recovery.value;
-  return recovery.error === 'IMPORT_UNSUPPORTED_STATE_SCHEMA' || recovery.error === 'IMPORT_UNSUPPORTED_STATE_VERSION'
+  return isExplicitlyUnsupportedState(value, recovery.error)
     ? { ok: false, error: 'LOCAL_STATE_UNSUPPORTED' }
     : { ok: false, error: 'LOCAL_STATE_UNREADABLE' };
 }
@@ -67,7 +75,7 @@ function readActiveValue(raw: string): PrivateState | AuthorityError {
   }
   const active = validatePrivateState(value);
   if (active.ok) return active.value;
-  return active.error === 'IMPORT_UNSUPPORTED_STATE_SCHEMA' || active.error === 'IMPORT_UNSUPPORTED_STATE_VERSION'
+  return isExplicitlyUnsupportedState(value, active.error)
     ? { ok: false, error: 'LOCAL_STATE_UNSUPPORTED' }
     : { ok: false, error: 'LOCAL_STATE_UNREADABLE' };
 }
@@ -85,6 +93,15 @@ function hasOnlyKeys(value: Record<string, unknown>, expected: readonly string[]
   return Object.keys(value).every((key) => allowed.has(key));
 }
 
+function isExplicitlyUnsupportedState(value: unknown, error: StateErrorCode): boolean {
+  if (!isRecord(value)) return false;
+  if (error === 'IMPORT_UNSUPPORTED_STATE_SCHEMA') {
+    return typeof value.schema === 'string' && value.schema !== PRIVATE_STATE_SCHEMA;
+  }
+  if (error !== 'IMPORT_UNSUPPORTED_STATE_VERSION') return false;
+  return typeof value.schemaVersion === 'string' && value.schemaVersion !== PRIVATE_STATE_VERSION;
+}
+
 function componentValue(value: unknown): {
   readonly value: PrivateState | undefined;
   readonly error?: AuthorityComponentError;
@@ -94,10 +111,7 @@ function componentValue(value: unknown): {
   if (validated.ok) return { value: validated.value };
   return {
     value: undefined,
-    error:
-      validated.error === 'IMPORT_UNSUPPORTED_STATE_SCHEMA' || validated.error === 'IMPORT_UNSUPPORTED_STATE_VERSION'
-        ? 'LOCAL_STATE_UNSUPPORTED'
-        : 'LOCAL_STATE_UNREADABLE',
+    error: isExplicitlyUnsupportedState(value, validated.error) ? 'LOCAL_STATE_UNSUPPORTED' : 'LOCAL_STATE_UNREADABLE',
   };
 }
 
