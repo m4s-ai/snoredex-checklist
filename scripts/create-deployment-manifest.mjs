@@ -119,6 +119,7 @@ const sourceFingerprints = previous ? [...new Set([...previousSources, previous.
 const manifest = {
   schema: 'snoredex-checklist-deployment',
   schemaVersion: '1.0.0',
+  publicationFormat: 'provenance-history-v1',
   pageUrl,
   publishedAt: new Date().toISOString(),
   appRevision: provenance.appRevision,

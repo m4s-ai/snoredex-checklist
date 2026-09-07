@@ -366,6 +366,7 @@ test('production adoption validates the reviewed target migration without requir
       runtimeAssetSet: rollbackRuntimeAssetSet,
     });
     assert.deepEqual(generatedDeployment.sourceFingerprints, [lock.catalogueFingerprint]);
+    assert.equal(generatedDeployment.publicationFormat, 'provenance-history-v1');
     const generatedProvenance = JSON.parse(await readFile(provenancePath, 'utf8'));
     assert.deepEqual(generatedProvenance.sourceFingerprints, generatedDeployment.sourceFingerprints);
 
@@ -532,7 +533,11 @@ test('production adoption validates the reviewed target migration without requir
       },
     });
     assert.equal(legacyProvenance.status, 0, `${legacyProvenance.stdout}${legacyProvenance.stderr}`);
-    const postUpgradeDeployment = { ...currentDeployment, appRevision: '934acd3d5d29202b728e164584749d0675666b463' };
+    const postUpgradeDeployment = {
+      ...currentDeployment,
+      appRevision: '934acd3d5d29202b728e164584749d0675666b463',
+      publicationFormat: 'provenance-history-v1',
+    };
     await writeFile(currentManifestPath, JSON.stringify(postUpgradeDeployment));
     await writeFile(
       provenancePath,
@@ -551,6 +556,27 @@ test('production adoption validates the reviewed target migration without requir
     assert.notEqual(postUpgradeMissingHistory.status, 0);
     assert.match(
       `${postUpgradeMissingHistory.stdout}${postUpgradeMissingHistory.stderr}`,
+      /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
+    );
+    const rollbackWithLegacyRevision = { ...legacyDeployment, publicationFormat: 'provenance-history-v1' };
+    await writeFile(currentManifestPath, JSON.stringify(rollbackWithLegacyRevision));
+    await writeFile(
+      provenancePath,
+      JSON.stringify({ ...provenanceFor(rollbackWithLegacyRevision), sourceFingerprints: undefined }),
+    );
+    const markedLegacyMissingHistory = spawnSync(process.execPath, [scriptPath], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_DEPLOYMENT_MODE: 'adopt',
+        SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+        SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+      },
+    });
+    assert.notEqual(markedLegacyMissingHistory.status, 0);
+    assert.match(
+      `${markedLegacyMissingHistory.stdout}${markedLegacyMissingHistory.stderr}`,
       /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
     );
     await writeFile(
