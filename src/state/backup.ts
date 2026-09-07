@@ -12,6 +12,7 @@ import {
 } from './domain.ts';
 import { readStateAuthority, type AuthorityReadResult } from './authority.ts';
 import {
+  PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY,
   PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY,
   PRIVATE_STATE_RECOVERY_STORAGE_KEY,
   PRIVATE_STATE_STORAGE_KEY,
@@ -451,6 +452,23 @@ function preservedRecovery(source: PrivateState, reconciliation: ReconciliationS
   return items.length === 0 ? undefined : { ...source, items };
 }
 
+function preserveUnreadableRecoveryRecords(storage: StorageLike, raw: string | null): BackupResult<void> {
+  if (raw === null) return ok(undefined);
+  const existing = readRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY);
+  if (!existing.ok) return existing;
+  if (existing.value === raw) return ok(undefined);
+  if (existing.value !== null) return fail('STORAGE_WRITE_FAILED');
+  try {
+    storage.setItem(PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY, raw);
+  } catch (cause) {
+    const verified = readRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY);
+    if (verified.ok && verified.value === raw) return ok(undefined);
+    return fail(isQuotaError(cause) ? 'STORAGE_QUOTA_EXCEEDED' : 'STORAGE_WRITE_FAILED');
+  }
+  const verified = readRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY);
+  return verified.ok && verified.value === raw ? ok(undefined) : fail('STORAGE_COMMIT_UNCERTAIN');
+}
+
 function writeRecoveryRecordsRepair(
   storage: StorageLike,
   expectedRaw: AuthorityRawSnapshot,
@@ -465,6 +483,8 @@ function writeRecoveryRecordsRepair(
   ) {
     return fail('STATE_CHANGED_DURING_OPERATION');
   }
+  const preserved = preserveUnreadableRecoveryRecords(storage, current.value.raw.recoveryRecords);
+  if (!preserved.ok) return preserved;
   const serialized = serializeRecoveryRecords(recoveryRecords);
   if (!serialized.ok || serialized.value === null) return fail('STATE_RECONCILIATION_BLOCKED');
   try {

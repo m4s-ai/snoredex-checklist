@@ -8,6 +8,9 @@ export const PRIVATE_STATE_STORAGE_KEY = 'snoredex-checklist.private-state';
 export const PRIVATE_STATE_RECOVERY_STORAGE_KEY = 'snoredex-checklist.private-state.recovery';
 /** Durable retired/conflict records survive replacement of the one-generation rollback snapshot. */
 export const PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY = 'snoredex-checklist.private-state.recovery-records';
+/** Exact unreadable ledger bytes are quarantined before a validated repair replaces them. */
+export const PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY =
+  'snoredex-checklist.private-state.recovery-records.quarantine';
 export const PRIVATE_STATE_LOCK_NAME = 'snoredex-checklist.private-state-write';
 export const PRIVATE_STATE_NOTE_DRAFT_KEY = 'snoredex-checklist.private-state.note-draft';
 export const NOTE_AUTOSAVE_DELAY_MS = 3_000;

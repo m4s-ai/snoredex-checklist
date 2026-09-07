@@ -23,6 +23,7 @@ import {
 import { reconcileBrowserState } from '../src/state/browser-reconciliation.ts';
 import {
   OrderedStateStore,
+  PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY,
   PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY,
   PRIVATE_STATE_RECOVERY_STORAGE_KEY,
   PRIVATE_STATE_STORAGE_KEY,
@@ -1103,6 +1104,7 @@ test('repairs an unreadable recovery ledger from a validated dedicated backup', 
   assert.deepEqual(committed.value.active?.items, active.items);
   assert.deepEqual(committed.value.recoveryRecords, records);
   assert.equal(readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY)).ok, true);
+  assert.equal(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY), '{malformed-ledger');
 });
 
 test('attempts every changed sidecar restoration after active promotion fails', async () => {
