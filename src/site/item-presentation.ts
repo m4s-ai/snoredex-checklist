@@ -61,9 +61,11 @@ function markingsCueLabel(item: SnapshotItem): string | undefined {
     .map((marking) => {
       if (typeof marking !== 'object' || marking === null || Array.isArray(marking)) return undefined;
       const row = marking as Record<string, unknown>;
-      return [presentText(row.kind), presentText(row.text)]
+      const kindAndRole = [presentText(row.kind), presentText(row.role)]
         .filter((value): value is string => value !== undefined)
-        .join(': ');
+        .join('/');
+      const value = presentText(row.text);
+      return [kindAndRole, value].filter((part): part is string => part !== '').join(': ') || undefined;
     })
     .filter((value): value is string => Boolean(value));
   return values.length > 0 ? `Markings: ${values.join(', ')}` : undefined;
