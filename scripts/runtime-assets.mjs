@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 
 const commitPattern = /^[0-9a-f]{40}$/u;
 const digestPattern = /^sha256:[0-9a-f]{64}$/u;
+const publicationIdPattern = /^[a-z0-9][a-z0-9._-]{1,127}$/u;
 
 function isRecord(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -93,16 +94,19 @@ export function validateRuntimeAssetSetPointer(value, expectedAppRevision) {
     value.path === `runtime/${value.appRevision}` &&
     digestPattern.test(value.manifestSha256 ?? '') &&
     Number.isSafeInteger(value.manifestByteLength) &&
-    value.manifestByteLength > 0
+    value.manifestByteLength > 0 &&
+    (value.publicationId === undefined || publicationIdPattern.test(value.publicationId))
   );
 }
 
-export function validateRuntimeAssetSetManifest(value, expectedTuple) {
+export function validateRuntimeAssetSetManifest(value, expectedTuple, expectedPublicationId) {
   if (
     !isRecord(value) ||
     value.schema !== 'snoredex-runtime-asset-set' ||
     value.schemaVersion !== '1.0.0' ||
     !validateRuntimeTuple(value.runtime, expectedTuple) ||
+    (value.publicationId !== undefined && !publicationIdPattern.test(value.publicationId)) ||
+    (expectedPublicationId !== undefined && value.publicationId !== expectedPublicationId) ||
     !Array.isArray(value.modules) ||
     value.modules.length === 0 ||
     value.modules.length > 256
@@ -141,7 +145,8 @@ export async function readRuntimeAssetSet(pointer, expectedTuple, readBytes) {
   if (
     manifestBytes.byteLength !== pointer.manifestByteLength ||
     sha256(manifestBytes) !== pointer.manifestSha256 ||
-    !validateRuntimeAssetSetManifest(manifest, expectedTuple)
+    !validateRuntimeAssetSetManifest(manifest, expectedTuple, pointer.publicationId) ||
+    manifest.publicationId !== pointer.publicationId
   ) {
     throw new Error('RUNTIME_ASSET_MANIFEST_INVALID');
   }
@@ -168,8 +173,21 @@ export async function readRuntimeAssetSet(pointer, expectedTuple, readBytes) {
   };
 }
 
-export async function writeRuntimeAssetSet({ assetsRoot, sourceRoot = assetsRoot, modulePaths, runtime }) {
+/**
+ * @param {{ assetsRoot: string, sourceRoot?: string, modulePaths: string[], runtime: object, publicationId?: string }} options
+ * @returns {Promise<{ appRevision: string, path: string, manifestSha256: string, manifestByteLength: number, publicationId?: string }>}
+ */
+export async function writeRuntimeAssetSet({
+  assetsRoot,
+  sourceRoot = assetsRoot,
+  modulePaths,
+  runtime,
+  publicationId = process.env.SNOREDEX_PUBLICATION_ID,
+}) {
   if (!validateRuntimeTuple(runtime)) throw new Error('RUNTIME_ASSET_TUPLE_INVALID');
+  if (publicationId !== undefined && !publicationIdPattern.test(publicationId)) {
+    throw new Error('RUNTIME_PUBLICATION_ID_INVALID');
+  }
   const paths = [...new Set(modulePaths)].sort();
   if (paths.length !== modulePaths.length || paths.some((path) => !isModulePath(path))) {
     throw new Error('RUNTIME_ASSET_MODULE_PATH_INVALID');
@@ -188,6 +206,7 @@ export async function writeRuntimeAssetSet({ assetsRoot, sourceRoot = assetsRoot
     schemaVersion: '1.0.0',
     runtime,
     modules,
+    ...(publicationId === undefined ? {} : { publicationId }),
   };
   const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   await writeFile(resolve(directory, 'manifest.json'), manifestBytes);
@@ -196,9 +215,7 @@ export async function writeRuntimeAssetSet({ assetsRoot, sourceRoot = assetsRoot
     path: `runtime/${runtime.appRevision}`,
     manifestSha256: sha256(manifestBytes),
     manifestByteLength: manifestBytes.byteLength,
-    ...(process.env.SNOREDEX_PUBLICATION_ID === undefined
-      ? {}
-      : { publicationId: process.env.SNOREDEX_PUBLICATION_ID }),
+    ...(publicationId === undefined ? {} : { publicationId }),
   };
 }
 
@@ -216,7 +233,8 @@ export async function validateRuntimeAssetSetDirectory(assetsRoot, pointer, expe
   if (
     manifestBytes.byteLength !== pointer.manifestByteLength ||
     sha256(manifestBytes) !== pointer.manifestSha256 ||
-    !validateRuntimeAssetSetManifest(manifest, expectedTuple)
+    !validateRuntimeAssetSetManifest(manifest, expectedTuple, pointer.publicationId) ||
+    manifest.publicationId !== pointer.publicationId
   ) {
     return false;
   }

@@ -89,6 +89,7 @@ test('upgrades a validated pre-integrity rollback shell before publication', asy
     assert.equal(promotedProvenance.publicationId, publicationId);
     assert.equal(promotedModuleManifest.publicationId, publicationId);
     assert.equal(promotedModuleManifest.runtimeAssetSet.publicationId, publicationId);
+    assert.equal(promotedRuntimeManifest.publicationId, publicationId);
     const deploymentResult = spawnSync(
       process.execPath,
       [resolve(root, 'scripts/create-deployment-manifest.mjs'), directory],

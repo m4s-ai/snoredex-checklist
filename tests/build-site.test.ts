@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -11,7 +11,9 @@ import {
   readRuntimeAssetSet,
   runtimeShellBindings,
   sha256,
+  validateRuntimeAssetSetDirectory,
   validateRuntimeAssetSetManifest,
+  writeRuntimeAssetSet,
 } from '../scripts/runtime-assets.mjs';
 
 const root = resolve(import.meta.dirname, '..');
@@ -66,6 +68,59 @@ test('validates every fetched runtime asset byte', async () => {
       ),
     /RUNTIME_ASSET_MODULE_INVALID/u,
   );
+});
+
+test('binds publication IDs into runtime manifest digests', async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), 'snoredex-runtime-publication-'));
+  const source = await mkdtemp(resolve(tmpdir(), 'snoredex-runtime-source-'));
+  try {
+    const runtime = {
+      appRevision: 'a'.repeat(40),
+      producerRevision: 'b'.repeat(40),
+      contractVersion: '1.0.0',
+      catalogueFingerprint: `sha256:${'c'.repeat(64)}`,
+      catalogueByteSha256: `sha256:${'d'.repeat(64)}`,
+      catalogueByteLength: 123,
+      migrationByteSha256: `sha256:${'e'.repeat(64)}`,
+      migrationByteLength: 456,
+    } as const;
+    const modulePaths = ['app.js', 'snapshot.js', 'migrations.js'];
+    for (const path of modulePaths) await writeFile(resolve(source, path), `export const path = '${path}';\n`);
+    const writePublishedRuntimeAssetSet = writeRuntimeAssetSet as unknown as (options: {
+      assetsRoot: string;
+      sourceRoot: string;
+      modulePaths: string[];
+      runtime: typeof runtime;
+      publicationId: string;
+    }) => Promise<{
+      appRevision: string;
+      path: string;
+      manifestSha256: string;
+      manifestByteLength: number;
+      publicationId?: string;
+    }>;
+    const first = await writePublishedRuntimeAssetSet({
+      assetsRoot: directory,
+      sourceRoot: source,
+      modulePaths,
+      runtime,
+      publicationId: 'pages-first',
+    });
+    const second = await writePublishedRuntimeAssetSet({
+      assetsRoot: directory,
+      sourceRoot: source,
+      modulePaths,
+      runtime,
+      publicationId: 'pages-second',
+    });
+    assert.notEqual(first.manifestSha256, second.manifestSha256);
+    assert.equal(second.publicationId, 'pages-second');
+    assert.equal(await validateRuntimeAssetSetDirectory(directory, second, runtime), true);
+    const strippedPointer = { ...second, publicationId: undefined } as unknown as typeof second;
+    assert.equal(await validateRuntimeAssetSetDirectory(directory, strippedPointer, runtime), false);
+  } finally {
+    await Promise.all([rm(directory, { recursive: true, force: true }), rm(source, { recursive: true, force: true })]);
+  }
 });
 
 test('validates migration source membership against the target contract', () => {

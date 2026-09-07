@@ -259,6 +259,7 @@ try {
     assetsRoot: assets,
     modulePaths: javascriptModules,
     runtime,
+    publicationId: provenance.publicationId,
   });
   const runtimeManifest = JSON.parse(await readFile(resolve(assets, runtimeAssetSet.path, 'manifest.json'), 'utf8'));
   await writeFile(
