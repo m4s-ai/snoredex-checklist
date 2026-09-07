@@ -561,14 +561,16 @@ function writeAuthority(
   ) {
     return fail('STATE_CHANGED_DURING_OPERATION');
   }
-  const serializedActive = active === undefined ? ok('null') : serializePrivateState(active);
+  const serializedActive = active === undefined ? ok<string | null>(null) : serializePrivateState(active);
   if (!serializedActive.ok) return fail('STORAGE_WRITE_FAILED');
+  const activeText = serializedActive.value;
   const serializedRecovery = recovery === undefined ? 'null' : serializePrivateState(recovery);
   if (typeof serializedRecovery !== 'string' && !serializedRecovery.ok) return fail('STORAGE_WRITE_FAILED');
   const recoveryText = typeof serializedRecovery === 'string' ? serializedRecovery : serializedRecovery.value;
   const serializedRecoveryRecords = serializeRecoveryRecords(recoveryRecords);
   if (!serializedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
   const recoveryRecordsText = serializedRecoveryRecords.value;
+  const activeChanged = current.value.raw.active !== activeText;
   const recoveryChanged = current.value.raw.recovery !== recoveryText;
   const recoveryRecordsChanged = current.value.raw.recoveryRecords !== recoveryRecordsText;
   const matchesExpectedRaw = (raw: AuthorityRawSnapshot): boolean =>
@@ -608,7 +610,18 @@ function writeAuthority(
     return fail('STORAGE_COMMIT_UNCERTAIN');
   }
   try {
-    storage.setItem(PRIVATE_STATE_STORAGE_KEY, serializedActive.value);
+    if (activeChanged && !restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, activeText)) {
+      const restoredSidecars = restoreSidecars();
+      const restoredActive = restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, expectedRaw.active);
+      const afterFailure = readAuthority(storage);
+      if (
+        (restoredSidecars && restoredActive) ||
+        (restoredSidecars && afterFailure.ok && afterFailure.value.raw.active === expectedRaw.active)
+      ) {
+        return fail('STORAGE_WRITE_FAILED');
+      }
+      return fail('STORAGE_COMMIT_UNCERTAIN');
+    }
   } catch (cause) {
     const restoredSidecars = restoreSidecars();
     const restoredActive = restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, expectedRaw.active);
@@ -624,7 +637,7 @@ function writeAuthority(
   const after = readAuthority(storage);
   if (
     !after.ok ||
-    after.value.raw.active !== serializedActive.value ||
+    after.value.raw.active !== activeText ||
     after.value.raw.recovery !== recoveryText ||
     after.value.raw.recoveryRecords !== recoveryRecordsText
   ) {

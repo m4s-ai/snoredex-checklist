@@ -1175,6 +1175,29 @@ test('imports a dedicated recovery ledger without changing the active collection
   assert.deepEqual(committed.value.recoveryRecords, records);
 });
 
+test('imports a recovery ledger before the active collection without creating a null key', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision: 'd'.repeat(40) });
+  const records = [
+    {
+      sourceFingerprint: oldFingerprint,
+      item: { itemId: oldA, status: 'have' as const, quantityOwned: 2, quantityOrdered: 0 },
+      disposition: 'orphan' as const,
+    },
+  ];
+  const exported = createRecoveryRecordsBackup(records);
+  assert.equal(exported.ok, true);
+  if (!exported.ok) return;
+  const plan = lifecycle.prepareImport(exported.value.bytes, targetFingerprint, new Set([targetA]));
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  const committed = await lifecycle.commitImport(plan.value, true);
+  assert.equal(committed.ok, true);
+  if (!committed.ok) return;
+  assert.equal(storage.getItem(PRIVATE_STATE_STORAGE_KEY), null);
+  assert.deepEqual(committed.value.recoveryRecords, records);
+});
+
 test('repairs an unreadable recovery ledger from a validated dedicated backup', async () => {
   const storage = new FakeBrowserLocalStorage();
   const active = state(targetFingerprint, [{ itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 }]);
