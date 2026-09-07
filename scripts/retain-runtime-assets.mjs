@@ -210,11 +210,13 @@ async function retainPublishedSet(previous, currentRuntime, publicationId) {
       throw new Error('RUNTIME_PREVIOUS_POINTER_INVALID');
     }
     const fetched = await fetchJson(`assets/${publishedPointer.path}/manifest.json`);
+    const transitionalPublicationBinding =
+      publishedPointer.publicationId !== undefined && fetched.value.publicationId === undefined;
     if (
       fetched.bytes.byteLength !== publishedPointer.manifestByteLength ||
       sha256(fetched.bytes) !== publishedPointer.manifestSha256 ||
-      !validateRuntimeAssetSetManifest(fetched.value, runtime, publishedPointer.publicationId) ||
-      fetched.value.publicationId !== publishedPointer.publicationId
+      !validateRuntimeAssetSetManifest(fetched.value, runtime) ||
+      (!transitionalPublicationBinding && fetched.value.publicationId !== publishedPointer.publicationId)
     ) {
       throw new Error('RUNTIME_PREVIOUS_MANIFEST_INVALID');
     }
@@ -231,6 +233,15 @@ async function retainPublishedSet(previous, currentRuntime, publicationId) {
       await writeFile(destination, bytes);
     }
     await retainLegacyTheme(candidate, fetched.value);
+    if (transitionalPublicationBinding) {
+      return await writeRuntimeAssetSet({
+        assetsRoot: assets,
+        sourceRoot: directory,
+        modulePaths: fetched.value.modules.map((module) => module.path),
+        runtime,
+        publicationId: publishedPointer.publicationId,
+      });
+    }
     return publishedPointer;
   }
 

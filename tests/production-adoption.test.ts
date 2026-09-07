@@ -116,6 +116,156 @@ test('upgrades a validated pre-integrity rollback shell before publication', asy
   }
 });
 
+test('upgrades a transitional pointer whose publication ID predates manifest binding', async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), 'snoredex-runtime-transition-'));
+  const oldAssets = await mkdtemp(resolve(tmpdir(), 'snoredex-runtime-old-assets-'));
+  const oldSource = await mkdtemp(resolve(tmpdir(), 'snoredex-runtime-old-source-'));
+  const originalFetch = globalThis.fetch;
+  const originalArgv = [...process.argv];
+  const originalEnvironment = { ...process.env };
+  try {
+    const lock = JSON.parse(await readFile(resolve(root, 'catalogue.lock.json'), 'utf8'));
+    const currentRevision = 'a'.repeat(40);
+    const previousRevision = 'b'.repeat(40);
+    const runtimeFor = (appRevision: string) => ({
+      appRevision,
+      producerRevision: lock.producerRevision,
+      contractVersion: '1.0.0' as const,
+      catalogueFingerprint: lock.catalogueFingerprint,
+      catalogueByteSha256: lock.catalogueByteSha256,
+      catalogueByteLength: lock.catalogueByteLength,
+      migrationByteSha256: lock.migrationByteSha256,
+      migrationByteLength: lock.migrationByteLength,
+    });
+    const currentRuntime = runtimeFor(currentRevision);
+    const previousRuntime = runtimeFor(previousRevision);
+    const modulePaths = ['app.js', 'snapshot.js', 'migrations.js', 'theme.js'];
+    for (const path of modulePaths) await writeFile(resolve(oldSource, path), `export const path = '${path}';\n`);
+    const writePublishedRuntimeAssetSet = writeRuntimeAssetSet as unknown as (options: {
+      assetsRoot: string;
+      sourceRoot?: string;
+      modulePaths: string[];
+      runtime: typeof previousRuntime;
+      publicationId?: string;
+    }) => Promise<{
+      appRevision: string;
+      path: string;
+      manifestSha256: string;
+      manifestByteLength: number;
+      publicationId?: string;
+    }>;
+    const oldPointer = await writePublishedRuntimeAssetSet({
+      assetsRoot: oldAssets,
+      sourceRoot: oldSource,
+      modulePaths,
+      runtime: previousRuntime,
+      publicationId: undefined,
+    });
+    const oldManifestBytes = await readFile(resolve(oldAssets, oldPointer.path, 'manifest.json'));
+    const oldModuleBytes = new Map(
+      await Promise.all(
+        modulePaths.map(async (path) => [path, await readFile(resolve(oldAssets, oldPointer.path, path))] as const),
+      ),
+    );
+    const assets = resolve(directory, 'assets');
+    await mkdir(assets, { recursive: true });
+    for (const path of modulePaths) await writeFile(resolve(assets, path), `export const path = 'current-${path}';\n`);
+    const activePointer = await writePublishedRuntimeAssetSet({
+      assetsRoot: assets,
+      modulePaths,
+      runtime: currentRuntime,
+      publicationId: 'pages-current',
+    });
+    await writeFile(
+      resolve(assets, 'module-manifest.json'),
+      JSON.stringify({
+        schema: 'snoredex-site-module-manifest',
+        schemaVersion: '2.0.0',
+        publicationFormat: 'provenance-history-v1',
+        publicationId: 'pages-current',
+        appRevision: currentRevision,
+        runtimeAssetSet: activePointer,
+        retainedRuntimeAssetSets: [],
+        legacyModules: modulePaths,
+      }),
+    );
+    await writeFile(
+      resolve(directory, 'provenance.json'),
+      JSON.stringify({
+        schema: 'snoredex-site-provenance',
+        schemaVersion: '1.0.0',
+        publicationFormat: 'provenance-history-v1',
+        publicationId: 'pages-current',
+        appRevision: currentRevision,
+        catalogue: {
+          mode: 'pinned-snapshot',
+          sourceCommit: lock.producerRevision,
+          sourceRepository: lock.sourceRepository,
+          contractVersion: lock.contractVersion,
+          catalogueFingerprint: lock.catalogueFingerprint,
+          catalogueByteSha256: lock.catalogueByteSha256,
+          catalogueByteLength: lock.catalogueByteLength,
+          migrationByteSha256: lock.migrationByteSha256,
+          migrationByteLength: lock.migrationByteLength,
+          lock,
+        },
+      }),
+    );
+    const previousPath = resolve(directory, 'previous-deployment.json');
+    await writeFile(
+      previousPath,
+      JSON.stringify({
+        schema: 'snoredex-checklist-deployment',
+        schemaVersion: '1.0.0',
+        pageUrl: 'https://m4s-ai.github.io/snoredex-checklist/',
+        publishedAt: '2026-08-30T00:00:00.000Z',
+        appRevision: previousRevision,
+        producerRevision: lock.producerRevision,
+        contractVersion: '1.0.0',
+        catalogueFingerprint: lock.catalogueFingerprint,
+        catalogueByteSha256: lock.catalogueByteSha256,
+        catalogueByteLength: lock.catalogueByteLength,
+        migrationByteSha256: lock.migrationByteSha256,
+        migrationByteLength: lock.migrationByteLength,
+        runtimeAssetSet: { ...oldPointer, publicationId: 'pages-previous' },
+        sourceFingerprints: [lock.catalogueFingerprint],
+      }),
+    );
+    globalThis.fetch = (async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith('/manifest.json')) return new Response(oldManifestBytes, { status: 200 });
+      const modulePath = path.slice(path.lastIndexOf('/') + 1);
+      const bytes = oldModuleBytes.get(modulePath);
+      return bytes === undefined ? new Response(null, { status: 404 }) : new Response(bytes, { status: 200 });
+    }) as typeof fetch;
+    process.argv.length = 2;
+    process.argv.push(directory);
+    process.env = {
+      ...process.env,
+      SNOREDEX_PAGE_URL: 'https://m4s-ai.github.io/snoredex-checklist/',
+      SNOREDEX_PUBLICATION_ID: 'pages-current',
+      SNOREDEX_CURRENT_DEPLOYMENT_PATH: previousPath,
+    };
+    await import(`../scripts/retain-runtime-assets.mjs?transition=${Date.now()}`);
+    const moduleManifest = JSON.parse(await readFile(resolve(assets, 'module-manifest.json'), 'utf8'));
+    const retained = moduleManifest.retainedRuntimeAssetSets[0];
+    const retainedManifest = JSON.parse(await readFile(resolve(assets, retained.path, 'manifest.json'), 'utf8'));
+    assert.equal(retainedManifest.publicationId, 'pages-previous');
+    assert.notEqual(retained.manifestSha256, oldPointer.manifestSha256);
+    assert.equal(await validateRuntimeAssetSetDirectory(assets, retained, previousRuntime), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.argv.length = 0;
+    process.argv.push(...originalArgv);
+    process.env = originalEnvironment;
+    await Promise.all([
+      rm(directory, { recursive: true, force: true }),
+      rm(oldAssets, { recursive: true, force: true }),
+      rm(oldSource, { recursive: true, force: true }),
+    ]);
+  }
+});
+
 test('production adoption validates the reviewed target migration without requiring the fixture as a source', async () => {
   const scriptPath = resolve(root, 'scripts/check-production-adoption.mjs');
   const manifestScriptPath = resolve(root, 'scripts/create-deployment-manifest.mjs');
