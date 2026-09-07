@@ -170,11 +170,16 @@ export function mergeRecoveryRecords(
 export function updateRecoveryRecords(
   existing: readonly DurableRecoveryRecord[],
   updates: readonly DurableRecoveryRecord[],
+  sourceFingerprint?: string,
 ): RecoveryRecordsResult<readonly DurableRecoveryRecord[]> {
   const current = canonicalRecords(existing, { rejectDuplicates: true });
   const next = canonicalRecords(updates, { rejectDuplicates: true });
   if (!current.ok || !next.ok) return { ok: false };
-  const byKey = new Map(current.value.map((record) => [recordKey(record), record]));
+  const byKey = new Map(
+    current.value
+      .filter((record) => sourceFingerprint === undefined || record.sourceFingerprint !== sourceFingerprint)
+      .map((record) => [recordKey(record), record]),
+  );
   for (const record of next.value) byKey.set(recordKey(record), record);
   return { ok: true, value: [...byKey.values()].sort(compareRecords) };
 }

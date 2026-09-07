@@ -604,7 +604,8 @@ function writeAuthority(
   };
   try {
     if (recoveryRecordsChanged) {
-      if (!restoreRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, recoveryRecordsText)) {
+      writeRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, recoveryRecordsText);
+      if (storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY) !== recoveryRecordsText) {
         restoreRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, expectedRaw.recoveryRecords);
         return fail('STORAGE_COMMIT_UNCERTAIN');
       }
@@ -959,6 +960,7 @@ export class PrivateStateLifecycle {
       const mergedRecoveryRecords = updateRecoveryRecords(
         mergedExternalRecoveryRecords.value,
         reconciliationRecoveryRecords ?? [],
+        plan.reconciliationSource?.catalogueFingerprint,
       );
       if (!mergedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
       return writeAuthority(this.storage, plan.expectedRaw, candidate, recovery, mergedRecoveryRecords.value);
@@ -999,6 +1001,7 @@ export class PrivateStateLifecycle {
       if (!validatedRecovery.ok) return fail(mapStateError(validatedRecovery.error));
       const active = current.value.authority.active;
       let candidate = validatedRecovery.value;
+      const sourceFingerprint = candidate.catalogueFingerprint;
       let preservedRecovery: PrivateState | undefined;
       let preservedRecoveryRecords: readonly DurableRecoveryRecord[] = [];
       if (candidate.catalogueFingerprint === targetFingerprint) {
@@ -1023,7 +1026,11 @@ export class PrivateStateLifecycle {
       if (active === undefined || active.items.length === 0) {
         const mergedRecoveryRecords = mergeRecoveryRecords(current.value.authority.recoveryRecords, []);
         if (!mergedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
-        const updatedRecoveryRecords = updateRecoveryRecords(mergedRecoveryRecords.value, preservedRecoveryRecords);
+        const updatedRecoveryRecords = updateRecoveryRecords(
+          mergedRecoveryRecords.value,
+          preservedRecoveryRecords,
+          sourceFingerprint,
+        );
         if (!updatedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
         return promoteRecovery(
           this.storage,
@@ -1036,7 +1043,11 @@ export class PrivateStateLifecycle {
       if (preservedRecovery !== undefined) return fail('STATE_RECONCILIATION_BLOCKED');
       const mergedRecoveryRecords = mergeRecoveryRecords(current.value.authority.recoveryRecords, []);
       if (!mergedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
-      const updatedRecoveryRecords = updateRecoveryRecords(mergedRecoveryRecords.value, preservedRecoveryRecords);
+      const updatedRecoveryRecords = updateRecoveryRecords(
+        mergedRecoveryRecords.value,
+        preservedRecoveryRecords,
+        sourceFingerprint,
+      );
       if (!updatedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
       return writeAuthority(
         this.storage,

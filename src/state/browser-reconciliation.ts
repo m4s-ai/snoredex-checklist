@@ -281,7 +281,11 @@ export async function reconcileBrowserState(
         }
         const additions = recoveryRecordsFromResult(active.catalogueFingerprint, reconciled.value);
         if (!additions.ok) return { ok: false, changed: false, error: 'STATE_RECONCILIATION_BLOCKED' };
-        const mergedRecords = updateRecoveryRecords(authority.recoveryRecords, additions.value);
+        const mergedRecords = updateRecoveryRecords(
+          authority.recoveryRecords,
+          additions.value,
+          active.catalogueFingerprint,
+        );
         if (!mergedRecords.ok) return { ok: false, changed: false, error: 'STATE_RECONCILIATION_BLOCKED' };
         return writeAuthority(storage.value, authority.raw, matchingRecovery, active, mergedRecords.value);
       }
@@ -299,7 +303,11 @@ export async function reconcileBrowserState(
     const recovery = preserveRecovery(active, result.value);
     const additions = recoveryRecordsFromResult(active.catalogueFingerprint, result.value);
     if (!additions.ok) return { ok: false, changed: false, error: 'STATE_RECONCILIATION_BLOCKED' };
-    const mergedRecords = updateRecoveryRecords(authority.recoveryRecords, additions.value);
+    const mergedRecords = updateRecoveryRecords(
+      authority.recoveryRecords,
+      additions.value,
+      active.catalogueFingerprint,
+    );
     if (!mergedRecords.ok) return { ok: false, changed: false, error: 'STATE_RECONCILIATION_BLOCKED' };
     // Each migration rotates the sidecar to the immediately previous active
     // snapshot.  Keeping an older recovery copy would block every later

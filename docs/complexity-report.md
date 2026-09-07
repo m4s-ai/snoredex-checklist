@@ -3,9 +3,9 @@
 > Advisory AST-derived estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (38 production code files).
-Lines: 13,853.
-Function-like nodes: 846.
-McCabe estimate: sum 3,959; mean 4.7; median 2; P90 10; P95 18.
+Lines: 13,877.
+Function-like nodes: 847.
+McCabe estimate: sum 3,961; mean 4.7; median 2; P90 10; P95 18.
 Hotspots: 79 functions exceed 10; 37 exceed 20.
 
 The report parses each source file with the bundled TypeScript compiler and counts runtime function-like declarations plus structural decision nodes: if/for/while/do/catch/case statements, conditional expressions and logical (&&/||/??) binary expressions. Type-only function signatures and nested function bodies are excluded from their enclosing function. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
@@ -22,7 +22,7 @@ The report parses each source file with the bundled TypeScript compiler and coun
 | `scripts/check-artifact.mjs:541`          | `extractHead`                    |         45 |
 | `src/state/backup.ts:560`                 | `writeAuthority`                 |         41 |
 | `src/site/deployment.ts:38`               | `validatePagesDeployment`        |         40 |
-| `src/state/backup.ts:873`                 | `<arrow>`                        |         40 |
+| `src/state/backup.ts:874`                 | `<arrow>`                        |         40 |
 | `src/state/storage.ts:1151`               | `setDraftOwnerState`             |         36 |
 | `src/catalogue/sync.ts:517`               | `parseJournal`                   |         34 |
 | `scripts/check-artifact.mjs:265`          | `stripHtmlComments`              |         32 |
