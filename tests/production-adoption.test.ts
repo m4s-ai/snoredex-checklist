@@ -515,7 +515,7 @@ test('production adoption validates the reviewed target migration without requir
       `${mismatchedHistory.stdout}${mismatchedHistory.stderr}`,
       /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
     );
-    const legacyDeployment = { ...currentDeployment, appRevision: 'b3534029b4edeb4667191274f41dabe09e1a82a1' };
+    const legacyDeployment = { ...currentDeployment, appRevision: 'ac8a5c5eb76439d5b024564b694a20447722a2df' };
     await writeFile(currentManifestPath, JSON.stringify(legacyDeployment));
     await writeFile(
       provenancePath,

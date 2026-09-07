@@ -49,11 +49,11 @@ const isPublishedAt = (value) =>
 const isSourceHistory = (value) =>
   value === undefined ||
   (Array.isArray(value) && value.every((entry) => isDigest(entry)) && new Set(value).size === value.length);
-const provenanceHistoryIntroducedRevision = '8d57c9d5d29202b728e164584749d0675666b463';
+const legacyProvenanceBoundaryRevision = 'ac8a5c5eb76439d5b024564b694a20447722a2df';
 const isLegacyProvenanceRevision = (appRevision) => {
-  if (!isCommit(appRevision) || appRevision === provenanceHistoryIntroducedRevision) return false;
+  if (!isCommit(appRevision)) return false;
   try {
-    execFileSync('git', ['merge-base', '--is-ancestor', appRevision, provenanceHistoryIntroducedRevision], {
+    execFileSync('git', ['merge-base', '--is-ancestor', appRevision, legacyProvenanceBoundaryRevision], {
       cwd: root,
       stdio: 'ignore',
     });
