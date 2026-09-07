@@ -343,6 +343,34 @@ test('does not mutate malformed authority when quarantine cannot be written', as
   assert.equal(storage.values.get(PRIVATE_STATE_STORAGE_KEY), brokenActive);
 });
 
+test('rejects authority quarantine records with unknown fields before repair', async () => {
+  const storage = new FakeStorage();
+  const brokenActive = '{broken-active';
+  const quarantine = {
+    schema: 'snoredex-private-state-authority-quarantine',
+    schemaVersion: 2,
+    active: [],
+    recovery: [],
+    unexpected: brokenActive,
+  };
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, brokenActive);
+  storage.values.set(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY, JSON.stringify(quarantine));
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision, now: () => exportedAt });
+  const imported = importedState();
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  const plan = lifecycle.prepareImport(imported.value.bytes, fingerprint, knownItemIds);
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+
+  assert.deepEqual(await lifecycle.commitImport(plan.value, true), {
+    ok: false,
+    error: 'LOCAL_STATE_UNREADABLE',
+  });
+  assert.equal(storage.values.get(PRIVATE_STATE_STORAGE_KEY), brokenActive);
+  assert.equal(storage.values.get(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY), JSON.stringify(quarantine));
+});
+
 test('continues recovery after the same authority component corrupts again', async () => {
   const storage = new FakeStorage();
   const firstCorruption = '{first-broken-active';

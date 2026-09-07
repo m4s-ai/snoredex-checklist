@@ -182,6 +182,11 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function hasOnlyKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+
 function normalizeRecoveryRecordsFilename(filename: string | undefined): string {
   if (filename === undefined || !filename.endsWith(PRIVATE_BACKUP_SUFFIX)) {
     return SUGGESTED_RECOVERY_RECORDS_FILENAME;
@@ -595,7 +600,11 @@ function readAuthorityQuarantine(raw: string | null): BackupResult<CorruptionQua
   } catch {
     return fail('LOCAL_STATE_UNREADABLE');
   }
-  if (!isObjectRecord(parsed) || parsed.schema !== AUTHORITY_QUARANTINE_SCHEMA) {
+  if (
+    !isObjectRecord(parsed) ||
+    !hasOnlyKeys(parsed, ['schema', 'schemaVersion', 'active', 'recovery']) ||
+    parsed.schema !== AUTHORITY_QUARANTINE_SCHEMA
+  ) {
     return fail('LOCAL_STATE_UNREADABLE');
   }
   if (parsed.schemaVersion === AUTHORITY_QUARANTINE_LEGACY_VERSION) {
