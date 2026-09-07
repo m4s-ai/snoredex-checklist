@@ -449,6 +449,15 @@ function restoreRaw(storage: StorageLike, key: string, raw: string | null): bool
   }
 }
 
+function writeRaw(storage: StorageLike, key: string, raw: string | null): void {
+  if (raw === null) {
+    if (storage.removeItem === undefined) throw new Error('Storage removal is unavailable');
+    storage.removeItem(key);
+  } else {
+    storage.setItem(key, raw);
+  }
+}
+
 function preservedRecovery(source: PrivateState, reconciliation: ReconciliationSuccess): PrivateState | undefined {
   const items = [...reconciliation.orphans, ...reconciliation.conflicts];
   return items.length === 0 ? undefined : { ...source, items };
@@ -610,17 +619,20 @@ function writeAuthority(
     return fail('STORAGE_COMMIT_UNCERTAIN');
   }
   try {
-    if (activeChanged && !restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, activeText)) {
-      const restoredSidecars = restoreSidecars();
-      const restoredActive = restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, expectedRaw.active);
-      const afterFailure = readAuthority(storage);
-      if (
-        (restoredSidecars && restoredActive) ||
-        (restoredSidecars && afterFailure.ok && afterFailure.value.raw.active === expectedRaw.active)
-      ) {
-        return fail('STORAGE_WRITE_FAILED');
+    if (activeChanged) {
+      writeRaw(storage, PRIVATE_STATE_STORAGE_KEY, activeText);
+      if (storage.getItem(PRIVATE_STATE_STORAGE_KEY) !== activeText) {
+        const restoredSidecars = restoreSidecars();
+        const restoredActive = restoreRaw(storage, PRIVATE_STATE_STORAGE_KEY, expectedRaw.active);
+        const afterFailure = readAuthority(storage);
+        if (
+          (restoredSidecars && restoredActive) ||
+          (restoredSidecars && afterFailure.ok && afterFailure.value.raw.active === expectedRaw.active)
+        ) {
+          return fail('STORAGE_WRITE_FAILED');
+        }
+        return fail('STORAGE_COMMIT_UNCERTAIN');
       }
-      return fail('STORAGE_COMMIT_UNCERTAIN');
     }
   } catch (cause) {
     const restoredSidecars = restoreSidecars();

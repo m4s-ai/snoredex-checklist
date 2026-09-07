@@ -78,6 +78,18 @@ class FakeBrowserLocalStorage {
   }
 }
 
+class QuotaActiveWriteStorage extends FakeBrowserLocalStorage {
+  public failNextActive = false;
+
+  public override setItem(key: string, value: string): void {
+    if (key === PRIVATE_STATE_STORAGE_KEY && this.failNextActive) {
+      this.failNextActive = false;
+      throw Object.assign(new Error('quota'), { name: 'QuotaExceededError' });
+    }
+    super.setItem(key, value);
+  }
+}
+
 class FailSidecarRestoreStorage extends FakeBrowserLocalStorage {
   public failActive = false;
   public failRecoveryRestore = false;
@@ -1302,6 +1314,22 @@ test('attempts every changed sidecar restoration after active promotion fails', 
   });
   assert.equal(storage.recoveryRestoreAttempts, 1);
   assert.equal(storage.recordsRestoreAttempts, 1);
+});
+
+test('preserves quota classification when the active write fails', async () => {
+  const storage = new QuotaActiveWriteStorage();
+  const original = state(targetFingerprint, [
+    { itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 },
+  ]);
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(original));
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision: 'd'.repeat(40) });
+  storage.failNextActive = true;
+  assert.deepEqual(await lifecycle.clear(true), {
+    ok: false,
+    error: 'STORAGE_QUOTA_EXCEEDED',
+  });
+  assert.deepEqual(JSON.parse(storage.getItem(PRIVATE_STATE_STORAGE_KEY) ?? 'null'), original);
+  assert.equal(storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY), null);
 });
 
 test('reports uncertain when final verification cannot restore every key', async () => {
