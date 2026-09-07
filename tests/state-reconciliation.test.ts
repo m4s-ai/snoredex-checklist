@@ -888,6 +888,39 @@ test('browser migration rotates an existing recovery snapshot', async () => {
   }
 });
 
+test('browser migration retains a populated recovery when the active collection is empty', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state(oldFingerprint)));
+  storage.setItem(
+    PRIVATE_STATE_RECOVERY_STORAGE_KEY,
+    JSON.stringify(state(oldFingerprint, [{ itemId: oldA, status: 'have', quantityOwned: 2, quantityOrdered: 0 }])),
+  );
+  const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { locks: { request: async (_name: string, callback: () => Promise<unknown>) => callback() } },
+  });
+  try {
+    const result = await reconcileBrowserState(targetFingerprint, new Set(), {
+      knownSourceItemIds: new Set([oldA]),
+      migrations: [
+        migration(oldFingerprint, targetFingerprint, [transition(oldA, [], 'retired-1:0', 'none', 'retire-to-orphan')]),
+      ],
+    });
+    assert.deepEqual(result, { ok: true, changed: true });
+    const recovery = JSON.parse(storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY) ?? 'null') as PrivateState;
+    assert.equal(recovery.items[0]?.itemId, oldA);
+    assert.equal(recovery.items[0]?.quantityOwned, 2);
+  } finally {
+    if (localStorageDescriptor === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
+    else Object.defineProperty(globalThis, 'localStorage', localStorageDescriptor);
+    if (navigatorDescriptor === undefined) delete (globalThis as { navigator?: unknown }).navigator;
+    else Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+  }
+});
+
 test('seeds legacy recovery records before rotating a later snapshot', async () => {
   const storage = new FakeBrowserLocalStorage();
   storage.setItem(
@@ -1144,6 +1177,45 @@ test('portable backups round-trip durable recovery records without activating ol
   assert.equal(parsedRecovery.ok, true);
   if (!parsedRecovery.ok) return;
   assert.deepEqual(parsedRecovery.value.records, recoveryRecords);
+});
+
+test('reconciled recovery records supersede stale local ledger entries', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state(targetFingerprint)));
+  const staleRecord = {
+    sourceFingerprint: oldFingerprint,
+    item: { itemId: oldA, status: 'have' as const, quantityOwned: 1, quantityOrdered: 0 },
+    disposition: 'orphan' as const,
+  };
+  storage.setItem(
+    PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY,
+    JSON.stringify({ schema: 'snoredex-private-state-recovery-records', schemaVersion: 1, records: [staleRecord] }),
+  );
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision: 'd'.repeat(40),
+    reconciliation: {
+      knownSourceItemIds: new Set([oldA]),
+      migrations: [
+        migration(oldFingerprint, targetFingerprint, [transition(oldA, [], 'retired-1:0', 'none', 'retire-to-orphan')]),
+      ],
+    },
+  });
+  const exported = createPortableBackup(
+    state(oldFingerprint, [{ itemId: oldA, status: 'have', quantityOwned: 4, quantityOrdered: 0 }]),
+    { appRevision: 'd'.repeat(40), exportedAt: '2026-09-06T10:00:00.000Z' },
+  );
+  assert.equal(exported.ok, true);
+  if (!exported.ok) return;
+  const prepared = lifecycle.prepareImport(exported.value.bytes, targetFingerprint, new Set());
+  assert.equal(prepared.ok, true);
+  if (!prepared.ok) return;
+  const committed = await lifecycle.commitImport(prepared.value, true);
+  assert.equal(committed.ok, true);
+  const records = readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY));
+  assert.equal(records.ok, true);
+  if (!records.ok) return;
+  assert.equal(records.value.length, 1);
+  assert.equal(records.value[0]?.item.quantityOwned, 4);
 });
 
 test('durable recovery merges fail closed on unequal identity collisions', () => {

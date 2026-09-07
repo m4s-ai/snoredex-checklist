@@ -77,7 +77,8 @@ function restoreRaw(storage: StorageLike, key: string, value: string | null): bo
   }
 }
 
-function preserveRecovery(source: PrivateState, _result: ReconciliationSuccess): PrivateState {
+function preserveRecovery(source: PrivateState, _result: ReconciliationSuccess): PrivateState | undefined {
+  if (source.items.length === 0) return undefined;
   // Keep the complete source snapshot so a rollback build can restore even
   // records that were successfully retained or rekeyed in the new state.
   return { ...source, items: source.items.map((item) => ({ ...item })) };

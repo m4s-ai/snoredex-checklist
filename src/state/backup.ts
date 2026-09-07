@@ -32,6 +32,7 @@ import {
   recoveryRecordsFromResult,
   serializeRecoveryRecords,
   type DurableRecoveryRecord,
+  updateRecoveryRecords,
 } from './recovery-records.ts';
 
 export const MAX_PORTABLE_BYTES = 16 * 1024 * 1024;
@@ -948,10 +949,15 @@ export class PrivateStateLifecycle {
         return fail('STATE_RECONCILIATION_BLOCKED');
       }
       const recovery = reconciliationRecovery ?? existingRecovery;
-      const mergedRecoveryRecords = mergeRecoveryRecords(current.value.authority.recoveryRecords, [
-        ...importedRecoveryRecords,
-        ...(reconciliationRecoveryRecords ?? []),
-      ]);
+      const mergedExternalRecoveryRecords = mergeRecoveryRecords(
+        current.value.authority.recoveryRecords,
+        importedRecoveryRecords,
+      );
+      if (!mergedExternalRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
+      const mergedRecoveryRecords = updateRecoveryRecords(
+        mergedExternalRecoveryRecords.value,
+        reconciliationRecoveryRecords ?? [],
+      );
       if (!mergedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
       return writeAuthority(this.storage, plan.expectedRaw, candidate, recovery, mergedRecoveryRecords.value);
     });
