@@ -515,10 +515,11 @@ test('production adoption validates the reviewed target migration without requir
       `${mismatchedHistory.stdout}${mismatchedHistory.stderr}`,
       /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
     );
-    await writeFile(currentManifestPath, JSON.stringify(currentDeployment));
+    const legacyDeployment = { ...currentDeployment, appRevision: 'b3534029b4edeb4667191274f41dabe09e1a82a1' };
+    await writeFile(currentManifestPath, JSON.stringify(legacyDeployment));
     await writeFile(
       provenancePath,
-      JSON.stringify({ ...provenanceFor(currentDeployment), sourceFingerprints: undefined }),
+      JSON.stringify({ ...provenanceFor(legacyDeployment), sourceFingerprints: undefined }),
     );
     const legacyProvenance = spawnSync(process.execPath, [scriptPath], {
       cwd: root,
@@ -531,6 +532,27 @@ test('production adoption validates the reviewed target migration without requir
       },
     });
     assert.equal(legacyProvenance.status, 0, `${legacyProvenance.stdout}${legacyProvenance.stderr}`);
+    const postUpgradeDeployment = { ...currentDeployment, appRevision: '934acd3d5d29202b728e164584749d0675666b463' };
+    await writeFile(currentManifestPath, JSON.stringify(postUpgradeDeployment));
+    await writeFile(
+      provenancePath,
+      JSON.stringify({ ...provenanceFor(postUpgradeDeployment), sourceFingerprints: undefined }),
+    );
+    const postUpgradeMissingHistory = spawnSync(process.execPath, [scriptPath], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_DEPLOYMENT_MODE: 'adopt',
+        SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+        SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+      },
+    });
+    assert.notEqual(postUpgradeMissingHistory.status, 0);
+    assert.match(
+      `${postUpgradeMissingHistory.stdout}${postUpgradeMissingHistory.stderr}`,
+      /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
+    );
     await writeFile(
       currentManifestPath,
       JSON.stringify({ ...currentDeployment, catalogueFingerprint: reviewedSourceFingerprint }),

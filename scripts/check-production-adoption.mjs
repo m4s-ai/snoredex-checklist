@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
@@ -48,6 +49,19 @@ const isPublishedAt = (value) =>
 const isSourceHistory = (value) =>
   value === undefined ||
   (Array.isArray(value) && value.every((entry) => isDigest(entry)) && new Set(value).size === value.length);
+const provenanceHistoryIntroducedRevision = '8d57c9d5d29202b728e164584749d0675666b463';
+const isLegacyProvenanceRevision = (appRevision) => {
+  if (!isCommit(appRevision) || appRevision === provenanceHistoryIntroducedRevision) return false;
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', appRevision, provenanceHistoryIntroducedRevision], {
+      cwd: root,
+      stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
 const isPublishedDeployment = (value) =>
   value?.schema === 'snoredex-checklist-deployment' &&
   value?.schemaVersion === '1.0.0' &&
@@ -95,7 +109,9 @@ const matchesPublishedProvenance = (deployment, provenance) => {
   // canonical history in deployment.json. During the first upgrade, derive it
   // from that validated manifest and require the two published records to agree.
   const publishedSourceFingerprints =
-    provenance?.sourceFingerprints === undefined ? deployment?.sourceFingerprints : provenance.sourceFingerprints;
+    provenance?.sourceFingerprints === undefined && isLegacyProvenanceRevision(deployment?.appRevision)
+      ? deployment?.sourceFingerprints
+      : provenance?.sourceFingerprints;
   return (
     deployment?.appRevision === provenance?.appRevision &&
     deployment?.producerRevision === catalogue?.sourceCommit &&
