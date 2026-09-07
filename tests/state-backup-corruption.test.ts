@@ -255,6 +255,29 @@ test('rejects unsupported authority components instead of replacing them', () =>
   assert.equal(storage.values.has(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY), false);
 });
 
+test('rejects future authority envelopes before checking version-specific fields', () => {
+  const storage = new FakeStorage();
+  storage.values.set(
+    PRIVATE_STATE_STORAGE_KEY,
+    JSON.stringify({
+      schema: 'snoredex-private-state-authority',
+      schemaVersion: 2,
+      active: state('future'),
+      recovery: null,
+      futureField: 'preserve me',
+    }),
+  );
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision, now: () => exportedAt });
+  const imported = importedState();
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  assert.deepEqual(lifecycle.prepareImport(imported.value.bytes, fingerprint, knownItemIds), {
+    ok: false,
+    error: 'LOCAL_STATE_UNSUPPORTED',
+  });
+  assert.equal(storage.values.has(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY), false);
+});
+
 test('rejects unsupported recovery-ledger versions instead of repairing them', () => {
   const storage = new FakeStorage();
   storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state('active')));

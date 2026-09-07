@@ -141,9 +141,6 @@ export function readStateAuthorityParts(raw: string | null, recoveryRaw: string 
   }
 
   if (isRecord(value) && value.schema === PRIVATE_STATE_AUTHORITY_SCHEMA) {
-    if (!hasOnlyKeys(value, ['schema', 'schemaVersion', 'active', 'recovery'])) {
-      return { active: undefined, recovery: undefined, activeError: 'LOCAL_STATE_UNREADABLE', enveloped: true };
-    }
     if (value.schemaVersion !== PRIVATE_STATE_AUTHORITY_VERSION) {
       const explicitlyUnsupported =
         typeof value.schemaVersion === 'number' && value.schemaVersion !== PRIVATE_STATE_AUTHORITY_VERSION;
@@ -153,6 +150,9 @@ export function readStateAuthorityParts(raw: string | null, recoveryRaw: string 
         activeError: explicitlyUnsupported ? 'LOCAL_STATE_UNSUPPORTED' : 'LOCAL_STATE_UNREADABLE',
         enveloped: true,
       };
+    }
+    if (!hasOnlyKeys(value, ['schema', 'schemaVersion', 'active', 'recovery'])) {
+      return { active: undefined, recovery: undefined, activeError: 'LOCAL_STATE_UNREADABLE', enveloped: true };
     }
     const active = componentValue(value.active);
     const recovery = componentValue(value.recovery);
