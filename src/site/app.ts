@@ -1240,22 +1240,27 @@ function renderRecoveryTools(
     exportRecoveryRecordsButton.disabled = !recordsReadable || current.value.recoveryRecords.length === 0;
     restoreButton.disabled = unsupported || !recoveryReadable || current.value.recovery === undefined;
     const messages: string[] = [];
-    if (!activeReadable && !recoveryReadable) {
+    if (unsupported) {
+      if (current.value.activeError === 'LOCAL_STATE_UNSUPPORTED')
+        messages.push('Saved collection uses an unsupported format. Open it with a compatible app version.');
+      if (current.value.recoveryError === 'LOCAL_STATE_UNSUPPORTED')
+        messages.push('Recovery snapshot uses an unsupported format. Open it with a compatible app version.');
+      if (current.value.recoveryRecordsError === 'LOCAL_STATE_UNSUPPORTED')
+        messages.push('Recovery ledger uses an unsupported format. Open it with a compatible app version.');
+    } else if (!activeReadable && !recoveryReadable) {
       messages.push(
         'Saved collection and recovery snapshot are unreadable. Only their raw bytes can be retained in quarantine; choose a valid backup to recover them.',
       );
-    } else if (current.value.activeError === 'LOCAL_STATE_UNSUPPORTED')
-      messages.push('Saved collection uses an unsupported format. Open it with a compatible app version.');
-    else if (!activeReadable) messages.push('Saved collection is unreadable. Choose a valid backup to recover it.');
-    if (current.value.recoveryError === 'LOCAL_STATE_UNSUPPORTED')
-      messages.push('Recovery snapshot uses an unsupported format. Open it with a compatible app version.');
-    else if (!recoveryReadable && activeReadable)
+    } else if (!activeReadable) messages.push('Saved collection is unreadable. Choose a valid backup to recover it.');
+    if (!unsupported && !recoveryReadable && activeReadable && current.value.active !== undefined)
       messages.push(
         'Recovery snapshot is unreadable. The collection backup remains available; choose a valid backup to replace it.',
       );
-    if (current.value.recoveryRecordsError === 'LOCAL_STATE_UNSUPPORTED')
-      messages.push('Recovery ledger uses an unsupported format. Open it with a compatible app version.');
-    else if (!recordsReadable)
+    else if (!unsupported && !recoveryReadable && activeReadable)
+      messages.push(
+        'Recovery snapshot is unreadable and no active collection is available. Its raw bytes can be retained in quarantine before a valid backup replaces it.',
+      );
+    if (!unsupported && !recordsReadable)
       messages.push('Recovery ledger is unreadable. A valid backup can replace it after confirmation.');
     setStatus(messages.join(' '));
   };
@@ -1360,6 +1365,10 @@ function renderRecoveryTools(
             }
             const replacingUnreadableActive =
               plan.preview.mode !== 'recovery-records' && current.value.activeError !== undefined;
+            const replacingWithoutReadableActive =
+              plan.preview.mode !== 'recovery-records' &&
+              current.value.active === undefined &&
+              current.value.recoveryError !== undefined;
             void confirmationDialog(
               plan.preview.mode === 'replace'
                 ? 'Replace collection?'
@@ -1370,7 +1379,9 @@ function renderRecoveryTools(
                 ? 'The preview is valid. Confirm to merge the durable recovery ledger.'
                 : replacingUnreadableActive
                   ? 'The saved collection is unreadable. Its original bytes will be preserved in quarantine before this backup replaces it.'
-                  : 'The preview is valid. Confirm to create a recovery backup and atomically apply this collection.',
+                  : replacingWithoutReadableActive
+                    ? 'No readable collection is available. The unreadable recovery bytes will be preserved in quarantine before this backup replaces it.'
+                    : 'The preview is valid. Confirm to create a recovery backup and atomically apply this collection.',
             ).then((confirmed) => {
               if (!confirmed || plan === undefined) return;
               setStatus('Applying collection…');
