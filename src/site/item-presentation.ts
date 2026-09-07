@@ -31,6 +31,47 @@ export function itemKindLabel(item: SnapshotItem): string {
   return 'Catalogue item';
 }
 
+function recordValue(item: SnapshotItem, key: string): unknown {
+  const value = item[key];
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value : undefined;
+}
+
+export function finishCueLabel(item: SnapshotItem): string | undefined {
+  const finish = presentText(item.finish);
+  const family = presentText(item.finishFamily);
+  if (finish && family && finish !== family) return `Finish: ${finish} · Finish family: ${family}`;
+  if (finish) return `Finish: ${finish}`;
+  if (family) return `Finish family: ${family}`;
+  return undefined;
+}
+
+export function rarityLabel(item: SnapshotItem): string | undefined {
+  const rarity = recordValue(item, 'rarity');
+  return rarity === undefined ? undefined : presentText((rarity as Record<string, unknown>).display);
+}
+
+export function rarityEvidenceLabel(item: SnapshotItem): string | undefined {
+  const rarity = recordValue(item, 'rarity');
+  return rarity === undefined ? undefined : presentText((rarity as Record<string, unknown>).evidenceStatus);
+}
+
+function identityPart(label: string, value: unknown): string | undefined {
+  const normalized = presentText(value);
+  return normalized ? `${label}: ${normalized}` : undefined;
+}
+
+/** Compact producer-backed cues that belong in the row's accessible identity. */
+export function itemIdentityCueLabel(item: SnapshotItem): string {
+  const parts = [
+    identityPart('Edition', item.edition),
+    finishCueLabel(item),
+    identityPart('Size', item.cardSize),
+    identityPart('Rarity', rarityLabel(item)),
+    itemKindLabel(item),
+  ].filter((value): value is string => value !== undefined);
+  return parts.join(' · ');
+}
+
 export function itemCueLabel(item: SnapshotItem): string {
   return item.progressClass === 'research' ? 'Research · read-only' : 'Trackable';
 }

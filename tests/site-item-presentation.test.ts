@@ -4,11 +4,16 @@ import test from 'node:test';
 import fixture from './fixtures/collector-catalogue.fixture.json' with { type: 'json' };
 import {
   collectorNumberLabel,
+  finishCueLabel,
   evidenceCueLabel,
   imageScopeLabel,
+  itemIdentityCueLabel,
   itemCueLabel,
+  itemKindLabel,
   linkValues,
   presentText,
+  rarityEvidenceLabel,
+  rarityLabel,
   safeExternalUrl,
 } from '../src/site/item-presentation.ts';
 
@@ -18,10 +23,27 @@ test('keeps item presentation labels explicit and distinct', () => {
   assert.equal(imageScopeLabel(verified, true), 'Authored placeholder (image scope unknown)');
   assert.equal(itemCueLabel(verified), 'Trackable');
   assert.equal(evidenceCueLabel(verified), 'Producer evidence: confirmed');
+  assert.equal(itemKindLabel(verified), 'Verified printing');
+  assert.equal(
+    itemIdentityCueLabel({
+      ...verified,
+      edition: '1st Edition',
+      finish: 'holo',
+      finishFamily: 'foil',
+      cardSize: 'standard',
+      rarity: { display: 'Holo Rare', evidenceStatus: 'source-backed' },
+    }),
+    'Edition: 1st Edition · Finish: holo · Finish family: foil · Size: standard · Rarity: Holo Rare · Verified printing',
+  );
+  assert.equal(finishCueLabel({ ...verified, finish: null, finishFamily: null }), undefined);
+  assert.equal(rarityLabel(verified), undefined);
+  assert.equal(rarityEvidenceLabel(verified), 'unknown');
 
   const research = fixture.catalogue.items[1];
   assert.equal(itemCueLabel(research), 'Research · read-only');
   assert.equal(evidenceCueLabel(research), 'Producer evidence: marketplace-claimed');
+  assert.equal(itemKindLabel(research), 'Finish candidate');
+  assert.match(itemIdentityCueLabel(research), /Finish candidate/u);
   assert.equal(
     imageScopeLabel({ ...research, imageScope: 'card-release' }, true),
     'Card-release placeholder (broader release)',

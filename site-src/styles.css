@@ -487,6 +487,12 @@ select {
   max-width: 100%;
   overflow-wrap: anywhere;
 }
+.item-identity-cue {
+  color: var(--muted);
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
 .item-muted,
 .item-cue,
 .item-meta {
