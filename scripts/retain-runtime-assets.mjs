@@ -171,14 +171,35 @@ async function loadActiveSet(provenance, manifest, publicationId) {
     manifest?.schema !== 'snoredex-site-module-manifest' ||
     manifest?.schemaVersion !== '2.0.0' ||
     manifest.appRevision !== provenance.appRevision ||
-    !validateRuntimeAssetSetPointer(manifest.runtimeAssetSet, provenance.appRevision) ||
-    !(await validateRuntimeAssetSetDirectory(assets, manifest.runtimeAssetSet, runtime))
+    !validateRuntimeAssetSetPointer(manifest.runtimeAssetSet, provenance.appRevision)
   ) {
     throw new Error('RUNTIME_ACTIVE_MANIFEST_INVALID');
   }
   const directory = join(assets, ...manifest.runtimeAssetSet.path.split('/'));
   const runtimeManifest = await readJson(join(directory, 'manifest.json'), 'RUNTIME_ACTIVE_MANIFEST_INVALID');
   const modulePaths = runtimeManifest.modules.map((module) => module.path);
+  const transitionalPublicationBinding =
+    manifest.runtimeAssetSet.publicationId !== undefined && runtimeManifest.publicationId === undefined;
+  if (transitionalPublicationBinding) {
+    const legacyPointer = { ...manifest.runtimeAssetSet, publicationId: undefined };
+    if (!(await validateRuntimeAssetSetDirectory(assets, legacyPointer, runtime))) {
+      throw new Error('RUNTIME_ACTIVE_MANIFEST_INVALID');
+    }
+    return {
+      pointer: await writeRuntimeAssetSet({
+        assetsRoot: assets,
+        sourceRoot: directory,
+        modulePaths,
+        runtime,
+        publicationId: publicationId ?? manifest.runtimeAssetSet.publicationId,
+      }),
+      runtime,
+      legacyModules: manifest.legacyModules ?? [],
+    };
+  }
+  if (!(await validateRuntimeAssetSetDirectory(assets, manifest.runtimeAssetSet, runtime))) {
+    throw new Error('RUNTIME_ACTIVE_MANIFEST_INVALID');
+  }
   if (!modulePaths.includes('theme.js')) {
     return promoteActiveShellIntegrity(manifest.runtimeAssetSet, runtime, modulePaths, publicationId);
   }

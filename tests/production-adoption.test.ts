@@ -170,12 +170,13 @@ test('upgrades a transitional pointer whose publication ID predates manifest bin
     const assets = resolve(directory, 'assets');
     await mkdir(assets, { recursive: true });
     for (const path of modulePaths) await writeFile(resolve(assets, path), `export const path = 'current-${path}';\n`);
-    const activePointer = await writePublishedRuntimeAssetSet({
+    const activeLegacyPointer = await writePublishedRuntimeAssetSet({
       assetsRoot: assets,
       modulePaths,
       runtime: currentRuntime,
-      publicationId: 'pages-current',
+      publicationId: undefined,
     });
+    const activePointer = { ...activeLegacyPointer, publicationId: 'pages-current' };
     await writeFile(
       resolve(assets, 'module-manifest.json'),
       JSON.stringify({
@@ -248,8 +249,12 @@ test('upgrades a transitional pointer whose publication ID predates manifest bin
     };
     await import(`../scripts/retain-runtime-assets.mjs?transition=${Date.now()}`);
     const moduleManifest = JSON.parse(await readFile(resolve(assets, 'module-manifest.json'), 'utf8'));
+    const activeManifest = JSON.parse(
+      await readFile(resolve(assets, moduleManifest.runtimeAssetSet.path, 'manifest.json'), 'utf8'),
+    );
     const retained = moduleManifest.retainedRuntimeAssetSets[0];
     const retainedManifest = JSON.parse(await readFile(resolve(assets, retained.path, 'manifest.json'), 'utf8'));
+    assert.equal(activeManifest.publicationId, 'pages-current');
     assert.equal(retainedManifest.publicationId, 'pages-previous');
     assert.notEqual(retained.manifestSha256, oldPointer.manifestSha256);
     assert.equal(await validateRuntimeAssetSetDirectory(assets, retained, previousRuntime), true);
