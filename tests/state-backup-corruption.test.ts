@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { PrivateStateLifecycle, createPortableBackup } from '../src/state/backup.ts';
+import { createRecoveryRecordsBackup, PrivateStateLifecycle, createPortableBackup } from '../src/state/backup.ts';
 import {
   PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY,
+  PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY,
   PRIVATE_STATE_RECOVERY_STORAGE_KEY,
   PRIVATE_STATE_STORAGE_KEY,
   type StorageLike,
@@ -16,6 +17,7 @@ import {
 } from '../src/state/domain.ts';
 
 const fingerprint = `sha256:${'a'.repeat(64)}`;
+const otherFingerprint = `sha256:${'b'.repeat(64)}`;
 const itemA = 'item-00000000-0000-0000-0000-00000000000a';
 const knownItemIds = new Set([itemA]);
 const appRevision = 'c'.repeat(40);
@@ -149,6 +151,63 @@ test('quarantines malformed recovery bytes embedded in an authority envelope', a
   const quarantine = JSON.parse(storage.values.get(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY) ?? 'null');
   assert.equal(quarantine.active, null);
   assert.equal(quarantine.recovery, envelope);
+});
+
+test('rejects unsupported authority components instead of replacing them', () => {
+  const storage = new FakeStorage();
+  storage.values.set(
+    PRIVATE_STATE_STORAGE_KEY,
+    JSON.stringify({
+      schema: 'snoredex-private-state-authority',
+      schemaVersion: 1,
+      active: { ...state('future'), schemaVersion: 999 },
+      recovery: null,
+    }),
+  );
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision, now: () => exportedAt });
+  const imported = importedState();
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  assert.deepEqual(lifecycle.prepareImport(imported.value.bytes, fingerprint, knownItemIds), {
+    ok: false,
+    error: 'LOCAL_STATE_UNSUPPORTED',
+  });
+  assert.equal(storage.values.has(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY), false);
+});
+
+test('uses the normal merge path for a valid existing recovery ledger', async () => {
+  const storage = new FakeStorage();
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state('active')));
+  const existing = {
+    schema: 'snoredex-private-state-recovery-records',
+    schemaVersion: 1,
+    records: [
+      {
+        sourceFingerprint: fingerprint,
+        item: { itemId: itemA, status: 'have', quantityOwned: 1, quantityOrdered: 0 },
+        disposition: 'orphan',
+      },
+    ],
+  };
+  storage.values.set(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, JSON.stringify(existing));
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision, now: () => exportedAt });
+  const imported = createRecoveryRecordsBackup([
+    {
+      sourceFingerprint: otherFingerprint,
+      item: { itemId: itemA, status: 'have', quantityOwned: 2, quantityOrdered: 0 },
+      disposition: 'orphan',
+    },
+  ]);
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  const plan = lifecycle.prepareImport(imported.value.bytes, fingerprint, knownItemIds);
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  const committed = await lifecycle.commitImport(plan.value, true);
+  assert.equal(committed.ok, true);
+  assert.equal(storage.values.has(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY), false);
+  assert.notEqual(storage.values.get(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY), JSON.stringify(existing));
+  assert.equal(storage.values.get(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY)?.includes(otherFingerprint), true);
 });
 
 test('does not mutate malformed authority when quarantine cannot be written', async () => {

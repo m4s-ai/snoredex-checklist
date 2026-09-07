@@ -474,6 +474,12 @@ function readAuthority(storage: StorageLike): BackupResult<{
   });
 }
 
+function unsupportedAuthorityError(authority: StateAuthorityParts): BackupErrorCode | undefined {
+  if (authority.activeError === 'LOCAL_STATE_UNSUPPORTED') return 'LOCAL_STATE_UNSUPPORTED';
+  if (authority.recoveryError === 'LOCAL_STATE_UNSUPPORTED') return 'LOCAL_STATE_UNSUPPORTED';
+  return undefined;
+}
+
 function restoreRaw(storage: StorageLike, key: string, raw: string | null): boolean {
   try {
     if (raw === null) {
@@ -948,10 +954,14 @@ export class PrivateStateLifecycle {
       if (recordsBackup === undefined || !recordsBackup.ok) return parsed;
       const current = readAuthorityParts(this.storage);
       if (!current.ok) return current;
+      const unsupported = unsupportedAuthorityError(current.value.authority);
+      if (unsupported !== undefined) return fail(unsupported);
       return recoveryRecordsPlan(current.value.raw, current.value.authority.active, recordsBackup.value.records);
     }
     const current = readAuthorityParts(this.storage);
     if (!current.ok) return current;
+    const unsupported = unsupportedAuthorityError(current.value.authority);
+    if (unsupported !== undefined) return fail(unsupported);
     // Imported diagnostic metadata is intentionally not persisted as local
     // collection state. The next export gets fresh appRevision/exportedAt.
     const candidate: PrivateState = {
@@ -1014,6 +1024,8 @@ export class PrivateStateLifecycle {
       if (plan.recoveryRecordsOnly === true) {
         const current = readAuthorityParts(this.storage);
         if (!current.ok) return current;
+        const unsupported = unsupportedAuthorityError(current.value.authority);
+        if (unsupported !== undefined) return fail(unsupported);
         if (
           current.value.raw.active !== plan.expectedRaw.active ||
           current.value.raw.recovery !== plan.expectedRaw.recovery ||
@@ -1026,10 +1038,26 @@ export class PrivateStateLifecycle {
           importedRecoveryRecords,
         );
         if (!mergedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
+        if (
+          current.value.authority.activeError === undefined &&
+          current.value.authority.recoveryError === undefined &&
+          current.value.authority.recoveryRecordsError === undefined
+        ) {
+          return writeAuthority(
+            this.storage,
+            plan.expectedRaw,
+            current.value.authority.active,
+            current.value.authority.recovery,
+            mergedRecoveryRecords.value,
+            current.value,
+          );
+        }
         return writeRecoveryRecordsRepair(this.storage, plan.expectedRaw, mergedRecoveryRecords.value);
       }
       const current = readAuthorityParts(this.storage);
       if (!current.ok) return current;
+      const unsupported = unsupportedAuthorityError(current.value.authority);
+      if (unsupported !== undefined) return fail(unsupported);
       if (
         current.value.raw.active !== plan.expectedRaw.active ||
         current.value.raw.recovery !== plan.expectedRaw.recovery ||
@@ -1154,6 +1182,8 @@ export class PrivateStateLifecycle {
     return exclusive(this.storage, () => {
       const current = readAuthorityParts(this.storage);
       if (!current.ok) return current;
+      const unsupported = unsupportedAuthorityError(current.value.authority);
+      if (unsupported !== undefined) return fail(unsupported);
       if (current.value.authority.recoveryError !== undefined) return fail(current.value.authority.recoveryError);
       const recovery = current.value.authority.recovery;
       if (recovery === undefined) return fail('EXPORT_FAILED');

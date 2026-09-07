@@ -1324,6 +1324,13 @@ function renderRecoveryTools(
           plan,
           () => {
             if (plan === undefined) return;
+            const current = lifecycle.read();
+            if (!current.ok) {
+              setStatus(recoveryErrorMessage(current.error));
+              return;
+            }
+            const replacingUnreadableActive =
+              plan.preview.mode !== 'recovery-records' && current.value.activeError !== undefined;
             void confirmationDialog(
               plan.preview.mode === 'replace'
                 ? 'Replace collection?'
@@ -1332,7 +1339,9 @@ function renderRecoveryTools(
                   : 'Import collection?',
               plan.preview.mode === 'recovery-records'
                 ? 'The preview is valid. Confirm to merge the durable recovery ledger.'
-                : 'The preview is valid. Confirm to create a recovery backup and atomically apply this collection.',
+                : replacingUnreadableActive
+                  ? 'The saved collection is unreadable. Its original bytes will be preserved in quarantine before this backup replaces it.'
+                  : 'The preview is valid. Confirm to create a recovery backup and atomically apply this collection.',
             ).then((confirmed) => {
               if (!confirmed || plan === undefined) return;
               setStatus('Applying collection…');

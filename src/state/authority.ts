@@ -52,7 +52,10 @@ function readRecoverySidecar(raw: string | null): PrivateState | undefined | Aut
     return { ok: false, error: 'LOCAL_STATE_UNREADABLE' };
   }
   const recovery = validatePrivateState(value);
-  return recovery.ok ? recovery.value : { ok: false, error: 'LOCAL_STATE_UNREADABLE' };
+  if (recovery.ok) return recovery.value;
+  return recovery.error === 'IMPORT_UNSUPPORTED_STATE_SCHEMA' || recovery.error === 'IMPORT_UNSUPPORTED_STATE_VERSION'
+    ? { ok: false, error: 'LOCAL_STATE_UNSUPPORTED' }
+    : { ok: false, error: 'LOCAL_STATE_UNREADABLE' };
 }
 
 function readActiveValue(raw: string): PrivateState | AuthorityError {
