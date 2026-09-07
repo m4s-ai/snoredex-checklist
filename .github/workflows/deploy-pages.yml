@@ -305,7 +305,7 @@ jobs:
           path: dist/site
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
       - name: Smoke-test deployed Pages site
         env:
           SNOREDEX_PAGE_URL: ${{ steps.deployment.outputs.page_url }}
