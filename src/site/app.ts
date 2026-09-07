@@ -1326,12 +1326,17 @@ function renderRecoveryTools(
     const noReadableActive =
       current.value.activeError === undefined &&
       (current.value.active === undefined || current.value.active.items.length === 0);
-    const confirmationMessage =
+    const snapshotMessage =
       current.value.activeError !== undefined
         ? 'The unreadable active bytes will be preserved in quarantine. The valid recovery snapshot will replace them.'
         : noReadableActive
           ? 'No readable current collection is available to retain. The valid recovery snapshot will replace it and be consumed.'
           : 'The current collection will be retained as the recovery snapshot before restore.';
+    const ledgerMessage =
+      current.value.recoveryRecordsError === undefined
+        ? ''
+        : ' The unreadable recovery ledger will be preserved in quarantine and rebuilt from this restore.';
+    const confirmationMessage = `${snapshotMessage}${ledgerMessage}`;
     void confirmationDialog('Restore previous snapshot?', confirmationMessage).then((confirmed) => {
       if (!confirmed) return;
       setStatus('Restoring collection…');

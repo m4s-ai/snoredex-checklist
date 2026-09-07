@@ -934,6 +934,30 @@ try {
         assert.equal(await restoreButton.isEnabled(), false, `${name}: unreadable recovery disables restore`);
         assert.equal(await importButton.isEnabled(), true, `${name}: unreadable recovery keeps import available`);
         await page.evaluate(({ fingerprint, itemId }) => {
+          const valid = {
+            schema: 'snoredex-collection-state',
+            schemaVersion: '1.0.0',
+            datasetId: 'snoredex-data/snorlax-current-known',
+            catalogueFingerprint: fingerprint,
+            items: [{ itemId, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],
+          };
+          localStorage.setItem('snoredex-checklist.private-state', JSON.stringify(valid));
+          localStorage.setItem('snoredex-checklist.private-state.recovery', JSON.stringify(valid));
+          localStorage.setItem('snoredex-checklist.private-state.recovery-records', '{malformed');
+        }, synthetic);
+        await openRecoveryTools();
+        await recoveryStatus.filter({ hasText: 'Recovery ledger is unreadable.' }).waitFor();
+        assert.equal(await restoreButton.isEnabled(), true, `${name}: unreadable ledger keeps restore available`);
+        await restoreButton.click();
+        const ledgerConfirmation = page.getByRole('dialog', { name: 'Restore previous snapshot?' });
+        await ledgerConfirmation.waitFor();
+        assert.match(
+          await ledgerConfirmation.innerText(),
+          /unreadable recovery ledger.*preserved in quarantine.*rebuilt from this restore/u,
+          `${name}: restore confirmation names unreadable ledger handling`,
+        );
+        await ledgerConfirmation.getByRole('button', { name: 'Cancel' }).click();
+        await page.evaluate(({ fingerprint, itemId }) => {
           localStorage.setItem(
             'snoredex-checklist.private-state',
             JSON.stringify({
