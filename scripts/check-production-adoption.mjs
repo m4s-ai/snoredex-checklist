@@ -120,8 +120,7 @@ const matchesPublishedProvenance = (deployment, provenance) => {
       : provenance?.sourceFingerprints;
   return (
     deployment?.appRevision === provenance?.appRevision &&
-    (currentModuleManifest?.publicationFormat !== publicationFormat ||
-      currentModuleManifest?.appRevision === deployment?.appRevision) &&
+    currentModuleManifest?.appRevision === deployment?.appRevision &&
     deployment?.producerRevision === catalogue?.sourceCommit &&
     deployment?.contractVersion === catalogue?.contractVersion &&
     deployment?.catalogueFingerprint === catalogue?.catalogueFingerprint &&

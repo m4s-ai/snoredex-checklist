@@ -552,6 +552,27 @@ test('production adoption validates the reviewed target migration without requir
       },
     });
     assert.equal(legacyProvenance.status, 0, `${legacyProvenance.stdout}${legacyProvenance.stderr}`);
+    await writeFile(
+      moduleManifestPath,
+      JSON.stringify({ ...moduleManifestFor(legacyDeployment, false), appRevision: currentDeployment.appRevision }),
+    );
+    const mixedLegacyPublication = spawnSync(process.execPath, [scriptPath], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_DEPLOYMENT_MODE: 'adopt',
+        SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+        SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+        SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: moduleManifestPath,
+      },
+    });
+    assert.notEqual(mixedLegacyPublication.status, 0);
+    assert.match(
+      `${mixedLegacyPublication.stdout}${mixedLegacyPublication.stderr}`,
+      /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
+    );
+    await writeFile(moduleManifestPath, JSON.stringify(moduleManifestFor(legacyDeployment, false)));
     const postUpgradeDeployment = {
       ...currentDeployment,
       appRevision: '934acd3d5d29202b728e164584749d0675666b463',
@@ -600,6 +621,7 @@ test('production adoption validates the reviewed target migration without requir
       `${markedLegacyMissingHistory.stdout}${markedLegacyMissingHistory.stderr}`,
       /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
     );
+    await writeFile(moduleManifestPath, JSON.stringify(moduleManifestFor(currentDeployment, false)));
     await writeFile(
       currentManifestPath,
       JSON.stringify({ ...currentDeployment, catalogueFingerprint: reviewedSourceFingerprint }),
