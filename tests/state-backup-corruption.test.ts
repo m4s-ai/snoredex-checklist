@@ -179,6 +179,34 @@ test('repairs a JSON-valid envelope component with missing state metadata', asyn
   ]);
 });
 
+test('repairs malformed outer authority metadata as corruption', async () => {
+  for (const schemaVersion of [null, '1']) {
+    const storage = new FakeStorage();
+    const envelope = JSON.stringify({
+      schema: 'snoredex-private-state-authority',
+      schemaVersion,
+      active: state('old active'),
+      recovery: null,
+    });
+    storage.values.set(PRIVATE_STATE_STORAGE_KEY, envelope);
+    const lifecycle = new PrivateStateLifecycle(storage, { appRevision, now: () => exportedAt });
+    const current = lifecycle.read();
+    assert.equal(current.ok, true);
+    if (!current.ok) return;
+    assert.equal(current.value.activeError, 'LOCAL_STATE_UNREADABLE');
+    const imported = importedState();
+    assert.equal(imported.ok, true);
+    if (!imported.ok) return;
+    const plan = lifecycle.prepareImport(imported.value.bytes, fingerprint, knownItemIds);
+    assert.equal(plan.ok, true);
+    if (!plan.ok) return;
+    assert.equal((await lifecycle.commitImport(plan.value, true)).ok, true);
+    assert.deepEqual(JSON.parse(storage.values.get(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY) ?? 'null').active, [
+      envelope,
+    ]);
+  }
+});
+
 test('rejects unsupported authority components instead of replacing them', () => {
   const storage = new FakeStorage();
   storage.values.set(

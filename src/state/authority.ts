@@ -145,7 +145,14 @@ export function readStateAuthorityParts(raw: string | null, recoveryRaw: string 
       return { active: undefined, recovery: undefined, activeError: 'LOCAL_STATE_UNREADABLE', enveloped: true };
     }
     if (value.schemaVersion !== PRIVATE_STATE_AUTHORITY_VERSION) {
-      return { active: undefined, recovery: undefined, activeError: 'LOCAL_STATE_UNSUPPORTED', enveloped: true };
+      const explicitlyUnsupported =
+        typeof value.schemaVersion === 'number' && value.schemaVersion !== PRIVATE_STATE_AUTHORITY_VERSION;
+      return {
+        active: undefined,
+        recovery: undefined,
+        activeError: explicitlyUnsupported ? 'LOCAL_STATE_UNSUPPORTED' : 'LOCAL_STATE_UNREADABLE',
+        enveloped: true,
+      };
     }
     const active = componentValue(value.active);
     const recovery = componentValue(value.recovery);
