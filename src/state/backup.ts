@@ -405,7 +405,7 @@ type ReadAuthority = Extract<AuthorityReadResult, { ok: true }> & {
 
 interface ReadAuthorityParts extends StateAuthorityParts {
   readonly recoveryRecords: readonly DurableRecoveryRecord[];
-  readonly recoveryRecordsError?: 'LOCAL_STATE_UNREADABLE';
+  readonly recoveryRecordsError?: 'LOCAL_STATE_UNSUPPORTED' | 'LOCAL_STATE_UNREADABLE';
 }
 
 interface AuthorityReadSnapshot {
@@ -415,13 +415,15 @@ interface AuthorityReadSnapshot {
 
 interface CorruptionQuarantine {
   readonly schema: 'snoredex-private-state-authority-quarantine';
-  readonly schemaVersion: 1;
-  readonly active: string | null;
-  readonly recovery: string | null;
+  readonly schemaVersion: 2;
+  readonly active: readonly string[];
+  readonly recovery: readonly string[];
 }
 
 const AUTHORITY_QUARANTINE_SCHEMA = 'snoredex-private-state-authority-quarantine' as const;
-const AUTHORITY_QUARANTINE_VERSION = 1 as const;
+const AUTHORITY_QUARANTINE_VERSION = 2 as const;
+const AUTHORITY_QUARANTINE_LEGACY_VERSION = 1 as const;
+const AUTHORITY_QUARANTINE_MAX_ENTRIES = 8;
 
 function readAuthorityPartsWithoutRecoveryRecords(storage: StorageLike): BackupResult<{
   readonly raw: AuthorityRawSnapshot;
@@ -443,12 +445,31 @@ function readAuthorityParts(storage: StorageLike): BackupResult<AuthorityReadSna
   const withoutRecords = readAuthorityPartsWithoutRecoveryRecords(storage);
   if (!withoutRecords.ok) return withoutRecords;
   const parsedRecoveryRecords = readRecoveryRecords(withoutRecords.value.raw.recoveryRecords);
+  let recoveryRecordsError: 'LOCAL_STATE_UNSUPPORTED' | 'LOCAL_STATE_UNREADABLE' | undefined;
+  if (!parsedRecoveryRecords.ok) {
+    let parsed: unknown;
+    try {
+      parsed =
+        withoutRecords.value.raw.recoveryRecords === null
+          ? undefined
+          : (JSON.parse(withoutRecords.value.raw.recoveryRecords) as unknown);
+    } catch {
+      parsed = undefined;
+    }
+    const hasSchema = isObjectRecord(parsed) && Object.prototype.hasOwnProperty.call(parsed, 'schema');
+    const hasVersion = isObjectRecord(parsed) && Object.prototype.hasOwnProperty.call(parsed, 'schemaVersion');
+    const unsupportedEnvelope =
+      isObjectRecord(parsed) &&
+      ((hasSchema && parsed.schema !== PRIVATE_STATE_RECOVERY_RECORDS_SCHEMA) ||
+        (hasVersion && parsed.schemaVersion !== PRIVATE_STATE_RECOVERY_RECORDS_VERSION));
+    recoveryRecordsError = unsupportedEnvelope ? 'LOCAL_STATE_UNSUPPORTED' : 'LOCAL_STATE_UNREADABLE';
+  }
   return ok({
     raw: withoutRecords.value.raw,
     authority: {
       ...withoutRecords.value.authority,
       recoveryRecords: parsedRecoveryRecords.ok ? parsedRecoveryRecords.value : [],
-      ...(parsedRecoveryRecords.ok ? {} : { recoveryRecordsError: 'LOCAL_STATE_UNREADABLE' as const }),
+      ...(recoveryRecordsError === undefined ? {} : { recoveryRecordsError }),
     },
   });
 }
@@ -474,9 +495,10 @@ function readAuthority(storage: StorageLike): BackupResult<{
   });
 }
 
-function unsupportedAuthorityError(authority: StateAuthorityParts): BackupErrorCode | undefined {
+function unsupportedAuthorityError(authority: ReadAuthorityParts): BackupErrorCode | undefined {
   if (authority.activeError === 'LOCAL_STATE_UNSUPPORTED') return 'LOCAL_STATE_UNSUPPORTED';
   if (authority.recoveryError === 'LOCAL_STATE_UNSUPPORTED') return 'LOCAL_STATE_UNSUPPORTED';
+  if (authority.recoveryRecordsError === 'LOCAL_STATE_UNSUPPORTED') return 'LOCAL_STATE_UNSUPPORTED';
   return undefined;
 }
 
@@ -561,8 +583,8 @@ function readAuthorityQuarantine(raw: string | null): BackupResult<CorruptionQua
     return ok({
       schema: AUTHORITY_QUARANTINE_SCHEMA,
       schemaVersion: AUTHORITY_QUARANTINE_VERSION,
-      active: null,
-      recovery: null,
+      active: [],
+      recovery: [],
     });
   }
   let parsed: unknown;
@@ -571,20 +593,39 @@ function readAuthorityQuarantine(raw: string | null): BackupResult<CorruptionQua
   } catch {
     return fail('LOCAL_STATE_UNREADABLE');
   }
+  if (!isObjectRecord(parsed) || parsed.schema !== AUTHORITY_QUARANTINE_SCHEMA) {
+    return fail('LOCAL_STATE_UNREADABLE');
+  }
+  if (parsed.schemaVersion === AUTHORITY_QUARANTINE_LEGACY_VERSION) {
+    if (
+      (parsed.active !== null && typeof parsed.active !== 'string') ||
+      (parsed.recovery !== null && typeof parsed.recovery !== 'string')
+    ) {
+      return fail('LOCAL_STATE_UNREADABLE');
+    }
+    return ok({
+      schema: AUTHORITY_QUARANTINE_SCHEMA,
+      schemaVersion: AUTHORITY_QUARANTINE_VERSION,
+      active: parsed.active === null ? [] : [parsed.active],
+      recovery: parsed.recovery === null ? [] : [parsed.recovery],
+    });
+  }
   if (
-    !isObjectRecord(parsed) ||
-    parsed.schema !== AUTHORITY_QUARANTINE_SCHEMA ||
     parsed.schemaVersion !== AUTHORITY_QUARANTINE_VERSION ||
-    (parsed.active !== null && typeof parsed.active !== 'string') ||
-    (parsed.recovery !== null && typeof parsed.recovery !== 'string')
+    !Array.isArray(parsed.active) ||
+    !Array.isArray(parsed.recovery) ||
+    parsed.active.some((entry) => typeof entry !== 'string') ||
+    parsed.recovery.some((entry) => typeof entry !== 'string') ||
+    parsed.active.length > AUTHORITY_QUARANTINE_MAX_ENTRIES ||
+    parsed.recovery.length > AUTHORITY_QUARANTINE_MAX_ENTRIES
   ) {
     return fail('LOCAL_STATE_UNREADABLE');
   }
   return ok({
     schema: AUTHORITY_QUARANTINE_SCHEMA,
     schemaVersion: AUTHORITY_QUARANTINE_VERSION,
-    active: parsed.active as string | null,
-    recovery: parsed.recovery as string | null,
+    active: parsed.active as string[],
+    recovery: parsed.recovery as string[],
   });
 }
 
@@ -615,17 +656,20 @@ function preserveUnreadableAuthority(
   if (!existing.ok) return existing;
   const parsed = readAuthorityQuarantine(existing.value);
   if (!parsed.ok) return parsed;
-  if (
-    (activeRaw !== null && parsed.value.active !== null && parsed.value.active !== activeRaw) ||
-    (recoveryRaw !== null && parsed.value.recovery !== null && parsed.value.recovery !== recoveryRaw)
-  ) {
-    return fail('STORAGE_WRITE_FAILED');
-  }
+  const append = (entries: readonly string[], rawValue: string | null): BackupResult<readonly string[]> => {
+    if (rawValue === null || entries.includes(rawValue)) return ok(entries);
+    if (entries.length >= AUTHORITY_QUARANTINE_MAX_ENTRIES) return fail('STORAGE_WRITE_FAILED');
+    return ok([...entries, rawValue]);
+  };
+  const active = append(parsed.value.active, activeRaw);
+  if (!active.ok) return active;
+  const recovery = append(parsed.value.recovery, recoveryRaw);
+  if (!recovery.ok) return recovery;
   const next: CorruptionQuarantine = {
     schema: AUTHORITY_QUARANTINE_SCHEMA,
     schemaVersion: AUTHORITY_QUARANTINE_VERSION,
-    active: activeRaw ?? parsed.value.active,
-    recovery: recoveryRaw ?? parsed.value.recovery,
+    active: active.value,
+    recovery: recovery.value,
   };
   const serialized = serializeAuthorityQuarantine(next);
   if (existing.value === serialized) return ok(undefined);
@@ -859,7 +903,7 @@ export class PrivateStateLifecycle {
     readonly recoveryRecords: readonly DurableRecoveryRecord[];
     readonly activeError?: 'LOCAL_STATE_UNSUPPORTED' | 'LOCAL_STATE_UNREADABLE';
     readonly recoveryError?: 'LOCAL_STATE_UNSUPPORTED' | 'LOCAL_STATE_UNREADABLE';
-    readonly recoveryRecordsError?: 'LOCAL_STATE_UNREADABLE';
+    readonly recoveryRecordsError?: 'LOCAL_STATE_UNSUPPORTED' | 'LOCAL_STATE_UNREADABLE';
   }> {
     const result = readAuthorityParts(this.storage);
     if (!result.ok) return result;

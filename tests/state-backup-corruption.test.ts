@@ -4,6 +4,7 @@ import test from 'node:test';
 import { createRecoveryRecordsBackup, PrivateStateLifecycle, createPortableBackup } from '../src/state/backup.ts';
 import {
   PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY,
+  PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY,
   PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY,
   PRIVATE_STATE_RECOVERY_STORAGE_KEY,
   PRIVATE_STATE_STORAGE_KEY,
@@ -101,9 +102,9 @@ test('imports over unreadable authority only after quarantining both original by
   assert.equal(JSON.parse(storage.values.get(PRIVATE_STATE_STORAGE_KEY) ?? 'null').items[0].note, 'replacement');
   assert.deepEqual(JSON.parse(storage.values.get(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY) ?? 'null'), {
     schema: 'snoredex-private-state-authority-quarantine',
-    schemaVersion: 1,
-    active: brokenActive,
-    recovery: brokenRecovery,
+    schemaVersion: 2,
+    active: [brokenActive],
+    recovery: [brokenRecovery],
   });
 });
 
@@ -124,10 +125,9 @@ test('retains readable active state as recovery when only recovery is malformed'
   assert.equal(committed.ok, true);
   if (!committed.ok) return;
   assert.equal(committed.value.recovery?.items[0]?.note, 'old active');
-  assert.equal(
-    JSON.parse(storage.values.get(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY) ?? 'null').recovery,
+  assert.deepEqual(JSON.parse(storage.values.get(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY) ?? 'null').recovery, [
     brokenRecovery,
-  );
+  ]);
 });
 
 test('quarantines malformed recovery bytes embedded in an authority envelope', async () => {
@@ -149,8 +149,8 @@ test('quarantines malformed recovery bytes embedded in an authority envelope', a
 
   assert.equal((await lifecycle.commitImport(plan.value, true)).ok, true);
   const quarantine = JSON.parse(storage.values.get(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY) ?? 'null');
-  assert.equal(quarantine.active, null);
-  assert.equal(quarantine.recovery, envelope);
+  assert.deepEqual(quarantine.active, []);
+  assert.deepEqual(quarantine.recovery, [envelope]);
 });
 
 test('rejects unsupported authority components instead of replacing them', () => {
@@ -173,6 +173,42 @@ test('rejects unsupported authority components instead of replacing them', () =>
     error: 'LOCAL_STATE_UNSUPPORTED',
   });
   assert.equal(storage.values.has(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY), false);
+});
+
+test('rejects unsupported recovery-ledger versions instead of repairing them', () => {
+  const storage = new FakeStorage();
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state('active')));
+  storage.values.set(
+    PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY,
+    JSON.stringify({ schema: 'snoredex-private-state-recovery-records', schemaVersion: 999, records: [] }),
+  );
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision, now: () => exportedAt });
+  const imported = importedState();
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  assert.deepEqual(lifecycle.prepareImport(imported.value.bytes, fingerprint, knownItemIds), {
+    ok: false,
+    error: 'LOCAL_STATE_UNSUPPORTED',
+  });
+  assert.equal(storage.values.has(PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY), false);
+});
+
+test('rejects unsupported recovery-ledger schemas instead of repairing them', () => {
+  const storage = new FakeStorage();
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state('active')));
+  storage.values.set(
+    PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY,
+    JSON.stringify({ schema: 'snoredex-private-state-recovery-records-v2', schemaVersion: 1, records: [] }),
+  );
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision, now: () => exportedAt });
+  const imported = importedState();
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  assert.deepEqual(lifecycle.prepareImport(imported.value.bytes, fingerprint, knownItemIds), {
+    ok: false,
+    error: 'LOCAL_STATE_UNSUPPORTED',
+  });
+  assert.equal(storage.values.has(PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY), false);
 });
 
 test('uses the normal merge path for a valid existing recovery ledger', async () => {
@@ -229,6 +265,34 @@ test('does not mutate malformed authority when quarantine cannot be written', as
   assert.equal(storage.values.get(PRIVATE_STATE_STORAGE_KEY), brokenActive);
 });
 
+test('continues recovery after the same authority component corrupts again', async () => {
+  const storage = new FakeStorage();
+  const firstCorruption = '{first-broken-active';
+  const secondCorruption = '{second-broken-active';
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, firstCorruption);
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision, now: () => exportedAt });
+  const first = importedState('first repair');
+  assert.equal(first.ok, true);
+  if (!first.ok) return;
+  const firstPlan = lifecycle.prepareImport(first.value.bytes, fingerprint, knownItemIds);
+  assert.equal(firstPlan.ok, true);
+  if (!firstPlan.ok) return;
+  assert.equal((await lifecycle.commitImport(firstPlan.value, true)).ok, true);
+
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, secondCorruption);
+  const second = importedState('second repair');
+  assert.equal(second.ok, true);
+  if (!second.ok) return;
+  const secondPlan = lifecycle.prepareImport(second.value.bytes, fingerprint, knownItemIds);
+  assert.equal(secondPlan.ok, true);
+  if (!secondPlan.ok) return;
+  assert.equal((await lifecycle.commitImport(secondPlan.value, true)).ok, true);
+  assert.deepEqual(JSON.parse(storage.values.get(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY) ?? 'null').active, [
+    firstCorruption,
+    secondCorruption,
+  ]);
+});
+
 test('reports invalid imports before reading a malformed local authority', () => {
   const storage = new FakeStorage();
   storage.values.set(PRIVATE_STATE_STORAGE_KEY, '{broken-active');
@@ -251,8 +315,7 @@ test('restores valid recovery when active authority bytes are unreadable', async
   if (!restored.ok) return;
   assert.equal(restored.value.active?.items[0]?.note, 'recovery');
   assert.equal(restored.value.recovery, undefined);
-  assert.equal(
-    JSON.parse(storage.values.get(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY) ?? 'null').active,
+  assert.deepEqual(JSON.parse(storage.values.get(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY) ?? 'null').active, [
     brokenActive,
-  );
+  ]);
 });
