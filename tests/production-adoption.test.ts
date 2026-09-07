@@ -173,6 +173,7 @@ test('production adoption validates the reviewed target migration without requir
   );
   assert.match(workflow, /run: node "\$RUNNER_TEMP\/check-production-adoption\.mjs"/u);
   assert.match(workflow, /SNOREDEX_REPOSITORY_ROOT: \$\{\{ github\.workspace \}\}/u);
+  assert.match(workflow, /SNOREDEX_PUBLICATION_ID: pages-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u);
   assert.match(
     workflow,
     /SNOREDEX_EXPECTED_GITHUB_SHA: \$\{\{ steps\.deployment-inputs\.outputs\.consumer_revision \}\}/u,
@@ -431,10 +432,12 @@ test('production adoption validates the reviewed target migration without requir
       migrationByteLength: number;
       sourceFingerprints: string[];
       runtimeAssetSet?: { appRevision: string; path: string; manifestSha256: string; manifestByteLength: number };
+      publicationId?: string;
     };
     const provenanceFor = (deployment: DeploymentFixture) => ({
       schema: 'snoredex-site-provenance',
       schemaVersion: '1.0.0',
+      publicationId: deployment.publicationId,
       appRevision: deployment.appRevision,
       catalogue: {
         mode: 'pinned-snapshot',
@@ -463,6 +466,7 @@ test('production adoption validates the reviewed target migration without requir
       schema: 'snoredex-site-module-manifest',
       schemaVersion: '2.0.0',
       ...(marked ? { publicationFormat: 'provenance-history-v1' } : {}),
+      publicationId: deployment.publicationId,
       appRevision: deployment.appRevision,
       runtimeAssetSet: deployment.runtimeAssetSet,
     });
@@ -544,6 +548,38 @@ test('production adoption validates the reviewed target migration without requir
       `${mismatchedHistory.stdout}${mismatchedHistory.stderr}`,
       /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
     );
+    const modernGeneration = {
+      ...currentDeployment,
+      publicationFormat: undefined,
+      publicationId: 'pages-test-1',
+      runtimeAssetSet: { ...currentDeployment.runtimeAssetSet, publicationId: 'pages-test-1' },
+      sourceFingerprints: [],
+    };
+    await writeFile(currentManifestPath, JSON.stringify(modernGeneration));
+    await writeFile(
+      provenancePath,
+      JSON.stringify({ ...provenanceFor(modernGeneration), sourceFingerprints: undefined }),
+    );
+    await writeFile(moduleManifestPath, JSON.stringify(moduleManifestFor(modernGeneration, false)));
+    const modernGenerationWithoutMarkers = spawnSync(process.execPath, [scriptPath], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_DEPLOYMENT_MODE: 'adopt',
+        SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+        SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+        SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: moduleManifestPath,
+      },
+    });
+    assert.notEqual(modernGenerationWithoutMarkers.status, 0);
+    assert.match(
+      `${modernGenerationWithoutMarkers.stdout}${modernGenerationWithoutMarkers.stderr}`,
+      /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
+    );
+    await writeFile(currentManifestPath, JSON.stringify(currentDeployment));
+    await writeFile(provenancePath, JSON.stringify(provenanceFor(currentDeployment)));
+    await writeFile(moduleManifestPath, JSON.stringify(moduleManifestFor(currentDeployment, false)));
     const legacyDeployment = {
       ...currentDeployment,
       appRevision: legacyAppRevision,

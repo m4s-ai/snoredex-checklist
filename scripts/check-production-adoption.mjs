@@ -60,16 +60,20 @@ const isSourceHistory = (value) =>
   (Array.isArray(value) && value.every((entry) => isDigest(entry)) && new Set(value).size === value.length);
 const publicationFormat = 'provenance-history-v1';
 const isPublicationFormat = (value) => value === undefined || value === publicationFormat;
-const isRuntimeAssetSetPointer = (value, appRevision) =>
+const isPublicationId = (value) =>
+  value === undefined || (typeof value === 'string' && /^[a-z0-9][a-z0-9._-]{1,127}$/u.test(value));
+const isRuntimeAssetSetPointer = (value, appRevision, publicationId) =>
   value?.appRevision === appRevision &&
   value?.path === `runtime/${appRevision}` &&
   isDigest(value?.manifestSha256) &&
-  isByteLength(value?.manifestByteLength);
+  isByteLength(value?.manifestByteLength) &&
+  value?.publicationId === publicationId;
 const isPublishedModuleManifest = (value) =>
   value?.schema === 'snoredex-site-module-manifest' &&
   value?.schemaVersion === '2.0.0' &&
   isCommit(value?.appRevision) &&
-  isRuntimeAssetSetPointer(value?.runtimeAssetSet, value?.appRevision) &&
+  isPublicationId(value?.publicationId) &&
+  isRuntimeAssetSetPointer(value?.runtimeAssetSet, value?.appRevision, value?.publicationId) &&
   isPublicationFormat(value?.publicationFormat);
 const isPublishedDeployment = (value) =>
   value?.schema === 'snoredex-checklist-deployment' &&
@@ -85,7 +89,8 @@ const isPublishedDeployment = (value) =>
   isDigest(value?.migrationByteSha256) &&
   isByteLength(value?.migrationByteLength) &&
   isPublicationFormat(value?.publicationFormat) &&
-  isRuntimeAssetSetPointer(value?.runtimeAssetSet, value?.appRevision) &&
+  isPublicationId(value?.publicationId) &&
+  isRuntimeAssetSetPointer(value?.runtimeAssetSet, value?.appRevision, value?.publicationId) &&
   isSourceHistory(value?.sourceFingerprints);
 const isPublishedProvenance = (value) => {
   const catalogue = value?.catalogue;
@@ -94,6 +99,7 @@ const isPublishedProvenance = (value) => {
     value?.schema === 'snoredex-site-provenance' &&
     value?.schemaVersion === '1.0.0' &&
     isCommit(value?.appRevision) &&
+    isPublicationId(value?.publicationId) &&
     catalogue?.mode === 'pinned-snapshot' &&
     isCommit(catalogue?.sourceCommit) &&
     catalogue?.sourceRepository === 'https://github.com/m4s-ai/snoredex-data' &&
@@ -119,15 +125,22 @@ const matchesPublishedProvenance = (deployment, provenance) => {
   // Releases created before provenance carried source history still have the
   // canonical history in deployment.json. During the first upgrade, derive it
   // from that validated manifest and require the two published records to agree.
+  const hasPublicationId =
+    deployment?.publicationId !== undefined ||
+    provenance?.publicationId !== undefined ||
+    currentModuleManifest?.publicationId !== undefined;
   const publishedSourceFingerprints =
     provenance?.sourceFingerprints === undefined &&
     deployment?.publicationFormat === undefined &&
-    currentModuleManifest?.publicationFormat === undefined
+    currentModuleManifest?.publicationFormat === undefined &&
+    !hasPublicationId
       ? deployment?.sourceFingerprints
       : provenance?.sourceFingerprints;
   return (
     deployment?.appRevision === provenance?.appRevision &&
     currentModuleManifest?.appRevision === deployment?.appRevision &&
+    deployment?.publicationId === provenance?.publicationId &&
+    deployment?.publicationId === currentModuleManifest?.publicationId &&
     JSON.stringify(deployment?.runtimeAssetSet) === JSON.stringify(currentModuleManifest?.runtimeAssetSet) &&
     deployment?.producerRevision === catalogue?.sourceCommit &&
     deployment?.contractVersion === catalogue?.contractVersion &&

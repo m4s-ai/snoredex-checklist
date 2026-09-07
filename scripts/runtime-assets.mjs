@@ -196,6 +196,9 @@ export async function writeRuntimeAssetSet({ assetsRoot, sourceRoot = assetsRoot
     path: `runtime/${runtime.appRevision}`,
     manifestSha256: sha256(manifestBytes),
     manifestByteLength: manifestBytes.byteLength,
+    ...(process.env.SNOREDEX_PUBLICATION_ID === undefined
+      ? {}
+      : { publicationId: process.env.SNOREDEX_PUBLICATION_ID }),
   };
 }
 

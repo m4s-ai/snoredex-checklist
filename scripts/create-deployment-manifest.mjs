@@ -120,6 +120,7 @@ const manifest = {
   schema: 'snoredex-checklist-deployment',
   schemaVersion: '1.0.0',
   publicationFormat: 'provenance-history-v1',
+  publicationId: provenance.publicationId,
   pageUrl,
   publishedAt: new Date().toISOString(),
   appRevision: provenance.appRevision,

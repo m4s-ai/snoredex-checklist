@@ -267,6 +267,7 @@ const result = {
   schema: 'snoredex-site-module-manifest',
   schemaVersion: '2.0.0',
   publicationFormat: 'provenance-history-v1',
+  publicationId: provenance.publicationId,
   appRevision: active.runtime.appRevision,
   runtimeAssetSet: active.pointer,
   retainedRuntimeAssetSets: retained ? [retained] : [],

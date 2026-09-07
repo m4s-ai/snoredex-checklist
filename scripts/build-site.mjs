@@ -84,10 +84,15 @@ if (
 const staging = `${output}.staging-${process.pid}`;
 const previous = `${output}.previous-${process.pid}`;
 const requestedAppRevision = process.env.SNOREDEX_APP_REVISION ?? process.env.GITHUB_SHA;
+const publicationId = process.env.SNOREDEX_PUBLICATION_ID;
+if (publicationId !== undefined && !/^[a-z0-9][a-z0-9._-]{1,127}$/u.test(publicationId)) {
+  throw new Error('BUILD_PUBLICATION_ID_INVALID');
+}
 const gitResult = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' });
 const gitRevision = requestedAppRevision ?? (gitResult.status === 0 ? gitResult.stdout.trim() : '');
 if (!/^[0-9a-f]{40}$/u.test(gitRevision)) throw new Error('BUILD_APP_REVISION_INVALID');
 provenance.appRevision = gitRevision;
+if (publicationId !== undefined) provenance.publicationId = publicationId;
 async function copyRevisionShell(source, destination, replacements = {}) {
   const shell = await readFile(source, 'utf8');
   if (!shell.includes('__SNOREDEX_APP_REVISION__')) throw new Error('BUILD_APP_REVISION_MARKER_MISSING');
@@ -263,6 +268,7 @@ try {
         schema: 'snoredex-site-module-manifest',
         schemaVersion: '2.0.0',
         publicationFormat: 'provenance-history-v1',
+        publicationId: provenance.publicationId,
         appRevision: gitRevision,
         runtimeAssetSet,
         retainedRuntimeAssetSets: [],
@@ -279,6 +285,7 @@ try {
       {
         schema: 'snoredex-site-provenance',
         schemaVersion: '1.0.0',
+        publicationId: provenance.publicationId,
         appRevision: gitRevision,
         catalogue: {
           mode: provenance.mode,
