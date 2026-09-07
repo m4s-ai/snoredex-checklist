@@ -172,6 +172,7 @@ test('production adoption validates the reviewed target migration without requir
     /git show "\$WORKFLOW_REVISION:scripts\/check-production-adoption\.mjs" > "\$RUNNER_TEMP\/check-production-adoption\.mjs"/u,
   );
   assert.match(workflow, /run: node "\$RUNNER_TEMP\/check-production-adoption\.mjs"/u);
+  assert.match(workflow, /SNOREDEX_REPOSITORY_ROOT: \$\{\{ github\.workspace \}\}/u);
   assert.match(
     workflow,
     /SNOREDEX_EXPECTED_GITHUB_SHA: \$\{\{ steps\.deployment-inputs\.outputs\.consumer_revision \}\}/u,
@@ -234,6 +235,8 @@ test('production adoption validates the reviewed target migration without requir
 
   const temporaryDirectory = await mkdtemp(resolve(tmpdir(), 'snoredex-adoption-'));
   try {
+    const copiedGuardPath = resolve(temporaryDirectory, 'check-production-adoption.mjs');
+    await writeFile(copiedGuardPath, script);
     const currentManifestPath = resolve(temporaryDirectory, 'deployment.json');
     const moduleManifestPath = resolve(temporaryDirectory, 'module-manifest.json');
     const previousAppRevision = 'b'.repeat(40);
@@ -651,7 +654,7 @@ test('production adoption validates the reviewed target migration without requir
     );
     await writeFile(currentManifestPath, JSON.stringify(currentDeployment), 'utf8');
     await writeFile(provenancePath, JSON.stringify(provenanceFor(currentDeployment)));
-    const rollback = spawnSync(process.execPath, [scriptPath], {
+    const rollback = spawnSync(process.execPath, [copiedGuardPath], {
       cwd: root,
       encoding: 'utf8',
       env: {
@@ -660,6 +663,7 @@ test('production adoption validates the reviewed target migration without requir
         SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
         SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
         SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: moduleManifestPath,
+        SNOREDEX_REPOSITORY_ROOT: root,
       },
     });
     assert.equal(rollback.status, 0, `${rollback.stdout}${rollback.stderr}`);

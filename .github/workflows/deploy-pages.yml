@@ -342,6 +342,7 @@ jobs:
           SNOREDEX_CURRENT_PROVENANCE_PATH: ${{ steps.current-production.outputs.provenance_path }}
           SNOREDEX_CURRENT_MODULE_MANIFEST_PATH: ${{ steps.current-production.outputs.module_manifest_path }}
           SNOREDEX_BOOTSTRAP_AUTHORIZED: ${{ steps.deployment-inputs.outputs.bootstrap_authorized }}
+          SNOREDEX_REPOSITORY_ROOT: ${{ github.workspace }}
         run: node "$RUNNER_TEMP/check-production-adoption.mjs"
       - name: Run browser and accessibility gates
         run: |
