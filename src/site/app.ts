@@ -33,7 +33,7 @@ interface BackupExport {
 }
 
 interface BackupPreview {
-  readonly mode: 'create' | 'replace';
+  readonly mode: 'create' | 'replace' | 'recovery-records';
   readonly sourceFingerprint: string;
   readonly targetFingerprint: string;
   readonly schemaVersion: string;
@@ -65,6 +65,7 @@ interface BackupPlan {
 interface BackupReadState {
   readonly active: { readonly items: readonly unknown[] } | undefined;
   readonly recovery: { readonly items: readonly unknown[] } | undefined;
+  readonly recoveryRecords: readonly unknown[];
 }
 
 type BackupResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: string };
@@ -73,6 +74,7 @@ interface BackupLifecycle {
   read(): BackupResult<BackupReadState>;
   exportActive(): BackupResult<BackupExport>;
   exportRecovery(): BackupResult<BackupExport>;
+  exportRecoveryRecords(): BackupResult<BackupExport>;
   prepareImport(
     bytes: Uint8Array,
     targetFingerprint: string,
@@ -1058,7 +1060,14 @@ function renderImportPreview(
   onCancel: () => void,
 ): void {
   const preview = text('div', undefined, 'recovery-preview');
-  const heading = text('h3', plan.preview.mode === 'replace' ? 'Replace preview' : 'Import preview');
+  const heading = text(
+    'h3',
+    plan.preview.mode === 'replace'
+      ? 'Replace preview'
+      : plan.preview.mode === 'recovery-records'
+        ? 'Recovery ledger preview'
+        : 'Import preview',
+  );
   const details = text('dl');
   appendRecoveryField(details, 'Schema version', plan.preview.schemaVersion);
   appendRecoveryField(details, 'Source fingerprint', plan.preview.sourceFingerprint);
@@ -1098,12 +1107,18 @@ function renderImportPreview(
   }
   const warning = text(
     'p',
-    'This is a non-mutating preview. Applying it replaces the current collection after an explicit confirmation and creates a recovery backup first.',
+    plan.preview.mode === 'recovery-records'
+      ? 'This is a non-mutating preview. Applying it merges the validated durable recovery ledger without activating retired item IDs.'
+      : 'This is a non-mutating preview. Applying it replaces the current collection after an explicit confirmation and creates a recovery backup first.',
   );
   const actions = text('div', undefined, 'recovery-preview-actions');
   const apply = text(
     'button',
-    plan.preview.mode === 'replace' ? 'Replace collection' : 'Import collection',
+    plan.preview.mode === 'replace'
+      ? 'Replace collection'
+      : plan.preview.mode === 'recovery-records'
+        ? 'Import recovery ledger'
+        : 'Import collection',
   ) as HTMLButtonElement;
   apply.type = 'button';
   const cancel = text('button', 'Cancel preview') as HTMLButtonElement;
@@ -1162,10 +1177,18 @@ function renderRecoveryTools(
   }
   const exportButton = text('button', 'Export collection') as HTMLButtonElement;
   const exportRecoveryButton = text('button', 'Export recovery snapshot') as HTMLButtonElement;
+  const exportRecoveryRecordsButton = text('button', 'Export recovery ledger') as HTMLButtonElement;
   const importButton = text('button', 'Choose backup to preview') as HTMLButtonElement;
   const clearButton = text('button', 'Clear collection') as HTMLButtonElement;
   const restoreButton = text('button', 'Restore previous snapshot') as HTMLButtonElement;
-  for (const button of [exportButton, exportRecoveryButton, importButton, clearButton, restoreButton])
+  for (const button of [
+    exportButton,
+    exportRecoveryButton,
+    exportRecoveryRecordsButton,
+    importButton,
+    clearButton,
+    restoreButton,
+  ])
     button.type = 'button';
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
@@ -1182,7 +1205,14 @@ function renderRecoveryTools(
   const refresh = (): void => {
     const current = lifecycle.read();
     if (!current.ok) {
-      for (const button of [exportButton, exportRecoveryButton, clearButton, restoreButton]) button.disabled = true;
+      for (const button of [
+        exportButton,
+        exportRecoveryButton,
+        exportRecoveryRecordsButton,
+        clearButton,
+        restoreButton,
+      ])
+        button.disabled = true;
       setStatus(recoveryErrorMessage(current.error));
       return;
     }
@@ -1190,6 +1220,7 @@ function renderRecoveryTools(
     exportButton.disabled = activeCount === 0;
     clearButton.disabled = activeCount === 0;
     exportRecoveryButton.disabled = current.value.recovery === undefined;
+    exportRecoveryRecordsButton.disabled = current.value.recoveryRecords.length === 0;
     restoreButton.disabled = current.value.recovery === undefined;
   };
   exportButton.addEventListener('click', () => {
@@ -1208,6 +1239,13 @@ function renderRecoveryTools(
       downloadBackup(result.value)
         ? 'Recovery snapshot downloaded.'
         : 'Backup download is unavailable in this browser.',
+    );
+  });
+  exportRecoveryRecordsButton.addEventListener('click', () => {
+    const result = lifecycle.exportRecoveryRecords();
+    if (!result.ok) return setStatus(recoveryErrorMessage(result.error));
+    setStatus(
+      downloadBackup(result.value) ? 'Recovery ledger downloaded.' : 'Backup download is unavailable in this browser.',
     );
   });
   clearButton.addEventListener('click', () => {
@@ -1266,8 +1304,14 @@ function renderRecoveryTools(
           () => {
             if (plan === undefined) return;
             void confirmationDialog(
-              plan.preview.mode === 'replace' ? 'Replace collection?' : 'Import collection?',
-              'The preview is valid. Confirm to create a recovery backup and atomically apply this collection.',
+              plan.preview.mode === 'replace'
+                ? 'Replace collection?'
+                : plan.preview.mode === 'recovery-records'
+                  ? 'Import recovery ledger?'
+                  : 'Import collection?',
+              plan.preview.mode === 'recovery-records'
+                ? 'The preview is valid. Confirm to merge the durable recovery ledger.'
+                : 'The preview is valid. Confirm to create a recovery backup and atomically apply this collection.',
             ).then((confirmed) => {
               if (!confirmed || plan === undefined) return;
               setStatus('Applying collection…');
@@ -1294,7 +1338,15 @@ function renderRecoveryTools(
         setStatus(recoveryErrorMessage('IMPORT_FILE_READ_FAILED'));
       });
   });
-  actionsContainer.append(exportButton, exportRecoveryButton, importButton, clearButton, restoreButton, fileInput);
+  actionsContainer.append(
+    exportButton,
+    exportRecoveryButton,
+    exportRecoveryRecordsButton,
+    importButton,
+    clearButton,
+    restoreButton,
+    fileInput,
+  );
   refresh();
 }
 

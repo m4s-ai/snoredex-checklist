@@ -8,6 +8,13 @@ import {
   type ReconciliationTransition,
 } from '../src/state/reconciliation.ts';
 import {
+  createPortableBackup,
+  createRecoveryRecordsBackup,
+  parsePortableBackup,
+  parseRecoveryRecordsBackup,
+  PrivateStateLifecycle,
+} from '../src/state/backup.ts';
+import {
   PRIVATE_DATASET_ID,
   PRIVATE_STATE_SCHEMA,
   PRIVATE_STATE_VERSION,
@@ -16,9 +23,16 @@ import {
 import { reconcileBrowserState } from '../src/state/browser-reconciliation.ts';
 import {
   OrderedStateStore,
+  PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY,
+  PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY,
   PRIVATE_STATE_RECOVERY_STORAGE_KEY,
   PRIVATE_STATE_STORAGE_KEY,
 } from '../src/state/storage.ts';
+import {
+  mergeRecoveryRecords,
+  readRecoveryRecords,
+  type DurableRecoveryRecord,
+} from '../src/state/recovery-records.ts';
 
 const oldFingerprint = `sha256:${'a'.repeat(64)}`;
 const middleFingerprint = `sha256:${'b'.repeat(64)}`;
@@ -61,6 +75,88 @@ class FakeBrowserLocalStorage {
 
   public key(index: number): string | null {
     return [...this.values.keys()][index] ?? null;
+  }
+}
+
+class QuotaActiveWriteStorage extends FakeBrowserLocalStorage {
+  public failNextActive = false;
+
+  public override setItem(key: string, value: string): void {
+    if (key === PRIVATE_STATE_STORAGE_KEY && this.failNextActive) {
+      this.failNextActive = false;
+      throw Object.assign(new Error('quota'), { name: 'QuotaExceededError' });
+    }
+    super.setItem(key, value);
+  }
+}
+
+class QuotaRecoveryRepairStorage extends FakeBrowserLocalStorage {
+  public failNextRecords = false;
+
+  public override setItem(key: string, value: string): void {
+    if (key === PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY && this.failNextRecords) {
+      this.failNextRecords = false;
+      throw Object.assign(new Error('quota'), { name: 'QuotaExceededError' });
+    }
+    super.setItem(key, value);
+  }
+}
+
+class FailSidecarRestoreStorage extends FakeBrowserLocalStorage {
+  public failActive = false;
+  public failRecoveryRestore = false;
+  public failRecordsRestore = false;
+  public recoveryRestoreAttempts = 0;
+  public recordsRestoreAttempts = 0;
+  public expectedRecovery: string | null = null;
+  public expectedRecords: string | null = null;
+
+  public override setItem(key: string, value: string): void {
+    if (key === PRIVATE_STATE_STORAGE_KEY && this.failActive) throw new Error('active write failed');
+    if (key === PRIVATE_STATE_RECOVERY_STORAGE_KEY && this.failRecoveryRestore && value === this.expectedRecovery) {
+      this.recoveryRestoreAttempts += 1;
+      throw new Error('recovery restore failed');
+    }
+    if (
+      key === PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY &&
+      this.failRecordsRestore &&
+      value === this.expectedRecords
+    ) {
+      this.recordsRestoreAttempts += 1;
+      throw new Error('recovery records restore failed');
+    }
+    super.setItem(key, value);
+  }
+
+  public override removeItem(key: string): void {
+    if (key === PRIVATE_STATE_RECOVERY_STORAGE_KEY && this.failRecoveryRestore && this.expectedRecovery === null) {
+      this.recoveryRestoreAttempts += 1;
+      throw new Error('recovery restore failed');
+    }
+    if (
+      key === PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY &&
+      this.failRecordsRestore &&
+      this.expectedRecords === null
+    ) {
+      this.recordsRestoreAttempts += 1;
+      throw new Error('recovery records restore failed');
+    }
+    super.removeItem(key);
+  }
+}
+
+class FinalVerificationDriftStorage extends FakeBrowserLocalStorage {
+  public driftRecovery = false;
+  public readonly driftedRecovery = JSON.stringify(state(oldFingerprint));
+
+  public override setItem(key: string, value: string): void {
+    super.setItem(key, value);
+    if (key === PRIVATE_STATE_STORAGE_KEY) this.driftRecovery = true;
+  }
+
+  public override getItem(key: string): string | null {
+    if (key === PRIVATE_STATE_RECOVERY_STORAGE_KEY && this.driftRecovery) return this.driftedRecovery;
+    return super.getItem(key);
   }
 }
 
@@ -802,6 +898,682 @@ test('browser migration rotates an existing recovery snapshot', async () => {
     if (navigatorDescriptor === undefined) delete (globalThis as { navigator?: unknown }).navigator;
     else Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
   }
+});
+
+test('browser migration retains a populated recovery when the active collection is empty', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state(oldFingerprint)));
+  storage.setItem(
+    PRIVATE_STATE_RECOVERY_STORAGE_KEY,
+    JSON.stringify(state(oldFingerprint, [{ itemId: oldA, status: 'have', quantityOwned: 2, quantityOrdered: 0 }])),
+  );
+  const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { locks: { request: async (_name: string, callback: () => Promise<unknown>) => callback() } },
+  });
+  try {
+    const result = await reconcileBrowserState(targetFingerprint, new Set(), {
+      knownSourceItemIds: new Set([oldA]),
+      migrations: [
+        migration(oldFingerprint, targetFingerprint, [transition(oldA, [], 'retired-1:0', 'none', 'retire-to-orphan')]),
+      ],
+    });
+    assert.deepEqual(result, { ok: true, changed: true });
+    const recovery = JSON.parse(storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY) ?? 'null') as PrivateState;
+    assert.equal(recovery.items[0]?.itemId, oldA);
+    assert.equal(recovery.items[0]?.quantityOwned, 2);
+  } finally {
+    if (localStorageDescriptor === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
+    else Object.defineProperty(globalThis, 'localStorage', localStorageDescriptor);
+    if (navigatorDescriptor === undefined) delete (globalThis as { navigator?: unknown }).navigator;
+    else Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+  }
+});
+
+test('seeds legacy recovery records before rotating a later snapshot', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  storage.setItem(
+    PRIVATE_STATE_STORAGE_KEY,
+    JSON.stringify(
+      state(middleFingerprint, [{ itemId: targetB, status: 'have', quantityOwned: 1, quantityOrdered: 0 }]),
+    ),
+  );
+  storage.setItem(
+    PRIVATE_STATE_RECOVERY_STORAGE_KEY,
+    JSON.stringify(state(oldFingerprint, [{ itemId: oldA, status: 'have', quantityOwned: 4, quantityOrdered: 0 }])),
+  );
+  const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { locks: { request: async (_name: string, callback: () => Promise<unknown>) => callback() } },
+  });
+  try {
+    const first = await reconcileBrowserState(middleFingerprint, new Set([targetB]), {
+      knownSourceItemIdsByFingerprint: new Map([[oldFingerprint, new Set([oldA])]]),
+      migrations: [
+        migration(oldFingerprint, middleFingerprint, [transition(oldA, [], 'retired-1:0', 'none', 'retire-to-orphan')]),
+      ],
+    });
+    assert.deepEqual(first, { ok: true, changed: true });
+    const firstRecords = readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY));
+    assert.equal(firstRecords.ok, true);
+    if (!firstRecords.ok) return;
+    assert.equal(firstRecords.value[0]?.item.itemId, oldA);
+
+    const second = await reconcileBrowserState(targetFingerprint, new Set([targetA]), {
+      knownSourceItemIdsByFingerprint: new Map([[middleFingerprint, new Set([targetB])]]),
+      migrations: [
+        migration(middleFingerprint, targetFingerprint, [
+          transition(targetB, [targetA], 'rekey-1:1', 'preserve', 'one-to-one-preserve'),
+        ]),
+      ],
+    });
+    assert.deepEqual(second, { ok: true, changed: true });
+    const secondRecords = readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY));
+    assert.equal(secondRecords.ok, true);
+    if (!secondRecords.ok) return;
+    assert.equal(secondRecords.value[0]?.item.itemId, oldA);
+    assert.equal(secondRecords.value[0]?.item.quantityOwned, 4);
+  } finally {
+    if (localStorageDescriptor === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
+    else Object.defineProperty(globalThis, 'localStorage', localStorageDescriptor);
+    if (navigatorDescriptor === undefined) delete (globalThis as { navigator?: unknown }).navigator;
+    else Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+  }
+});
+
+test('browser migration keeps retired records across an A to B to C chain', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  storage.setItem(
+    PRIVATE_STATE_STORAGE_KEY,
+    JSON.stringify(
+      state(oldFingerprint, [
+        { itemId: oldA, status: 'have', quantityOwned: 3, quantityOrdered: 1, note: 'retired but recoverable' },
+        { itemId: oldB, status: 'ordered', quantityOwned: 0, quantityOrdered: 2, note: 'continues forward' },
+      ]),
+    ),
+  );
+  const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { locks: { request: async (_name: string, callback: () => Promise<unknown>) => callback() } },
+  });
+  try {
+    const first = await reconcileBrowserState(middleFingerprint, new Set([targetB]), {
+      knownSourceItemIds: new Set([oldA, oldB]),
+      migrations: [
+        migration(oldFingerprint, middleFingerprint, [
+          transition(oldA, [], 'retired-1:0', 'none', 'retire-to-orphan'),
+          transition(oldB, [targetB], 'rekey-1:1', 'preserve', 'one-to-one-preserve'),
+        ]),
+      ],
+    });
+    assert.deepEqual(first, { ok: true, changed: true });
+    const firstRecords = readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY));
+    assert.equal(firstRecords.ok, true);
+    if (!firstRecords.ok) return;
+    assert.deepEqual(firstRecords.value, [
+      {
+        sourceFingerprint: oldFingerprint,
+        item: { itemId: oldA, status: 'have', quantityOwned: 3, quantityOrdered: 1, note: 'retired but recoverable' },
+        disposition: 'orphan',
+      },
+    ]);
+
+    const second = await reconcileBrowserState(targetFingerprint, new Set([targetA]), {
+      knownSourceItemIds: new Set([targetB]),
+      migrations: [
+        migration(middleFingerprint, targetFingerprint, [
+          transition(targetB, [targetA], 'rekey-1:1', 'preserve', 'one-to-one-preserve'),
+        ]),
+      ],
+    });
+    assert.deepEqual(second, { ok: true, changed: true });
+    const active = JSON.parse(storage.getItem(PRIVATE_STATE_STORAGE_KEY) ?? 'null') as PrivateState;
+    assert.equal(active.catalogueFingerprint, targetFingerprint);
+    assert.equal(active.items[0]?.itemId, targetA);
+    const secondRecords = readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY));
+    assert.equal(secondRecords.ok, true);
+    if (!secondRecords.ok) return;
+    assert.equal(secondRecords.value.length, 1);
+    assert.equal(secondRecords.value[0]?.sourceFingerprint, oldFingerprint);
+    assert.equal(secondRecords.value[0]?.item.note, 'retired but recoverable');
+    assert.equal(secondRecords.value[0]?.item.quantityOwned, 3);
+  } finally {
+    if (localStorageDescriptor === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
+    else Object.defineProperty(globalThis, 'localStorage', localStorageDescriptor);
+    if (navigatorDescriptor === undefined) delete (globalThis as { navigator?: unknown }).navigator;
+    else Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+  }
+});
+
+test('browser rollback merges edits to retired records into the durable ledger', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  const source = state(oldFingerprint, [
+    { itemId: oldA, status: 'have', quantityOwned: 1, quantityOrdered: 0, note: 'before rollback' },
+    { itemId: oldB, status: 'ordered', quantityOwned: 0, quantityOrdered: 1, note: 'retained' },
+  ]);
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(source));
+  const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { locks: { request: async (_name: string, callback: () => Promise<unknown>) => callback() } },
+  });
+  const route = migration(oldFingerprint, middleFingerprint, [
+    transition(oldA, [], 'retired-1:0', 'none', 'retire-to-orphan'),
+    transition(oldB, [targetB], 'rekey-1:1', 'preserve', 'one-to-one-preserve'),
+  ]);
+  try {
+    assert.deepEqual(
+      await reconcileBrowserState(middleFingerprint, new Set([targetB]), {
+        knownSourceItemIds: new Set([oldA, oldB]),
+        migrations: [route],
+      }),
+      { ok: true, changed: true },
+    );
+    assert.deepEqual(await reconcileBrowserState(oldFingerprint, new Set([oldA, oldB]), { migrations: [] }), {
+      ok: true,
+      changed: true,
+    });
+    storage.setItem(
+      PRIVATE_STATE_STORAGE_KEY,
+      JSON.stringify(
+        state(oldFingerprint, [
+          { itemId: oldA, status: 'have', quantityOwned: 4, quantityOrdered: 0, note: 'edited during rollback' },
+          { itemId: oldB, status: 'ordered', quantityOwned: 0, quantityOrdered: 1, note: 'retained' },
+        ]),
+      ),
+    );
+    assert.deepEqual(
+      await reconcileBrowserState(middleFingerprint, new Set([targetB]), {
+        knownSourceItemIds: new Set([oldA, oldB]),
+        migrations: [route],
+      }),
+      { ok: true, changed: true },
+    );
+    const records = readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY));
+    assert.equal(records.ok, true);
+    if (!records.ok) return;
+    assert.equal(records.value.length, 1);
+    assert.equal(records.value[0]?.item.note, 'edited during rollback');
+    assert.equal(records.value[0]?.item.quantityOwned, 4);
+  } finally {
+    if (localStorageDescriptor === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
+    else Object.defineProperty(globalThis, 'localStorage', localStorageDescriptor);
+    if (navigatorDescriptor === undefined) delete (globalThis as { navigator?: unknown }).navigator;
+    else Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+  }
+});
+
+test('updates stale ledger records on a direct roll-forward after rollback', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  storage.setItem(
+    PRIVATE_STATE_STORAGE_KEY,
+    JSON.stringify(state(oldFingerprint, [{ itemId: oldA, status: 'have', quantityOwned: 4, quantityOrdered: 0 }])),
+  );
+  storage.setItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY, JSON.stringify(state(middleFingerprint)));
+  const staleRecord = {
+    sourceFingerprint: oldFingerprint,
+    item: { itemId: oldA, status: 'have' as const, quantityOwned: 1, quantityOrdered: 0 },
+    disposition: 'orphan' as const,
+  };
+  storage.setItem(
+    PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY,
+    JSON.stringify({ schema: 'snoredex-private-state-recovery-records', schemaVersion: 1, records: [staleRecord] }),
+  );
+  const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { locks: { request: async (_name: string, callback: () => Promise<unknown>) => callback() } },
+  });
+  try {
+    const result = await reconcileBrowserState(targetFingerprint, new Set(), {
+      knownSourceItemIds: new Set([oldA]),
+      migrations: [
+        migration(oldFingerprint, targetFingerprint, [transition(oldA, [], 'retired-1:0', 'none', 'retire-to-orphan')]),
+      ],
+    });
+    assert.deepEqual(result, { ok: true, changed: true });
+    const records = readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY));
+    assert.equal(records.ok, true);
+    if (!records.ok) return;
+    assert.equal(records.value[0]?.item.quantityOwned, 4);
+  } finally {
+    if (localStorageDescriptor === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
+    else Object.defineProperty(globalThis, 'localStorage', localStorageDescriptor);
+    if (navigatorDescriptor === undefined) delete (globalThis as { navigator?: unknown }).navigator;
+    else Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+  }
+});
+
+test('removes ledger records when rollback edits reset an item to default', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state(oldFingerprint)));
+  const staleRecord = {
+    sourceFingerprint: oldFingerprint,
+    item: { itemId: oldA, status: 'have' as const, quantityOwned: 2, quantityOrdered: 0 },
+    disposition: 'orphan' as const,
+  };
+  storage.setItem(
+    PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY,
+    JSON.stringify({ schema: 'snoredex-private-state-recovery-records', schemaVersion: 1, records: [staleRecord] }),
+  );
+  const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { locks: { request: async (_name: string, callback: () => Promise<unknown>) => callback() } },
+  });
+  try {
+    const result = await reconcileBrowserState(targetFingerprint, new Set([targetA]), {
+      knownSourceItemIds: new Set([oldA]),
+      migrations: [
+        migration(oldFingerprint, targetFingerprint, [
+          transition(oldA, [targetA], 'rekey-1:1', 'preserve', 'one-to-one-preserve'),
+        ]),
+      ],
+    });
+    assert.deepEqual(result, { ok: true, changed: true });
+    assert.equal(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY), null);
+  } finally {
+    if (localStorageDescriptor === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
+    else Object.defineProperty(globalThis, 'localStorage', localStorageDescriptor);
+    if (navigatorDescriptor === undefined) delete (globalThis as { navigator?: unknown }).navigator;
+    else Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+  }
+});
+
+test('portable backups round-trip durable recovery records without activating old IDs', () => {
+  const recoveryRecords: readonly DurableRecoveryRecord[] = [
+    {
+      sourceFingerprint: oldFingerprint,
+      item: { itemId: oldA, status: 'have', quantityOwned: 2, quantityOrdered: 0, note: 'portable orphan' },
+      disposition: 'orphan',
+    },
+  ];
+  const exported = createPortableBackup(
+    state(targetFingerprint, [{ itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 }]),
+    {
+      appRevision: 'd'.repeat(40),
+      exportedAt: '2026-09-06T10:00:00.000Z',
+      recoveryRecords,
+    },
+  );
+  assert.equal(exported.ok, true);
+  if (!exported.ok) return;
+  assert.equal(exported.value.text.includes('portable orphan'), false);
+  assert.notEqual(exported.value.recoveryRecordsBackup, undefined);
+  if (exported.value.recoveryRecordsBackup === undefined) return;
+  const parsed = parsePortableBackup(exported.value.bytes, new Set([targetA]));
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.deepEqual(parsed.value.state.items, [
+    { itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 },
+  ]);
+  assert.deepEqual(parsed.value.recoveryRecords, []);
+  const parsedRecovery = parseRecoveryRecordsBackup(exported.value.recoveryRecordsBackup.bytes);
+  assert.equal(parsedRecovery.ok, true);
+  if (!parsedRecovery.ok) return;
+  assert.deepEqual(parsedRecovery.value.records, recoveryRecords);
+});
+
+test('reconciled recovery records supersede stale local ledger entries', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state(targetFingerprint)));
+  const staleRecord = {
+    sourceFingerprint: oldFingerprint,
+    item: { itemId: oldA, status: 'have' as const, quantityOwned: 1, quantityOrdered: 0 },
+    disposition: 'orphan' as const,
+  };
+  storage.setItem(
+    PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY,
+    JSON.stringify({ schema: 'snoredex-private-state-recovery-records', schemaVersion: 1, records: [staleRecord] }),
+  );
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision: 'd'.repeat(40),
+    reconciliation: {
+      knownSourceItemIds: new Set([oldA]),
+      migrations: [
+        migration(oldFingerprint, targetFingerprint, [transition(oldA, [], 'retired-1:0', 'none', 'retire-to-orphan')]),
+      ],
+    },
+  });
+  const exported = createPortableBackup(
+    state(oldFingerprint, [{ itemId: oldA, status: 'have', quantityOwned: 4, quantityOrdered: 0 }]),
+    { appRevision: 'd'.repeat(40), exportedAt: '2026-09-06T10:00:00.000Z' },
+  );
+  assert.equal(exported.ok, true);
+  if (!exported.ok) return;
+  const prepared = lifecycle.prepareImport(exported.value.bytes, targetFingerprint, new Set());
+  assert.equal(prepared.ok, true);
+  if (!prepared.ok) return;
+  const committed = await lifecycle.commitImport(prepared.value, true);
+  assert.equal(committed.ok, true);
+  const records = readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY));
+  assert.equal(records.ok, true);
+  if (!records.ok) return;
+  assert.equal(records.value.length, 1);
+  assert.equal(records.value[0]?.item.quantityOwned, 4);
+});
+
+test('restoring a recovery snapshot updates stale ledger records', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state(targetFingerprint)));
+  storage.setItem(
+    PRIVATE_STATE_RECOVERY_STORAGE_KEY,
+    JSON.stringify(state(oldFingerprint, [{ itemId: oldA, status: 'have', quantityOwned: 4, quantityOrdered: 0 }])),
+  );
+  const staleRecord = {
+    sourceFingerprint: oldFingerprint,
+    item: { itemId: oldA, status: 'have' as const, quantityOwned: 1, quantityOrdered: 0 },
+    disposition: 'orphan' as const,
+  };
+  storage.setItem(
+    PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY,
+    JSON.stringify({ schema: 'snoredex-private-state-recovery-records', schemaVersion: 1, records: [staleRecord] }),
+  );
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision: 'd'.repeat(40),
+    reconciliation: {
+      knownSourceItemIds: new Set([oldA]),
+      migrations: [
+        migration(oldFingerprint, targetFingerprint, [transition(oldA, [], 'retired-1:0', 'none', 'retire-to-orphan')]),
+      ],
+    },
+  });
+  const restored = await lifecycle.restore(true, targetFingerprint, new Set());
+  assert.equal(restored.ok, true);
+  const records = readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY));
+  assert.equal(records.ok, true);
+  if (!records.ok) return;
+  assert.equal(records.value[0]?.item.quantityOwned, 4);
+});
+
+test('rejects present empty recovery-ledger payloads', () => {
+  assert.deepEqual(readRecoveryRecords(null), { ok: true, value: [] });
+  assert.equal(readRecoveryRecords('').ok, false);
+  assert.equal(readRecoveryRecords('  \n').ok, false);
+  assert.equal(readRecoveryRecords('null').ok, false);
+});
+
+test('durable recovery merges fail closed on unequal identity collisions', () => {
+  const existing: DurableRecoveryRecord = {
+    sourceFingerprint: oldFingerprint,
+    item: { itemId: oldA, status: 'have', quantityOwned: 2, quantityOrdered: 0, note: 'newer local value' },
+    disposition: 'orphan',
+  };
+  const imported: DurableRecoveryRecord = {
+    ...existing,
+    item: { ...existing.item, quantityOwned: 1, note: 'older imported value' },
+  };
+  assert.deepEqual(mergeRecoveryRecords([existing], [imported]), { ok: false });
+  assert.deepEqual(mergeRecoveryRecords([existing], [{ ...existing }]), { ok: true, value: [existing] });
+});
+
+test('imports a dedicated recovery ledger without changing the active collection', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  const active = state(targetFingerprint, [{ itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 }]);
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(active));
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision: 'd'.repeat(40) });
+  const records = [
+    {
+      sourceFingerprint: oldFingerprint,
+      item: { itemId: oldA, status: 'have' as const, quantityOwned: 2, quantityOrdered: 0 },
+      disposition: 'orphan' as const,
+    },
+  ];
+  const exported = createRecoveryRecordsBackup(records);
+  assert.equal(exported.ok, true);
+  if (!exported.ok) return;
+  const plan = lifecycle.prepareImport(exported.value.bytes, targetFingerprint, new Set([targetA]));
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.equal(plan.value.recoveryRecordsOnly, true);
+  assert.equal(plan.value.preview.mode, 'recovery-records');
+  const committed = await lifecycle.commitImport(plan.value, true);
+  assert.equal(committed.ok, true);
+  if (!committed.ok) return;
+  assert.deepEqual(committed.value.active?.items, active.items);
+  assert.deepEqual(committed.value.recoveryRecords, records);
+});
+
+test('imports a recovery ledger before the active collection without creating a null key', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision: 'd'.repeat(40) });
+  const records = [
+    {
+      sourceFingerprint: oldFingerprint,
+      item: { itemId: oldA, status: 'have' as const, quantityOwned: 2, quantityOrdered: 0 },
+      disposition: 'orphan' as const,
+    },
+  ];
+  const exported = createRecoveryRecordsBackup(records);
+  assert.equal(exported.ok, true);
+  if (!exported.ok) return;
+  const plan = lifecycle.prepareImport(exported.value.bytes, targetFingerprint, new Set([targetA]));
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  const committed = await lifecycle.commitImport(plan.value, true);
+  assert.equal(committed.ok, true);
+  if (!committed.ok) return;
+  assert.equal(storage.getItem(PRIVATE_STATE_STORAGE_KEY), null);
+  assert.deepEqual(committed.value.recoveryRecords, records);
+});
+
+test('repairs an unreadable recovery ledger from a validated dedicated backup', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  const active = state(targetFingerprint, [{ itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 }]);
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(active));
+  storage.setItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, '{malformed-ledger');
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision: 'd'.repeat(40) });
+  const records = [
+    {
+      sourceFingerprint: oldFingerprint,
+      item: { itemId: oldA, status: 'have' as const, quantityOwned: 3, quantityOrdered: 0 },
+      disposition: 'orphan' as const,
+    },
+  ];
+  const exported = createRecoveryRecordsBackup(records);
+  assert.equal(exported.ok, true);
+  if (!exported.ok) return;
+  const plan = lifecycle.prepareImport(exported.value.bytes, targetFingerprint, new Set([targetA]));
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.equal(plan.value.recoveryRecordsOnly, true);
+  const committed = await lifecycle.commitImport(plan.value, true);
+  assert.equal(committed.ok, true);
+  if (!committed.ok) return;
+  assert.deepEqual(committed.value.active?.items, active.items);
+  assert.deepEqual(committed.value.recoveryRecords, records);
+  assert.equal(readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY)).ok, true);
+  const quarantine = JSON.parse(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY) ?? 'null') as {
+    entries?: unknown;
+  };
+  assert.deepEqual(quarantine.entries, ['{malformed-ledger']);
+});
+
+test('preserves quota classification during recovery-ledger repair', async () => {
+  const storage = new QuotaRecoveryRepairStorage();
+  const active = state(targetFingerprint, [{ itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 }]);
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(active));
+  storage.setItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, '{malformed-ledger');
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision: 'd'.repeat(40) });
+  const records = [
+    {
+      sourceFingerprint: oldFingerprint,
+      item: { itemId: oldA, status: 'have' as const, quantityOwned: 3, quantityOrdered: 0 },
+      disposition: 'orphan' as const,
+    },
+  ];
+  const exported = createRecoveryRecordsBackup(records);
+  assert.equal(exported.ok, true);
+  if (!exported.ok) return;
+  const plan = lifecycle.prepareImport(exported.value.bytes, targetFingerprint, new Set([targetA]));
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  storage.failNextRecords = true;
+  assert.deepEqual(await lifecycle.commitImport(plan.value, true), {
+    ok: false,
+    error: 'STORAGE_QUOTA_EXCEEDED',
+  });
+});
+
+test('preserves quota classification during a normal ledger write', async () => {
+  const storage = new QuotaRecoveryRepairStorage();
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(state(targetFingerprint)));
+  const lifecycle = new PrivateStateLifecycle(storage, {
+    appRevision: 'd'.repeat(40),
+    reconciliation: {
+      knownSourceItemIds: new Set([oldA]),
+      migrations: [
+        migration(oldFingerprint, targetFingerprint, [transition(oldA, [], 'retired-1:0', 'none', 'retire-to-orphan')]),
+      ],
+    },
+  });
+  const exported = createPortableBackup(
+    state(oldFingerprint, [{ itemId: oldA, status: 'have', quantityOwned: 3, quantityOrdered: 0 }]),
+    { appRevision: 'd'.repeat(40), exportedAt: '2026-09-06T10:00:00.000Z' },
+  );
+  assert.equal(exported.ok, true);
+  if (!exported.ok) return;
+  const plan = lifecycle.prepareImport(exported.value.bytes, targetFingerprint, new Set());
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  storage.failNextRecords = true;
+  assert.deepEqual(await lifecycle.commitImport(plan.value, true), {
+    ok: false,
+    error: 'STORAGE_QUOTA_EXCEEDED',
+  });
+});
+
+test('keeps every unreadable recovery ledger quarantine across repeated repairs', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  const active = state(targetFingerprint, [{ itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 }]);
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(active));
+  storage.setItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, '{second-malformed-ledger');
+  storage.setItem(
+    PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY,
+    JSON.stringify({
+      schema: 'snoredex-private-state-recovery-records-quarantine',
+      schemaVersion: 1,
+      entries: ['{first-malformed-ledger'],
+    }),
+  );
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision: 'd'.repeat(40) });
+  const record = {
+    sourceFingerprint: oldFingerprint,
+    item: { itemId: oldB, status: 'ordered' as const, quantityOwned: 0, quantityOrdered: 1 },
+    disposition: 'conflict' as const,
+  };
+  const exported = createRecoveryRecordsBackup([record]);
+  assert.equal(exported.ok, true);
+  if (!exported.ok) return;
+  const plan = lifecycle.prepareImport(exported.value.bytes, targetFingerprint, new Set([targetA]));
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  const committed = await lifecycle.commitImport(plan.value, true);
+  assert.equal(committed.ok, true);
+  const quarantine = JSON.parse(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY) ?? 'null') as {
+    entries?: unknown;
+  };
+  assert.deepEqual(quarantine.entries, ['{first-malformed-ledger', '{second-malformed-ledger']);
+});
+
+test('attempts every changed sidecar restoration after active promotion fails', async () => {
+  const storage = new FailSidecarRestoreStorage();
+  storage.setItem(
+    PRIVATE_STATE_STORAGE_KEY,
+    JSON.stringify(
+      state(targetFingerprint, [{ itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 }]),
+    ),
+  );
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision: 'd'.repeat(40) });
+  const record = {
+    sourceFingerprint: oldFingerprint,
+    item: { itemId: oldA, status: 'have' as const, quantityOwned: 2, quantityOrdered: 0 },
+    disposition: 'orphan' as const,
+  };
+  const exported = createPortableBackup(
+    state(targetFingerprint, [{ itemId: targetA, status: 'have', quantityOwned: 2, quantityOrdered: 0 }]),
+    {
+      appRevision: 'd'.repeat(40),
+      exportedAt: '2026-09-06T10:00:00.000Z',
+      recoveryRecords: [record],
+    },
+  );
+  assert.equal(exported.ok, true);
+  if (!exported.ok) return;
+  const prepared = lifecycle.prepareImport(exported.value.bytes, targetFingerprint, new Set([targetA]));
+  assert.equal(prepared.ok, true);
+  if (!prepared.ok) return;
+  const plan = { ...prepared.value, importedRecoveryRecords: exported.value.recoveryRecords };
+  storage.expectedRecovery = storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY);
+  storage.expectedRecords = storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY);
+  storage.failActive = true;
+  storage.failRecoveryRestore = true;
+  storage.failRecordsRestore = true;
+  assert.deepEqual(await lifecycle.commitImport(plan, true), {
+    ok: false,
+    error: 'STORAGE_COMMIT_UNCERTAIN',
+  });
+  assert.equal(storage.recoveryRestoreAttempts, 1);
+  assert.equal(storage.recordsRestoreAttempts, 1);
+});
+
+test('preserves quota classification when the active write fails', async () => {
+  const storage = new QuotaActiveWriteStorage();
+  const original = state(targetFingerprint, [
+    { itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 },
+  ]);
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(original));
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision: 'd'.repeat(40) });
+  storage.failNextActive = true;
+  assert.deepEqual(await lifecycle.clear(true), {
+    ok: false,
+    error: 'STORAGE_QUOTA_EXCEEDED',
+  });
+  assert.deepEqual(JSON.parse(storage.getItem(PRIVATE_STATE_STORAGE_KEY) ?? 'null'), original);
+  assert.equal(storage.getItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY), null);
+});
+
+test('reports uncertain when final verification cannot restore every key', async () => {
+  const storage = new FinalVerificationDriftStorage();
+  storage.setItem(
+    PRIVATE_STATE_STORAGE_KEY,
+    JSON.stringify(
+      state(targetFingerprint, [{ itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 }]),
+    ),
+  );
+  storage.driftRecovery = false;
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision: 'd'.repeat(40) });
+  const imported = createPortableBackup(
+    state(targetFingerprint, [{ itemId: targetA, status: 'have', quantityOwned: 2, quantityOrdered: 0 }]),
+    {
+      appRevision: 'd'.repeat(40),
+      exportedAt: '2026-09-06T10:00:00.000Z',
+    },
+  );
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  const plan = lifecycle.prepareImport(imported.value.bytes, targetFingerprint, new Set([targetA]));
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.deepEqual(await lifecycle.commitImport(plan.value, true), {
+    ok: false,
+    error: 'STORAGE_COMMIT_UNCERTAIN',
+  });
 });
 
 test('browser rollback restores matching recovery while preserving newer active state', async () => {
