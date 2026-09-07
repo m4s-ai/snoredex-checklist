@@ -143,6 +143,13 @@ test('production adoption validates the reviewed target migration without requir
     workflow,
     /description: Optional full consumer commit SHA \(rollback only; adopt uses the workflow revision\)/u,
   );
+  assert.match(workflow, /description: Explicitly authorize first publication when no production manifest exists/u);
+  assert.match(workflow, /bootstrap authorization requires workflow_dispatch/u);
+  assert.match(workflow, /state=missing/u);
+  assert.match(
+    workflow,
+    /SNOREDEX_BOOTSTRAP_AUTHORIZED: \$\{\{ steps\.deployment-inputs\.outputs\.bootstrap_authorized \}\}/u,
+  );
   assert.match(workflow, /required: false/u);
   assert.match(workflow, /consumer_revision is required for rollback/u);
   assert.match(workflow, /consumer_revision="\$\{CONSUMER_REVISION_INPUT:-\$WORKFLOW_REVISION\}"/u);
@@ -162,14 +169,25 @@ test('production adoption validates the reviewed target migration without requir
     /name: Require reviewed producer migration target\s+if: steps\.deployment-inputs\.outputs\.deployment_mode == 'adopt'/u,
   );
 
-  const run = (currentFingerprint?: string) => {
-    const env: NodeJS.ProcessEnv = { ...process.env, SNOREDEX_DEPLOYMENT_MODE: 'adopt' };
+  const run = (currentFingerprint?: string, bootstrapAuthorized = false) => {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      SNOREDEX_DEPLOYMENT_MODE: 'adopt',
+      SNOREDEX_BOOTSTRAP_AUTHORIZED: String(bootstrapAuthorized),
+    };
     if (currentFingerprint === undefined) delete env.SNOREDEX_CURRENT_CATALOGUE_FINGERPRINT;
     else env.SNOREDEX_CURRENT_CATALOGUE_FINGERPRINT = currentFingerprint;
     return spawnSync(process.execPath, [scriptPath], { cwd: root, encoding: 'utf8', env });
   };
 
-  const initial = run();
+  const unapprovedBootstrap = run();
+  assert.notEqual(unapprovedBootstrap.status, 0);
+  assert.match(
+    `${unapprovedBootstrap.stdout}${unapprovedBootstrap.stderr}`,
+    /PRODUCTION_ADOPTION_BLOCKED_BOOTSTRAP_REQUIRES_AUTHORIZATION/u,
+  );
+
+  const initial = run(undefined, true);
   assert.equal(initial.status, 0, `${initial.stdout}${initial.stderr}`);
 
   const target = 'sha256:c9b59276dadaf321b39ada5d17eaea74c4beecd00f8dc0cae0a46fc37afb8f15';
@@ -371,9 +389,47 @@ test('production adoption validates the reviewed target migration without requir
     assert.deepEqual(divergentDeployment.sourceFingerprints, [reviewedSourceFingerprint, lock.catalogueFingerprint]);
 
     const currentDeployment = {
+      ...previousDeployment,
       sourceFingerprints: [target, reviewedSourceFingerprint],
       catalogueFingerprint: target,
     };
+    const runAgainstManifest = async (value: string | object) => {
+      await writeFile(currentManifestPath, typeof value === 'string' ? value : JSON.stringify(value), 'utf8');
+      return spawnSync(process.execPath, [scriptPath], {
+        cwd: root,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          SNOREDEX_DEPLOYMENT_MODE: 'adopt',
+          SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+          SNOREDEX_BOOTSTRAP_AUTHORIZED: 'false',
+        },
+      });
+    };
+    const emptyManifest = await runAgainstManifest('');
+    assert.notEqual(emptyManifest.status, 0);
+    assert.match(
+      `${emptyManifest.stdout}${emptyManifest.stderr}`,
+      /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
+    );
+    const wrongPage = await runAgainstManifest({ ...currentDeployment, pageUrl: 'https://example.invalid/' });
+    assert.notEqual(wrongPage.status, 0);
+    assert.match(`${wrongPage.stdout}${wrongPage.stderr}`, /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u);
+    const wrongIdentity = await runAgainstManifest({ ...currentDeployment, appRevision: 'invalid' });
+    assert.notEqual(wrongIdentity.status, 0);
+    assert.match(
+      `${wrongIdentity.stdout}${wrongIdentity.stderr}`,
+      /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
+    );
+    const inconsistentHistory = await runAgainstManifest({
+      ...currentDeployment,
+      sourceFingerprints: [target, target],
+    });
+    assert.notEqual(inconsistentHistory.status, 0);
+    assert.match(
+      `${inconsistentHistory.stdout}${inconsistentHistory.stderr}`,
+      /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
+    );
     await writeFile(currentManifestPath, JSON.stringify(currentDeployment), 'utf8');
     const rollback = spawnSync(process.execPath, [scriptPath], {
       cwd: root,
@@ -399,7 +455,7 @@ test('production adoption validates the reviewed target migration without requir
 
     await writeFile(
       currentManifestPath,
-      JSON.stringify({ sourceFingerprints: [], catalogueFingerprint: reviewedSourceFingerprint }),
+      JSON.stringify({ ...currentDeployment, sourceFingerprints: [], catalogueFingerprint: reviewedSourceFingerprint }),
       'utf8',
     );
     const fromEmptyRecoverySet = spawnSync(process.execPath, [scriptPath], {
@@ -416,6 +472,7 @@ test('production adoption validates the reviewed target migration without requir
     await writeFile(
       currentManifestPath,
       JSON.stringify({
+        ...currentDeployment,
         sourceFingerprints: [target, `sha256:${'b'.repeat(64)}`],
         catalogueFingerprint: target,
       }),

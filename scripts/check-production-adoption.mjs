@@ -14,9 +14,11 @@ async function readJson(path) {
 const lock = await readJson('catalogue.lock.json');
 const migrations = await readJson('vendor/snoredex-data/collector_migrations.json');
 const targetFingerprint = lock?.catalogueFingerprint;
+const pageUrl = 'https://m4s-ai.github.io/snoredex-checklist/';
 const deploymentMode = process.env.SNOREDEX_DEPLOYMENT_MODE ?? 'adopt';
 const currentDeploymentPath = process.env.SNOREDEX_CURRENT_DEPLOYMENT_PATH;
 const legacyCurrentFingerprint = process.env.SNOREDEX_CURRENT_CATALOGUE_FINGERPRINT;
+const bootstrapAuthorization = process.env.SNOREDEX_BOOTSTRAP_AUTHORIZED;
 const hasCurrentDeployment = currentDeploymentPath !== undefined && currentDeploymentPath !== '';
 let currentDeployment;
 if (hasCurrentDeployment) {
@@ -28,21 +30,59 @@ if (hasCurrentDeployment) {
 }
 const currentFingerprint = currentDeployment?.catalogueFingerprint ?? legacyCurrentFingerprint;
 const hasCurrentFingerprint = currentFingerprint !== undefined && currentFingerprint !== '';
+const isCommit = (value) => typeof value === 'string' && /^[0-9a-f]{40}$/u.test(value);
+const isDigest = (value) => typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value);
+const isByteLength = (value) => Number.isSafeInteger(value) && value > 0;
+const isPublishedAt = (value) =>
+  typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value);
+const isSourceHistory = (value) =>
+  value === undefined ||
+  (Array.isArray(value) && value.every((entry) => isDigest(entry)) && new Set(value).size === value.length);
+const isPublishedDeployment = (value) =>
+  value?.schema === 'snoredex-checklist-deployment' &&
+  value?.schemaVersion === '1.0.0' &&
+  value?.pageUrl === pageUrl &&
+  isPublishedAt(value?.publishedAt) &&
+  isCommit(value?.appRevision) &&
+  isCommit(value?.producerRevision) &&
+  value?.contractVersion === '1.0.0' &&
+  isDigest(value?.catalogueFingerprint) &&
+  isDigest(value?.catalogueByteSha256) &&
+  isByteLength(value?.catalogueByteLength) &&
+  isDigest(value?.migrationByteSha256) &&
+  isByteLength(value?.migrationByteLength) &&
+  isSourceHistory(value?.sourceFingerprints);
+if (
+  bootstrapAuthorization !== undefined &&
+  bootstrapAuthorization !== '' &&
+  !['true', 'false'].includes(bootstrapAuthorization)
+) {
+  throw new Error('PRODUCTION_ADOPTION_BLOCKED_INVALID_BOOTSTRAP_AUTHORIZATION');
+}
 if (deploymentMode !== 'adopt' && deploymentMode !== 'rollback') {
   throw new Error('PRODUCTION_ADOPTION_BLOCKED_INVALID_DEPLOYMENT_MODE');
 }
 if (hasCurrentFingerprint && !/^sha256:[0-9a-f]{64}$/u.test(currentFingerprint)) {
   throw new Error('PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_FINGERPRINT');
 }
-if (hasCurrentDeployment && !hasCurrentFingerprint) {
+if (hasCurrentDeployment && (!hasCurrentFingerprint || !isPublishedDeployment(currentDeployment))) {
   throw new Error('PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT');
 }
 if (deploymentMode === 'rollback') {
   if (!hasCurrentDeployment) {
     throw new Error('PRODUCTION_ADOPTION_BLOCKED_ROLLBACK_REQUIRES_PUBLISHED_DEPLOYMENT');
   }
+  if (bootstrapAuthorization === 'true') {
+    throw new Error('PRODUCTION_ADOPTION_BLOCKED_BOOTSTRAP_REQUIRES_MISSING_DEPLOYMENT');
+  }
   console.log('production rollback target accepted');
   process.exit(0);
+}
+if (bootstrapAuthorization === 'true' && (hasCurrentDeployment || hasCurrentFingerprint)) {
+  throw new Error('PRODUCTION_ADOPTION_BLOCKED_BOOTSTRAP_REQUIRES_MISSING_DEPLOYMENT');
+}
+if (!hasCurrentDeployment && !hasCurrentFingerprint && bootstrapAuthorization !== 'true') {
+  throw new Error('PRODUCTION_ADOPTION_BLOCKED_BOOTSTRAP_REQUIRES_AUTHORIZATION');
 }
 
 const sourceFingerprints = hasCurrentDeployment

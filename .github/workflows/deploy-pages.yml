@@ -21,6 +21,11 @@ on:
         options:
           - adopt
           - rollback
+      bootstrap:
+        description: Explicitly authorize first publication when no production manifest exists
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -127,12 +132,23 @@ jobs:
         env:
           DEPLOYMENT_MODE_INPUT: ${{ inputs.deployment_mode }}
           CONSUMER_REVISION_INPUT: ${{ inputs.consumer_revision }}
+          BOOTSTRAP_INPUT: ${{ inputs.bootstrap }}
+          EVENT_NAME: ${{ github.event_name }}
           WORKFLOW_REVISION: ${{ github.sha }}
         run: |
           set -euo pipefail
           deployment_mode="${DEPLOYMENT_MODE_INPUT:-adopt}"
+          bootstrap_authorized="${BOOTSTRAP_INPUT:-false}"
           if [[ "$deployment_mode" == "rollback" && -z "$CONSUMER_REVISION_INPUT" ]]; then
             echo "consumer_revision is required for rollback"
+            exit 1
+          fi
+          if [[ "$bootstrap_authorized" == "true" && "$EVENT_NAME" != "workflow_dispatch" ]]; then
+            echo "bootstrap authorization requires workflow_dispatch"
+            exit 1
+          fi
+          if [[ "$bootstrap_authorized" == "true" && "$deployment_mode" != "adopt" ]]; then
+            echo "bootstrap authorization is only valid for adopt"
             exit 1
           fi
           consumer_revision="${CONSUMER_REVISION_INPUT:-$WORKFLOW_REVISION}"
@@ -142,6 +158,7 @@ jobs:
           fi
           echo "deployment_mode=$deployment_mode" >> "$GITHUB_OUTPUT"
           echo "consumer_revision=$consumer_revision" >> "$GITHUB_OUTPUT"
+          echo "bootstrap_authorized=$bootstrap_authorized" >> "$GITHUB_OUTPUT"
           echo "SNOREDEX_APP_REVISION=$consumer_revision" >> "$GITHUB_ENV"
       - name: Validate consumer revision
         env:
@@ -202,12 +219,14 @@ jobs:
             echo "catalogue_fingerprint=" >> "$GITHUB_OUTPUT"
             echo "app_revision=" >> "$GITHUB_OUTPUT"
             echo "manifest_path=" >> "$GITHUB_OUTPUT"
+            echo "state=missing" >> "$GITHUB_OUTPUT"
           elif [[ "$status" == "200" ]]; then
             fingerprint="$(node --input-type=module -e 'import fs from "node:fs"; const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).catalogueFingerprint; if (!/^sha256:[0-9a-f]{64}$/.test(value ?? "")) process.exit(1); process.stdout.write(value);' "$manifest")"
             app_revision="$(node --input-type=module -e 'import fs from "node:fs"; const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).appRevision; if (!/^[0-9a-f]{40}$/.test(value ?? "")) process.exit(1); process.stdout.write(value);' "$manifest")"
             echo "catalogue_fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
             echo "app_revision=$app_revision" >> "$GITHUB_OUTPUT"
             echo "manifest_path=$manifest" >> "$GITHUB_OUTPUT"
+            echo "state=present" >> "$GITHUB_OUTPUT"
           else
             echo "current production deployment manifest unavailable (HTTP $status)"
             exit 1
@@ -274,6 +293,7 @@ jobs:
         env:
           SNOREDEX_DEPLOYMENT_MODE: ${{ steps.deployment-inputs.outputs.deployment_mode }}
           SNOREDEX_CURRENT_DEPLOYMENT_PATH: ${{ steps.current-production.outputs.manifest_path }}
+          SNOREDEX_BOOTSTRAP_AUTHORIZED: ${{ steps.deployment-inputs.outputs.bootstrap_authorized }}
         run: node scripts/check-production-adoption.mjs
       - name: Run browser and accessibility gates
         run: |
