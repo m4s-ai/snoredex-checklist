@@ -291,7 +291,7 @@ jobs:
           fi
           node scripts/retain-runtime-assets.mjs
       - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
       - name: Add deployment provenance
         env:
           SNOREDEX_PAGE_URL: https://m4s-ai.github.io/snoredex-checklist/
