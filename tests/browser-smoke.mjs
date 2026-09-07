@@ -802,6 +802,22 @@ try {
         await page.goto(`${baseUrl}/collection/?localization=${encodeURIComponent(synthetic.localizationId)}`, {
           waitUntil: 'networkidle',
         });
+        const firstIdentityRow = page.locator('[data-view] [data-item-id]').first();
+        assert.match(
+          await firstIdentityRow.locator('.item-identity').innerText(),
+          /Size:\s*standard/u,
+          `${name}: primary identity exposes producer card size`,
+        );
+        assert.ok(
+          (await page.locator('[data-view] .item-cue').allTextContents()).includes('Verified printing'),
+          `${name}: primary tags expose producer item kind`,
+        );
+        await firstIdentityRow.locator('.item-details > summary').click();
+        assert.match(
+          await firstIdentityRow.locator('.item-detail-list').innerText(),
+          /Edition\n(?:Not recorded|[^\n]+)/u,
+          `${name}: details expose the producer edition field`,
+        );
         assert.equal(
           await page.locator('[data-view] [data-item-id]').count(),
           Math.min(24, synthetic.localizationItemCount),

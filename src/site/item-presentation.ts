@@ -31,6 +31,91 @@ export function itemKindLabel(item: SnapshotItem): string {
   return 'Catalogue item';
 }
 
+function recordValue(item: SnapshotItem, key: string): unknown {
+  const value = item[key];
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value : undefined;
+}
+
+export function finishCueLabel(item: SnapshotItem): string | undefined {
+  const finish = presentText(item.finish);
+  const family = presentText(item.finishFamily);
+  if (finish && family && finish !== family) return `Finish: ${finish} · Finish family: ${family}`;
+  if (finish) return `Finish: ${finish}`;
+  if (family) return `Finish family: ${family}`;
+  return undefined;
+}
+
+export function rarityLabel(item: SnapshotItem): string | undefined {
+  const rarity = recordValue(item, 'rarity');
+  return rarity === undefined ? undefined : presentText((rarity as Record<string, unknown>).display);
+}
+
+export function rarityEvidenceLabel(item: SnapshotItem): string | undefined {
+  const rarity = recordValue(item, 'rarity');
+  return rarity === undefined ? undefined : presentText((rarity as Record<string, unknown>).evidenceStatus);
+}
+
+type MarkingCuePart = readonly [string | null, string | null, string | null];
+
+function markingCueParts(item: SnapshotItem): MarkingCuePart[] {
+  if (!Array.isArray(item.markings)) return [];
+  return item.markings
+    .map((marking): MarkingCuePart | undefined => {
+      if (typeof marking !== 'object' || marking === null || Array.isArray(marking)) return undefined;
+      const row = marking as Record<string, unknown>;
+      const kind = presentText(row.kind) ?? null;
+      const role = presentText(row.role) ?? null;
+      const value = presentText(row.text) ?? null;
+      return kind === null && role === null && value === null ? undefined : [kind, role, value];
+    })
+    .filter((value): value is MarkingCuePart => value !== undefined);
+}
+
+function markingsCueLabel(item: SnapshotItem): string | undefined {
+  const values = markingCueParts(item)
+    .map(([kind, role, value]) => {
+      const kindAndRole = [kind, role].filter((part): part is string => part !== null).join('/');
+      return (
+        [kindAndRole, value].filter((part): part is string => part !== null && part !== '').join(': ') || undefined
+      );
+    })
+    .filter((value): value is string => Boolean(value));
+  return values.length > 0 ? `Markings: ${values.join(', ')}` : undefined;
+}
+
+function identityPart(label: string, value: unknown): string | undefined {
+  const normalized = presentText(value);
+  return normalized ? `${label}: ${normalized}` : undefined;
+}
+
+/** Compact producer-backed cues that belong in the row's accessible identity. */
+export function itemIdentityCueLabel(item: SnapshotItem): string {
+  const parts = [
+    identityPart('Edition', item.edition),
+    finishCueLabel(item),
+    identityPart('Foil', item.foilPattern),
+    markingsCueLabel(item),
+    identityPart('Size', item.cardSize),
+    identityPart('Rarity', rarityLabel(item)),
+    itemKindLabel(item),
+  ].filter((value): value is string => value !== undefined);
+  return parts.join(' · ');
+}
+
+/** Stable structured identity for collision handling; keep it separate from display formatting. */
+export function itemIdentityCueKey(item: SnapshotItem): string {
+  return JSON.stringify({
+    edition: presentText(item.edition) ?? null,
+    finish: presentText(item.finish) ?? null,
+    finishFamily: presentText(item.finishFamily) ?? null,
+    foilPattern: presentText(item.foilPattern) ?? null,
+    markings: markingCueParts(item),
+    cardSize: presentText(item.cardSize) ?? null,
+    rarity: rarityLabel(item) ?? null,
+    itemKind: presentText(item.itemKind) ?? null,
+  });
+}
+
 export function itemCueLabel(item: SnapshotItem): string {
   return item.progressClass === 'research' ? 'Research · read-only' : 'Trackable';
 }
