@@ -848,3 +848,17 @@ test('rejects slash-separated inline event-handler attributes', async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('ignores slash sequences in integrity hashes', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-integrity-hash-test-'));
+  try {
+    await writeValidArtifact(directory, {
+      indexScript: '<script src="theme.js" integrity="sha256-qjUqluBms9R+o/opdG5PNMtd/6Ia/oNUqgIOxpTPFrM="></script>',
+    });
+    const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+    assert.match(`${result.stdout}${result.stderr}`, /artifact ok:/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
