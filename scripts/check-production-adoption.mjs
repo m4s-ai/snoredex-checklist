@@ -78,8 +78,7 @@ const isPublishedProvenance = (value) => {
     isByteLength(catalogue?.catalogueByteLength) &&
     isDigest(catalogue?.migrationByteSha256) &&
     isByteLength(catalogue?.migrationByteLength) &&
-    Array.isArray(value?.sourceFingerprints) &&
-    isSourceHistory(value.sourceFingerprints) &&
+    isSourceHistory(value?.sourceFingerprints) &&
     lock?.producerRevision === catalogue.sourceCommit &&
     lock?.sourceRepository === catalogue.sourceRepository &&
     lock?.contractVersion === catalogue.contractVersion &&
@@ -92,6 +91,11 @@ const isPublishedProvenance = (value) => {
 };
 const matchesPublishedProvenance = (deployment, provenance) => {
   const catalogue = provenance?.catalogue;
+  // Releases created before provenance carried source history still have the
+  // canonical history in deployment.json. During the first upgrade, derive it
+  // from that validated manifest and require the two published records to agree.
+  const publishedSourceFingerprints =
+    provenance?.sourceFingerprints === undefined ? deployment?.sourceFingerprints : provenance.sourceFingerprints;
   return (
     deployment?.appRevision === provenance?.appRevision &&
     deployment?.producerRevision === catalogue?.sourceCommit &&
@@ -101,7 +105,9 @@ const matchesPublishedProvenance = (deployment, provenance) => {
     deployment?.catalogueByteLength === catalogue?.catalogueByteLength &&
     deployment?.migrationByteSha256 === catalogue?.migrationByteSha256 &&
     deployment?.migrationByteLength === catalogue?.migrationByteLength &&
-    JSON.stringify(deployment?.sourceFingerprints ?? []) === JSON.stringify(provenance?.sourceFingerprints)
+    Array.isArray(publishedSourceFingerprints) &&
+    isSourceHistory(publishedSourceFingerprints) &&
+    JSON.stringify(deployment?.sourceFingerprints ?? []) === JSON.stringify(publishedSourceFingerprints)
   );
 };
 if (

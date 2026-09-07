@@ -515,6 +515,22 @@ test('production adoption validates the reviewed target migration without requir
       `${mismatchedHistory.stdout}${mismatchedHistory.stderr}`,
       /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
     );
+    await writeFile(currentManifestPath, JSON.stringify(currentDeployment));
+    await writeFile(
+      provenancePath,
+      JSON.stringify({ ...provenanceFor(currentDeployment), sourceFingerprints: undefined }),
+    );
+    const legacyProvenance = spawnSync(process.execPath, [scriptPath], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_DEPLOYMENT_MODE: 'adopt',
+        SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+        SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+      },
+    });
+    assert.equal(legacyProvenance.status, 0, `${legacyProvenance.stdout}${legacyProvenance.stderr}`);
     await writeFile(
       currentManifestPath,
       JSON.stringify({ ...currentDeployment, catalogueFingerprint: reviewedSourceFingerprint }),
