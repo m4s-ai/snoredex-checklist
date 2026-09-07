@@ -119,6 +119,10 @@ function hasMigrationPath(
   return false;
 }
 
+function isMissingRecoveryRecords(raw: string | null): boolean {
+  return raw === null || raw.trim() === '' || raw.trim() === 'null';
+}
+
 function writeAuthority(
   storage: StorageLike,
   expected: AuthoritySnapshot['raw'],
@@ -188,6 +192,46 @@ function writeAuthority(
   return { ok: true, changed: true };
 }
 
+function seedLegacyRecoveryRecords(
+  storage: StorageLike,
+  current: AuthoritySnapshot,
+  reconciliation: ReconciliationContext,
+):
+  | { readonly ok: true; readonly value: { readonly authority: AuthoritySnapshot; readonly changed: boolean } }
+  | { readonly ok: false; readonly error: string } {
+  const active = current.active;
+  const recovery = current.recovery;
+  if (
+    !isMissingRecoveryRecords(current.raw.recoveryRecords) ||
+    active === undefined ||
+    recovery === undefined ||
+    recovery.catalogueFingerprint === active.catalogueFingerprint ||
+    !hasMigrationPath(reconciliation, recovery.catalogueFingerprint, active.catalogueFingerprint)
+  ) {
+    return { ok: true, value: { authority: current, changed: false } };
+  }
+  const historicalContext: ReconciliationContext = {
+    migrations: reconciliation.migrations,
+    ...(reconciliation.knownSourceItemIdsByFingerprint === undefined
+      ? {}
+      : { knownSourceItemIdsByFingerprint: reconciliation.knownSourceItemIdsByFingerprint }),
+  };
+  const migrated = reconcilePrivateState(recovery, active.catalogueFingerprint, historicalContext);
+  if (!migrated.ok) return { ok: false, error: migrated.error };
+  const additions = recoveryRecordsFromResult(recovery.catalogueFingerprint, migrated.value);
+  if (!additions.ok) return { ok: false, error: 'STATE_RECONCILIATION_BLOCKED' };
+  const merged = mergeRecoveryRecords(current.recoveryRecords, additions.value);
+  if (!merged.ok) return { ok: false, error: 'STATE_RECONCILIATION_BLOCKED' };
+  if (merged.value.length === current.recoveryRecords.length) {
+    return { ok: true, value: { authority: current, changed: false } };
+  }
+  const written = writeAuthority(storage, current.raw, active, recovery, merged.value);
+  if (!written.ok) return { ok: false, error: written.error ?? 'STORAGE_COMMIT_UNCERTAIN' };
+  const after = readAuthority(storage);
+  if (!after.ok) return after;
+  return { ok: true, value: { authority: after.value, changed: true } };
+}
+
 async function exclusive<T>(storage: StorageLike, callback: () => T): Promise<T> {
   if (storage.withLock === undefined) return callback();
   return storage.withLock(async () => callback());
@@ -204,13 +248,19 @@ export async function reconcileBrowserState(
   return exclusive(storage.value, () => {
     const current = readAuthority(storage.value);
     if (!current.ok) return { ok: false, changed: false, error: current.error };
-    const active = current.value.active;
-    if (active === undefined) return { ok: true, changed: false };
+    const seeded = seedLegacyRecoveryRecords(storage.value, current.value, reconciliation);
+    if (!seeded.ok) return { ok: false, changed: false, error: seeded.error };
+    const authority = seeded.value.authority;
+    const seededChanged = seeded.value.changed;
+    const active = authority.active;
+    if (active === undefined) return { ok: true, changed: seededChanged };
     if (active.catalogueFingerprint === targetFingerprint) {
       const checked = validatePrivateState(active, knownItemIds);
-      return checked.ok ? { ok: true, changed: false } : { ok: false, changed: false, error: 'LOCAL_STATE_UNREADABLE' };
+      return checked.ok
+        ? { ok: true, changed: seededChanged }
+        : { ok: false, changed: false, error: 'LOCAL_STATE_UNREADABLE' };
     }
-    const matchingRecovery = current.value.recovery;
+    const matchingRecovery = authority.recovery;
     if (matchingRecovery?.catalogueFingerprint === targetFingerprint) {
       const checked = validatePrivateState(matchingRecovery, knownItemIds);
       if (!checked.ok) return { ok: false, changed: false, error: 'LOCAL_STATE_UNREADABLE' };
@@ -230,15 +280,15 @@ export async function reconcileBrowserState(
         }
         const additions = recoveryRecordsFromResult(active.catalogueFingerprint, reconciled.value);
         if (!additions.ok) return { ok: false, changed: false, error: 'STATE_RECONCILIATION_BLOCKED' };
-        const mergedRecords = updateRecoveryRecords(current.value.recoveryRecords, additions.value);
+        const mergedRecords = updateRecoveryRecords(authority.recoveryRecords, additions.value);
         if (!mergedRecords.ok) return { ok: false, changed: false, error: 'STATE_RECONCILIATION_BLOCKED' };
-        return writeAuthority(storage.value, current.value.raw, matchingRecovery, active, mergedRecords.value);
+        return writeAuthority(storage.value, authority.raw, matchingRecovery, active, mergedRecords.value);
       }
       // A rollback deploy targets the snapshot in the recovery slot. Swap it
       // into active while retaining the newer active state for a future roll-forward.
       // When a migration route exists, the active state is reconciled first so
       // edits made during rollback cannot be silently discarded.
-      return writeAuthority(storage.value, current.value.raw, matchingRecovery, active, current.value.recoveryRecords);
+      return writeAuthority(storage.value, authority.raw, matchingRecovery, active, authority.recoveryRecords);
     }
     const result = reconcilePrivateState(active, targetFingerprint, {
       ...reconciliation,
@@ -248,16 +298,16 @@ export async function reconcileBrowserState(
     const recovery = preserveRecovery(active, result.value);
     const additions = recoveryRecordsFromResult(active.catalogueFingerprint, result.value);
     if (!additions.ok) return { ok: false, changed: false, error: 'STATE_RECONCILIATION_BLOCKED' };
-    const mergedRecords = mergeRecoveryRecords(current.value.recoveryRecords, additions.value);
+    const mergedRecords = mergeRecoveryRecords(authority.recoveryRecords, additions.value);
     if (!mergedRecords.ok) return { ok: false, changed: false, error: 'STATE_RECONCILIATION_BLOCKED' };
     // Each migration rotates the sidecar to the immediately previous active
     // snapshot.  Keeping an older recovery copy would block every later
     // catalogue adoption because there is only one rollback slot.
     return writeAuthority(
       storage.value,
-      current.value.raw,
+      authority.raw,
       result.value.state,
-      recovery ?? current.value.recovery,
+      recovery ?? authority.recovery,
       mergedRecords.value,
     );
   });

@@ -876,6 +876,60 @@ test('browser migration rotates an existing recovery snapshot', async () => {
   }
 });
 
+test('seeds legacy recovery records before rotating a later snapshot', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  storage.setItem(
+    PRIVATE_STATE_STORAGE_KEY,
+    JSON.stringify(
+      state(middleFingerprint, [{ itemId: targetB, status: 'have', quantityOwned: 1, quantityOrdered: 0 }]),
+    ),
+  );
+  storage.setItem(
+    PRIVATE_STATE_RECOVERY_STORAGE_KEY,
+    JSON.stringify(state(oldFingerprint, [{ itemId: oldA, status: 'have', quantityOwned: 4, quantityOrdered: 0 }])),
+  );
+  const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { locks: { request: async (_name: string, callback: () => Promise<unknown>) => callback() } },
+  });
+  try {
+    const first = await reconcileBrowserState(middleFingerprint, new Set([targetB]), {
+      knownSourceItemIdsByFingerprint: new Map([[oldFingerprint, new Set([oldA])]]),
+      migrations: [
+        migration(oldFingerprint, middleFingerprint, [transition(oldA, [], 'retired-1:0', 'none', 'retire-to-orphan')]),
+      ],
+    });
+    assert.deepEqual(first, { ok: true, changed: true });
+    const firstRecords = readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY));
+    assert.equal(firstRecords.ok, true);
+    if (!firstRecords.ok) return;
+    assert.equal(firstRecords.value[0]?.item.itemId, oldA);
+
+    const second = await reconcileBrowserState(targetFingerprint, new Set([targetA]), {
+      knownSourceItemIdsByFingerprint: new Map([[middleFingerprint, new Set([targetB])]]),
+      migrations: [
+        migration(middleFingerprint, targetFingerprint, [
+          transition(targetB, [targetA], 'rekey-1:1', 'preserve', 'one-to-one-preserve'),
+        ]),
+      ],
+    });
+    assert.deepEqual(second, { ok: true, changed: true });
+    const secondRecords = readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY));
+    assert.equal(secondRecords.ok, true);
+    if (!secondRecords.ok) return;
+    assert.equal(secondRecords.value[0]?.item.itemId, oldA);
+    assert.equal(secondRecords.value[0]?.item.quantityOwned, 4);
+  } finally {
+    if (localStorageDescriptor === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
+    else Object.defineProperty(globalThis, 'localStorage', localStorageDescriptor);
+    if (navigatorDescriptor === undefined) delete (globalThis as { navigator?: unknown }).navigator;
+    else Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+  }
+});
+
 test('browser migration keeps retired records across an A to B to C chain', async () => {
   const storage = new FakeBrowserLocalStorage();
   storage.setItem(
@@ -1104,7 +1158,43 @@ test('repairs an unreadable recovery ledger from a validated dedicated backup', 
   assert.deepEqual(committed.value.active?.items, active.items);
   assert.deepEqual(committed.value.recoveryRecords, records);
   assert.equal(readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY)).ok, true);
-  assert.equal(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY), '{malformed-ledger');
+  const quarantine = JSON.parse(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY) ?? 'null') as {
+    entries?: unknown;
+  };
+  assert.deepEqual(quarantine.entries, ['{malformed-ledger']);
+});
+
+test('keeps every unreadable recovery ledger quarantine across repeated repairs', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  const active = state(targetFingerprint, [{ itemId: targetA, status: 'have', quantityOwned: 1, quantityOrdered: 0 }]);
+  storage.setItem(PRIVATE_STATE_STORAGE_KEY, JSON.stringify(active));
+  storage.setItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY, '{second-malformed-ledger');
+  storage.setItem(
+    PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY,
+    JSON.stringify({
+      schema: 'snoredex-private-state-recovery-records-quarantine',
+      schemaVersion: 1,
+      entries: ['{first-malformed-ledger'],
+    }),
+  );
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision: 'd'.repeat(40) });
+  const record = {
+    sourceFingerprint: oldFingerprint,
+    item: { itemId: oldB, status: 'ordered' as const, quantityOwned: 0, quantityOrdered: 1 },
+    disposition: 'conflict' as const,
+  };
+  const exported = createRecoveryRecordsBackup([record]);
+  assert.equal(exported.ok, true);
+  if (!exported.ok) return;
+  const plan = lifecycle.prepareImport(exported.value.bytes, targetFingerprint, new Set([targetA]));
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  const committed = await lifecycle.commitImport(plan.value, true);
+  assert.equal(committed.ok, true);
+  const quarantine = JSON.parse(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY) ?? 'null') as {
+    entries?: unknown;
+  };
+  assert.deepEqual(quarantine.entries, ['{first-malformed-ledger', '{second-malformed-ledger']);
 });
 
 test('attempts every changed sidecar restoration after active promotion fails', async () => {

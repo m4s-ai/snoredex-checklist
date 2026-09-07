@@ -38,6 +38,8 @@ export const MAX_PORTABLE_BYTES = 16 * 1024 * 1024;
 export const PRIVATE_BACKUP_SUFFIX = ['.snoredex-', 'private.json'].join('');
 export const SUGGESTED_BACKUP_FILENAME = `snoredex-checklist-backup${PRIVATE_BACKUP_SUFFIX}`;
 export const SUGGESTED_RECOVERY_RECORDS_FILENAME = `snoredex-checklist-recovery-records${PRIVATE_BACKUP_SUFFIX}`;
+const RECOVERY_RECORDS_QUARANTINE_SCHEMA = 'snoredex-private-state-recovery-records-quarantine' as const;
+const RECOVERY_RECORDS_QUARANTINE_VERSION = 1 as const;
 
 export const BACKUP_ERROR_CODES = [
   'IMPORT_FILE_TOO_LARGE',
@@ -452,21 +454,52 @@ function preservedRecovery(source: PrivateState, reconciliation: ReconciliationS
   return items.length === 0 ? undefined : { ...source, items };
 }
 
+function readRecoveryRecordsQuarantine(raw: string | null): BackupResult<readonly string[]> {
+  if (raw === null) return ok([]);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return ok([raw]);
+  }
+  if (
+    !isObjectRecord(parsed) ||
+    parsed.schema !== RECOVERY_RECORDS_QUARANTINE_SCHEMA ||
+    parsed.schemaVersion !== RECOVERY_RECORDS_QUARANTINE_VERSION
+  ) {
+    return ok([raw]);
+  }
+  if (!Array.isArray(parsed.entries) || parsed.entries.some((entry) => typeof entry !== 'string')) {
+    return fail('LOCAL_STATE_UNREADABLE');
+  }
+  return ok(parsed.entries);
+}
+
+function serializeRecoveryRecordsQuarantine(entries: readonly string[]): string {
+  return `${JSON.stringify(
+    { schema: RECOVERY_RECORDS_QUARANTINE_SCHEMA, schemaVersion: RECOVERY_RECORDS_QUARANTINE_VERSION, entries },
+    null,
+    2,
+  )}\n`;
+}
+
 function preserveUnreadableRecoveryRecords(storage: StorageLike, raw: string | null): BackupResult<void> {
   if (raw === null) return ok(undefined);
   const existing = readRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY);
   if (!existing.ok) return existing;
-  if (existing.value === raw) return ok(undefined);
-  if (existing.value !== null) return fail('STORAGE_WRITE_FAILED');
+  const entries = readRecoveryRecordsQuarantine(existing.value);
+  if (!entries.ok) return entries;
+  if (entries.value.includes(raw)) return ok(undefined);
+  const next = serializeRecoveryRecordsQuarantine([...entries.value, raw]);
   try {
-    storage.setItem(PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY, raw);
+    storage.setItem(PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY, next);
   } catch (cause) {
     const verified = readRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY);
-    if (verified.ok && verified.value === raw) return ok(undefined);
+    if (verified.ok && verified.value === next) return ok(undefined);
     return fail(isQuotaError(cause) ? 'STORAGE_QUOTA_EXCEEDED' : 'STORAGE_WRITE_FAILED');
   }
   const verified = readRaw(storage, PRIVATE_STATE_RECOVERY_RECORDS_QUARANTINE_STORAGE_KEY);
-  return verified.ok && verified.value === raw ? ok(undefined) : fail('STORAGE_COMMIT_UNCERTAIN');
+  return verified.ok && verified.value === next ? ok(undefined) : fail('STORAGE_COMMIT_UNCERTAIN');
 }
 
 function writeRecoveryRecordsRepair(
