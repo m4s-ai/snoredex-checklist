@@ -1384,6 +1384,9 @@ function renderRecoveryTools(
             }
             const replacingUnreadableActive =
               plan.preview.mode !== 'recovery-records' && current.value.activeError !== undefined;
+            const replacingUnreadableRecovery =
+              plan.preview.mode !== 'recovery-records' && current.value.recoveryError !== undefined;
+            const replacingBothUnreadable = replacingUnreadableActive && replacingUnreadableRecovery;
             const activeCollectionAvailable =
               current.value.active !== undefined && current.value.active.items.length > 0;
             const replacingWithoutReadableActive =
@@ -1401,13 +1404,15 @@ function renderRecoveryTools(
                   : 'Import collection?',
               plan.preview.mode === 'recovery-records'
                 ? 'The preview is valid. Confirm to merge the durable recovery ledger.'
-                : replacingUnreadableActive
-                  ? 'The saved collection is unreadable. Its original bytes will be preserved in quarantine before this backup replaces it.'
-                  : replacingWithoutReadableRecovery
-                    ? 'No readable collection is available. The unreadable recovery bytes will be preserved in quarantine before this backup replaces it.'
-                    : replacingWithoutReadableActive
-                      ? 'No readable collection is available to retain. This backup will be applied without a readable recovery backup from the current state.'
-                      : 'The preview is valid. Confirm to create a recovery backup and atomically apply this collection.',
+                : replacingBothUnreadable
+                  ? 'The saved collection and recovery snapshot are unreadable. Their original bytes will be preserved in quarantine before this backup replaces both components.'
+                  : replacingUnreadableActive
+                    ? 'The saved collection is unreadable. Its original bytes will be preserved in quarantine before this backup replaces it.'
+                    : replacingWithoutReadableRecovery
+                      ? 'No readable collection is available. The unreadable recovery bytes will be preserved in quarantine before this backup replaces it.'
+                      : replacingWithoutReadableActive
+                        ? 'No readable collection is available to retain. This backup will be applied without a readable recovery backup from the current state.'
+                        : 'The preview is valid. Confirm to create a recovery backup and atomically apply this collection.',
             ).then((confirmed) => {
               if (!confirmed || plan === undefined) return;
               setStatus('Applying collection…');

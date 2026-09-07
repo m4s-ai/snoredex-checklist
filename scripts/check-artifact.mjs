@@ -2,7 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join, resolve, relative, posix } from 'node:path';
 import process from 'node:process';
-import { parseFragment } from 'parse5';
+import { parse } from 'parse5';
 import { SyntaxKind } from 'typescript/unstable/ast';
 import { API } from 'typescript/unstable/sync';
 import {
@@ -264,12 +264,13 @@ function* htmlTags(html) {
 }
 
 function hasInlineEventHandler(html) {
-  const nodes = [...parseFragment(html).childNodes];
+  const nodes = [parse(html)];
   while (nodes.length > 0) {
     const node = nodes.pop();
     if (node === undefined) continue;
     if ('attrs' in node && node.attrs.some(({ name }) => /^on[a-z]+$/iu.test(name))) return true;
     if ('childNodes' in node) nodes.push(...node.childNodes);
+    if ('content' in node) nodes.push(node.content);
   }
   return false;
 }

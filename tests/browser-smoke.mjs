@@ -917,9 +917,20 @@ try {
         assert.equal(await clearButton.isEnabled(), false, `${name}: unreadable recovery disables clear`);
         assert.equal(await restoreButton.isEnabled(), false, `${name}: unreadable recovery disables restore`);
         assert.equal(await importButton.isEnabled(), true, `${name}: unreadable recovery keeps import available`);
-        await page.evaluate(() => {
+        await page.evaluate(({ fingerprint, itemId }) => {
+          localStorage.setItem(
+            'snoredex-checklist.private-state',
+            JSON.stringify({
+              schema: 'snoredex-collection-state',
+              schemaVersion: '1.0.0',
+              datasetId: 'snoredex-data/snorlax-current-known',
+              catalogueFingerprint: fingerprint,
+              items: [{ itemId, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],
+            }),
+          );
           localStorage.removeItem('snoredex-checklist.private-state.recovery');
-        });
+          localStorage.removeItem('snoredex-checklist.private-state.recovery-records');
+        }, synthetic);
         await openRecoveryTools();
         const downloadPromise = page.waitForEvent('download');
         await exportButton.click();
@@ -930,6 +941,17 @@ try {
         for await (const chunk of stream) chunks.push(chunk);
         const backup = JSON.parse(Buffer.concat(chunks).toString('utf8'));
         assert.equal(backup.catalogueFingerprint, synthetic.fingerprint, `${name}: exported fingerprint`);
+        await page.evaluate(() => {
+          localStorage.setItem('snoredex-checklist.private-state', '{malformed');
+          localStorage.setItem('snoredex-checklist.private-state.recovery', '{malformed');
+          localStorage.removeItem('snoredex-checklist.private-state.recovery-records');
+        });
+        await openRecoveryTools();
+        assert.match(
+          await recoveryStatus.innerText(),
+          /Saved collection and recovery snapshot are unreadable/u,
+          `${name}: combined unreadable status names both components`,
+        );
         const beforeImport = await page.evaluate(() => localStorage.getItem('snoredex-checklist.private-state'));
         await page.locator('input[type="file"]').setInputFiles({
           name: 'synthetic.snoredex-private.json',
@@ -943,6 +965,31 @@ try {
           beforeImport,
           `${name}: preview is mutation-free`,
         );
+        const applyImport = page.getByRole('button', { name: /^(?:Import|Replace) collection$/u });
+        await applyImport.click();
+        const combinedConfirmation = page.getByRole('dialog', { name: /^(?:Import|Replace) collection\?$/u });
+        await combinedConfirmation.waitFor();
+        assert.match(
+          await combinedConfirmation.innerText(),
+          /saved collection and recovery snapshot are unreadable.*replaces both components/u,
+          `${name}: combined unreadable confirmation names both components`,
+        );
+        await combinedConfirmation.getByRole('button', { name: 'Cancel' }).click();
+        await page.evaluate(({ fingerprint, itemId }) => {
+          localStorage.setItem(
+            'snoredex-checklist.private-state',
+            JSON.stringify({
+              schema: 'snoredex-collection-state',
+              schemaVersion: '1.0.0',
+              datasetId: 'snoredex-data/snorlax-current-known',
+              catalogueFingerprint: fingerprint,
+              items: [{ itemId, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],
+            }),
+          );
+          localStorage.removeItem('snoredex-checklist.private-state.recovery');
+          localStorage.removeItem('snoredex-checklist.private-state.recovery-records');
+        }, synthetic);
+        await openRecoveryTools();
         await page.locator('input[type="file"]').setInputFiles({
           name: 'invalid.json',
           mimeType: 'application/json',
