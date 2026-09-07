@@ -1069,6 +1069,7 @@ function renderImportPreview(
   plan: BackupPlan,
   onConfirm: () => void,
   onCancel: () => void,
+  warningOverride?: string,
 ): void {
   const preview = text('div', undefined, 'recovery-preview');
   const heading = text(
@@ -1118,9 +1119,10 @@ function renderImportPreview(
   }
   const warning = text(
     'p',
-    plan.preview.mode === 'recovery-records'
-      ? 'This is a non-mutating preview. Applying it merges the validated durable recovery ledger without activating retired item IDs.'
-      : 'This is a non-mutating preview. Applying it replaces the current collection after an explicit confirmation and creates a recovery backup first.',
+    warningOverride ??
+      (plan.preview.mode === 'recovery-records'
+        ? 'This is a non-mutating preview. Applying it merges the validated durable recovery ledger without activating retired item IDs.'
+        : 'This is a non-mutating preview. Applying it replaces the current collection after an explicit confirmation and creates a recovery backup first.'),
   );
   const actions = text('div', undefined, 'recovery-preview-actions');
   const apply = text(
@@ -1349,6 +1351,13 @@ function renderRecoveryTools(
           return;
         }
         plan = result.value;
+        const current = lifecycle.read();
+        const cannotCreateCurrentRecovery =
+          !current.ok || current.value.active === undefined || current.value.activeError !== undefined;
+        const previewWarning =
+          plan.preview.mode === 'recovery-records' || !cannotCreateCurrentRecovery
+            ? undefined
+            : 'This is a non-mutating preview. Applying it replaces the current collection; unreadable local bytes are preserved in quarantine, and no readable recovery backup from the current collection can be guaranteed.';
         renderImportPreview(
           previewContainer,
           plan,
@@ -1399,6 +1408,7 @@ function renderRecoveryTools(
             clearPreview();
             setStatus('Import preview cancelled.');
           },
+          previewWarning,
         );
         setStatus('Review the backup preview before applying it.');
       })
