@@ -1231,6 +1231,7 @@ function renderRecoveryTools(
       return;
     }
     const activeCount = current.value.active?.items.length ?? 0;
+    const activeCollectionAvailable = current.value.active !== undefined && activeCount > 0;
     const activeReadable = current.value.activeError === undefined;
     const recoveryReadable = current.value.recoveryError === undefined;
     const recordsReadable = current.value.recoveryRecordsError === undefined;
@@ -1254,7 +1255,7 @@ function renderRecoveryTools(
         'Saved collection and recovery snapshot are unreadable. Only their raw bytes can be retained in quarantine; choose a valid backup to recover them.',
       );
     } else if (!activeReadable) messages.push('Saved collection is unreadable. Choose a valid backup to recover it.');
-    if (!unsupported && !recoveryReadable && activeReadable && current.value.active !== undefined)
+    if (!unsupported && !recoveryReadable && activeReadable && activeCollectionAvailable)
       messages.push(
         'Recovery snapshot is unreadable. The collection backup remains available; choose a valid backup to replace it.',
       );
@@ -1357,8 +1358,12 @@ function renderRecoveryTools(
         }
         plan = result.value;
         const current = lifecycle.read();
+        const activeCollectionAvailable =
+          current.ok && current.value.active !== undefined && current.value.active.items.length > 0;
         const cannotCreateCurrentRecovery =
-          !current.ok || current.value.active === undefined || current.value.activeError !== undefined;
+          !current.ok ||
+          current.value.activeError !== undefined ||
+          (!activeCollectionAvailable && current.value.recovery === undefined);
         const previewWarning =
           plan.preview.mode === 'recovery-records' || !cannotCreateCurrentRecovery
             ? undefined
@@ -1379,10 +1384,15 @@ function renderRecoveryTools(
             }
             const replacingUnreadableActive =
               plan.preview.mode !== 'recovery-records' && current.value.activeError !== undefined;
+            const activeCollectionAvailable =
+              current.value.active !== undefined && current.value.active.items.length > 0;
             const replacingWithoutReadableActive =
               plan.preview.mode !== 'recovery-records' &&
-              current.value.active === undefined &&
-              current.value.recoveryError !== undefined;
+              current.value.activeError === undefined &&
+              !activeCollectionAvailable &&
+              current.value.recovery === undefined;
+            const replacingWithoutReadableRecovery =
+              replacingWithoutReadableActive && current.value.recoveryError !== undefined;
             void confirmationDialog(
               plan.preview.mode === 'replace'
                 ? 'Replace collection?'
@@ -1393,9 +1403,11 @@ function renderRecoveryTools(
                 ? 'The preview is valid. Confirm to merge the durable recovery ledger.'
                 : replacingUnreadableActive
                   ? 'The saved collection is unreadable. Its original bytes will be preserved in quarantine before this backup replaces it.'
-                  : replacingWithoutReadableActive
+                  : replacingWithoutReadableRecovery
                     ? 'No readable collection is available. The unreadable recovery bytes will be preserved in quarantine before this backup replaces it.'
-                    : 'The preview is valid. Confirm to create a recovery backup and atomically apply this collection.',
+                    : replacingWithoutReadableActive
+                      ? 'No readable collection is available to retain. This backup will be applied without a readable recovery backup from the current state.'
+                      : 'The preview is valid. Confirm to create a recovery backup and atomically apply this collection.',
             ).then((confirmed) => {
               if (!confirmed || plan === undefined) return;
               setStatus('Applying collection…');
