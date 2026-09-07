@@ -1057,6 +1057,49 @@ test('browser rollback merges edits to retired records into the durable ledger',
   }
 });
 
+test('updates stale ledger records on a direct roll-forward after rollback', async () => {
+  const storage = new FakeBrowserLocalStorage();
+  storage.setItem(
+    PRIVATE_STATE_STORAGE_KEY,
+    JSON.stringify(state(oldFingerprint, [{ itemId: oldA, status: 'have', quantityOwned: 4, quantityOrdered: 0 }])),
+  );
+  storage.setItem(PRIVATE_STATE_RECOVERY_STORAGE_KEY, JSON.stringify(state(middleFingerprint)));
+  const staleRecord = {
+    sourceFingerprint: oldFingerprint,
+    item: { itemId: oldA, status: 'have' as const, quantityOwned: 1, quantityOrdered: 0 },
+    disposition: 'orphan' as const,
+  };
+  storage.setItem(
+    PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY,
+    JSON.stringify({ schema: 'snoredex-private-state-recovery-records', schemaVersion: 1, records: [staleRecord] }),
+  );
+  const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { locks: { request: async (_name: string, callback: () => Promise<unknown>) => callback() } },
+  });
+  try {
+    const result = await reconcileBrowserState(targetFingerprint, new Set(), {
+      knownSourceItemIds: new Set([oldA]),
+      migrations: [
+        migration(oldFingerprint, targetFingerprint, [transition(oldA, [], 'retired-1:0', 'none', 'retire-to-orphan')]),
+      ],
+    });
+    assert.deepEqual(result, { ok: true, changed: true });
+    const records = readRecoveryRecords(storage.getItem(PRIVATE_STATE_RECOVERY_RECORDS_STORAGE_KEY));
+    assert.equal(records.ok, true);
+    if (!records.ok) return;
+    assert.equal(records.value[0]?.item.quantityOwned, 4);
+  } finally {
+    if (localStorageDescriptor === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
+    else Object.defineProperty(globalThis, 'localStorage', localStorageDescriptor);
+    if (navigatorDescriptor === undefined) delete (globalThis as { navigator?: unknown }).navigator;
+    else Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+  }
+});
+
 test('portable backups round-trip durable recovery records without activating old IDs', () => {
   const recoveryRecords: readonly DurableRecoveryRecord[] = [
     {
