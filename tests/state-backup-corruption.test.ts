@@ -128,6 +128,29 @@ test('retains readable active state as recovery when only recovery is malformed'
   );
 });
 
+test('quarantines malformed recovery bytes embedded in an authority envelope', async () => {
+  const storage = new FakeStorage();
+  const envelope = JSON.stringify({
+    schema: 'snoredex-private-state-authority',
+    schemaVersion: 1,
+    active: state('old active'),
+    recovery: '{invalid nested recovery}',
+  });
+  storage.values.set(PRIVATE_STATE_STORAGE_KEY, envelope);
+  const lifecycle = new PrivateStateLifecycle(storage, { appRevision, now: () => exportedAt });
+  const imported = importedState();
+  assert.equal(imported.ok, true);
+  if (!imported.ok) return;
+  const plan = lifecycle.prepareImport(imported.value.bytes, fingerprint, knownItemIds);
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+
+  assert.equal((await lifecycle.commitImport(plan.value, true)).ok, true);
+  const quarantine = JSON.parse(storage.values.get(PRIVATE_STATE_AUTHORITY_QUARANTINE_STORAGE_KEY) ?? 'null');
+  assert.equal(quarantine.active, null);
+  assert.equal(quarantine.recovery, envelope);
+});
+
 test('does not mutate malformed authority when quarantine cannot be written', async () => {
   const storage = new FailAuthorityQuarantineStorage();
   const brokenActive = '{broken-active';

@@ -586,6 +586,18 @@ function serializeAuthorityQuarantine(value: CorruptionQuarantine): string {
   return `${JSON.stringify(value)}\n`;
 }
 
+function unreadableAuthorityRaw(snapshot: AuthorityReadSnapshot, component: 'active' | 'recovery'): string | null {
+  if (component === 'active' && snapshot.authority.activeError !== undefined) {
+    return snapshot.raw.active;
+  }
+  if (component === 'recovery' && snapshot.authority.recoveryError !== undefined) {
+    // In an authority envelope both components live in the active key. The
+    // sidecar, when present, is not the bytes that failed validation.
+    return snapshot.authority.enveloped ? snapshot.raw.active : snapshot.raw.recovery;
+  }
+  return null;
+}
+
 /** Preserve malformed authority bytes without allowing a later repair to overwrite a different copy. */
 function preserveUnreadableAuthority(
   storage: StorageLike,
@@ -1095,8 +1107,8 @@ export class PrivateStateLifecycle {
       if (!mergedRecoveryRecords.ok) return fail('STATE_RECONCILIATION_BLOCKED');
       const preservedAuthority = preserveUnreadableAuthority(
         this.storage,
-        current.value.authority.activeError === undefined ? null : current.value.raw.active,
-        current.value.authority.recoveryError === undefined ? null : current.value.raw.recovery,
+        unreadableAuthorityRaw(current.value, 'active'),
+        unreadableAuthorityRaw(current.value, 'recovery'),
       );
       if (!preservedAuthority.ok) return preservedAuthority;
       if (current.value.authority.recoveryRecordsError !== undefined) {
@@ -1173,7 +1185,7 @@ export class PrivateStateLifecycle {
       }
       const preservedAuthority = preserveUnreadableAuthority(
         this.storage,
-        current.value.authority.activeError === undefined ? null : current.value.raw.active,
+        unreadableAuthorityRaw(current.value, 'active'),
         null,
       );
       if (!preservedAuthority.ok) return preservedAuthority;

@@ -1278,10 +1278,16 @@ function renderRecoveryTools(
     });
   });
   restoreButton.addEventListener('click', () => {
-    void confirmationDialog(
-      'Restore previous snapshot?',
-      'The current collection will be retained as the recovery snapshot before restore.',
-    ).then((confirmed) => {
+    const current = lifecycle.read();
+    if (!current.ok) {
+      setStatus(recoveryErrorMessage(current.error));
+      return;
+    }
+    const confirmationMessage =
+      current.value.activeError === undefined
+        ? 'The current collection will be retained as the recovery snapshot before restore.'
+        : 'The unreadable active bytes will be preserved in quarantine. The valid recovery snapshot will replace them.';
+    void confirmationDialog('Restore previous snapshot?', confirmationMessage).then((confirmed) => {
       if (!confirmed) return;
       setStatus('Restoring collection…');
       void lifecycle.restore(true, targetFingerprint, knownItemIds).then((result) => {
