@@ -111,6 +111,7 @@ test('production adoption validates the reviewed target migration without requir
   assert.match(script, /candidate\?\.toFingerprint === targetFingerprint/u);
   assert.match(script, /sourceFingerprints/u);
   assert.match(manifestScript, /SNOREDEX_CURRENT_DEPLOYMENT_PATH/u);
+  assert.match(manifestScript, /sourceFingerprints/);
   assert.match(manifestScript, /manifest\.rollback = \{ \.\.\.rollback, runtimeAssetSet: retained \}/u);
   assert.match(
     manifestScript,
@@ -147,6 +148,8 @@ test('production adoption validates the reviewed target migration without requir
   assert.match(workflow, /bootstrap authorization requires workflow_dispatch/u);
   assert.match(workflow, /state=missing/u);
   assert.match(workflow, /provenance_status=.*provenance\.json/u);
+  assert.match(workflow, /current production publication evidence exists despite a missing deployment manifest/u);
+  assert.match(workflow, /provenance_curl_status/);
   assert.match(
     workflow,
     /SNOREDEX_CURRENT_PROVENANCE_PATH: \$\{\{ steps\.current-production\.outputs\.provenance_path \}\}/u,
@@ -363,6 +366,8 @@ test('production adoption validates the reviewed target migration without requir
       runtimeAssetSet: rollbackRuntimeAssetSet,
     });
     assert.deepEqual(generatedDeployment.sourceFingerprints, [lock.catalogueFingerprint]);
+    const generatedProvenance = JSON.parse(await readFile(provenancePath, 'utf8'));
+    assert.deepEqual(generatedProvenance.sourceFingerprints, generatedDeployment.sourceFingerprints);
 
     await writeFile(
       currentManifestPath,
@@ -434,6 +439,7 @@ test('production adoption validates the reviewed target migration without requir
           migrationByteLength: deployment.migrationByteLength,
         },
       },
+      sourceFingerprints: [...deployment.sourceFingerprints],
     });
     const runAgainstManifest = async (value: string | object) => {
       await writeFile(currentManifestPath, typeof value === 'string' ? value : JSON.stringify(value), 'utf8');
@@ -452,6 +458,21 @@ test('production adoption validates the reviewed target migration without requir
         },
       });
     };
+    const bootstrapWithPublishedProvenance = spawnSync(process.execPath, [scriptPath], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_DEPLOYMENT_MODE: 'adopt',
+        SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+        SNOREDEX_BOOTSTRAP_AUTHORIZED: 'true',
+      },
+    });
+    assert.notEqual(bootstrapWithPublishedProvenance.status, 0);
+    assert.match(
+      `${bootstrapWithPublishedProvenance.stdout}${bootstrapWithPublishedProvenance.stderr}`,
+      /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
+    );
     const emptyManifest = await runAgainstManifest('');
     assert.notEqual(emptyManifest.status, 0);
     assert.match(
@@ -474,6 +495,24 @@ test('production adoption validates the reviewed target migration without requir
     assert.notEqual(inconsistentHistory.status, 0);
     assert.match(
       `${inconsistentHistory.stdout}${inconsistentHistory.stderr}`,
+      /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
+    );
+    const truncatedHistory = { ...currentDeployment, sourceFingerprints: [] };
+    await writeFile(currentManifestPath, JSON.stringify(truncatedHistory), 'utf8');
+    await writeFile(provenancePath, JSON.stringify(provenanceFor(currentDeployment)));
+    const mismatchedHistory = spawnSync(process.execPath, [scriptPath], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        SNOREDEX_DEPLOYMENT_MODE: 'adopt',
+        SNOREDEX_CURRENT_DEPLOYMENT_PATH: currentManifestPath,
+        SNOREDEX_CURRENT_PROVENANCE_PATH: provenancePath,
+      },
+    });
+    assert.notEqual(mismatchedHistory.status, 0);
+    assert.match(
+      `${mismatchedHistory.stdout}${mismatchedHistory.stderr}`,
       /PRODUCTION_ADOPTION_BLOCKED_INVALID_CURRENT_DEPLOYMENT/u,
     );
     await writeFile(

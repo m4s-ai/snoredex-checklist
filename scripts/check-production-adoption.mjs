@@ -78,6 +78,8 @@ const isPublishedProvenance = (value) => {
     isByteLength(catalogue?.catalogueByteLength) &&
     isDigest(catalogue?.migrationByteSha256) &&
     isByteLength(catalogue?.migrationByteLength) &&
+    Array.isArray(value?.sourceFingerprints) &&
+    isSourceHistory(value.sourceFingerprints) &&
     lock?.producerRevision === catalogue.sourceCommit &&
     lock?.sourceRepository === catalogue.sourceRepository &&
     lock?.contractVersion === catalogue.contractVersion &&
@@ -98,7 +100,8 @@ const matchesPublishedProvenance = (deployment, provenance) => {
     deployment?.catalogueByteSha256 === catalogue?.catalogueByteSha256 &&
     deployment?.catalogueByteLength === catalogue?.catalogueByteLength &&
     deployment?.migrationByteSha256 === catalogue?.migrationByteSha256 &&
-    deployment?.migrationByteLength === catalogue?.migrationByteLength
+    deployment?.migrationByteLength === catalogue?.migrationByteLength &&
+    JSON.stringify(deployment?.sourceFingerprints ?? []) === JSON.stringify(provenance?.sourceFingerprints)
   );
 };
 if (

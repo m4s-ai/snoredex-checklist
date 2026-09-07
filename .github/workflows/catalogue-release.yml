@@ -134,8 +134,11 @@ jobs:
             echo "manifest=" >> "$GITHUB_OUTPUT"
             echo "provenance=" >> "$GITHUB_OUTPUT"
           elif [[ "$http_status" == "200" ]]; then
+            set +e
             provenance_status="$(curl --silent --show-error --location --output "$provenance" --write-out '%{http_code}' "$SNOREDEX_PAGE_URL/provenance.json")"
-            if [[ "$provenance_status" == "200" ]]; then
+            provenance_curl_status=$?
+            set -e
+            if [[ "$provenance_curl_status" -eq 0 && "$provenance_status" == "200" ]]; then
               echo "state=available" >> "$GITHUB_OUTPUT"
               echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
               echo "provenance=$provenance" >> "$GITHUB_OUTPUT"
