@@ -936,10 +936,14 @@ function focusResultSuccessor(container: HTMLElement, previous: ResultFocus): vo
   const next = previous.nextItemIds
     .map((itemId) => rowsByItemId.get(itemId))
     .find((row): row is HTMLElement => row !== undefined);
+  const sameIndex = rows[previous.index];
+  const after = [next, sameIndex]
+    .filter((row): row is HTMLElement => row !== undefined)
+    .sort((left, right) => rows.indexOf(left) - rows.indexOf(right))[0];
   const before = previous.previousItemIds
     .map((itemId) => rowsByItemId.get(itemId))
     .find((row): row is HTMLElement => row !== undefined);
-  const target = retained ?? next ?? before ?? rows[previous.index] ?? rows[previous.index - 1];
+  const target = retained ?? after ?? before ?? rows[previous.index - 1];
   if (target) {
     target.tabIndex = -1;
     target.focus();

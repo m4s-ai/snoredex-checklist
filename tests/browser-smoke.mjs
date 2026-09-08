@@ -727,9 +727,13 @@ try {
             (candidate) => trackable.filter((other) => other.localizationId === candidate.localizationId).length > 1,
           ) ?? trackable[0];
         if (!item) return null;
-        const focusItem = trackable.find(
-          (candidate) => trackable.filter((other) => other.localizationId === candidate.localizationId).length === 3,
-        );
+        const focusItem =
+          trackable.find(
+            (candidate) => trackable.filter((other) => other.localizationId === candidate.localizationId).length > 24,
+          ) ??
+          trackable.find(
+            (candidate) => trackable.filter((other) => other.localizationId === candidate.localizationId).length === 3,
+          );
         const activeEditionIds = new Set(
           catalogue.items
             .filter((candidate) => candidate.active && candidate.setEditionId)
@@ -744,6 +748,11 @@ try {
           itemId: item.itemId,
           localizationId: item.localizationId,
           focusLocalizationId: focusItem?.localizationId,
+          focusLocalizationItemCount: focusItem
+            ? catalogue.items.filter(
+                (candidate) => candidate.active && candidate.localizationId === focusItem.localizationId,
+              ).length
+            : 0,
           localizationItemCount: catalogue.items.filter(
             (candidate) => candidate.active && candidate.localizationId === item.localizationId,
           ).length,
@@ -998,11 +1007,13 @@ try {
             input.checked = true;
             input.dispatchEvent(new Event('change', { bubbles: true }));
           }, itemId);
-        for (const [index, expectedIndex] of [
+        const focusCases = [
           [0, 1],
           [1, 2],
-          [focusIds.length - 1, focusIds.length - 2],
-        ]) {
+        ];
+        if (synthetic.focusLocalizationItemCount <= focusIds.length)
+          focusCases.push([focusIds.length - 1, focusIds.length - 2]);
+        for (const [index, expectedIndex] of focusCases) {
           await page.evaluate(() => {
             for (const key of Object.keys(localStorage))
               if (key.startsWith('snoredex-checklist.private-state')) localStorage.removeItem(key);
@@ -1061,6 +1072,35 @@ try {
           focusIds[2],
           `${name}: batched removals focus the first surviving successor`,
         );
+        if (synthetic.focusLocalizationItemCount > 24 && focusIds.length === 24) {
+          await page.evaluate(() => {
+            for (const key of Object.keys(localStorage))
+              if (key.startsWith('snoredex-checklist.private-state')) localStorage.removeItem(key);
+          });
+          await page.goto(focusUrl, { waitUntil: 'networkidle' });
+          const paginatedTargetId = focusIds[focusIds.length - 1];
+          const paginatedPredecessorId = focusIds[focusIds.length - 2];
+          await controlsForItem(page, paginatedTargetId).getByRole('radio', { name: 'Have' }).waitFor();
+          await selectHaveWithoutWaitingForDetach(paginatedTargetId);
+          await page.waitForFunction(
+            (itemId) => [...document.querySelectorAll('[data-item-id]')].every((row) => row.dataset.itemId !== itemId),
+            paginatedTargetId,
+          );
+          const revealedSuccessorId = await page
+            .locator('[data-view] [data-item-id]')
+            .nth(23)
+            .getAttribute('data-item-id');
+          assert.notEqual(
+            revealedSuccessorId,
+            paginatedPredecessorId,
+            `${name}: paginated removal reveals a distinct successor`,
+          );
+          assert.equal(
+            await page.evaluate(() => document.activeElement?.closest('[data-item-id]')?.getAttribute('data-item-id')),
+            revealedSuccessorId,
+            `${name}: paginated removal focuses the newly revealed successor`,
+          );
+        }
         assert.notEqual(synthetic.singletonEdition, undefined, `${name}: singleton focus fixture`);
         if (synthetic.singletonEdition !== undefined) {
           await page.evaluate(() => {
