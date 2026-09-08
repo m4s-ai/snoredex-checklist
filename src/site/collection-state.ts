@@ -418,7 +418,19 @@ export class BrowserCollectionStateController implements CollectionStateControll
       meta.versions.note = ++this.nextRevision;
     }
     this.clearFailureAfterEdit(meta, 'note');
-    const pending = this.pendingSnapshot();
+    const previousPending = this.pendingNote;
+    const snapshot = this.pendingSnapshot();
+    const affected = new Map(snapshot.affected);
+    for (const [pendingItemId, fields] of previousPending?.affected ?? []) {
+      const currentFields = affected.get(pendingItemId);
+      if (currentFields === undefined) {
+        affected.set(pendingItemId, fields);
+        continue;
+      }
+      const mergedFields = new Set([...currentFields, ...fields]);
+      if (mergedFields.size !== currentFields.size) affected.set(pendingItemId, mergedFields);
+    }
+    const pending = { ...snapshot, affected };
     const scheduled = this.store.scheduleNoteSave(pending.state, false);
     this.pendingNote = { ...pending, scheduled: scheduled.ok };
     if (!scheduled.ok) {

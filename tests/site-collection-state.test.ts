@@ -204,6 +204,25 @@ test('keeps note-only notifications bounded to the edited item', async () => {
   assert.deepEqual(notifications, [ITEM_A, ITEM_A, ITEM_A]);
 });
 
+test('completes a note save when the pending draft reverts before flush', async () => {
+  const { controller, noteSaves } = makeHarness({
+    active: [{ itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0, note: 'old' }],
+  });
+  const notifications: Array<string | undefined> = [];
+  controller.onChange((itemId) => notifications.push(itemId));
+
+  assert.deepEqual(controller.scheduleNote(ITEM_A, 'new'), { ok: true });
+  assert.equal(controller.item(ITEM_A).save.phase, 'saving');
+  assert.deepEqual(controller.scheduleNote(ITEM_A, 'old'), { ok: true });
+  assert.equal(controller.item(ITEM_A).save.phase, 'saving');
+
+  const flush = controller.flushNote();
+  noteSaves[0].resolve(saved);
+  assert.deepEqual(await flush, { ok: true, skipped: undefined });
+  assert.equal(controller.item(ITEM_A).save.phase, 'saved');
+  assert.deepEqual(notifications, [ITEM_A, ITEM_A, ITEM_A, ITEM_A]);
+});
+
 test('canonicalizes equivalent quantity drafts on no-op and persisted commits', async () => {
   const unchanged = makeHarness({
     active: [{ itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],
