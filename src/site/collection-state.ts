@@ -421,14 +421,14 @@ export class BrowserCollectionStateController implements CollectionStateControll
     const previousPending = this.pendingNote;
     const snapshot = this.pendingSnapshot();
     const affected = new Map(snapshot.affected);
-    for (const [pendingItemId, fields] of previousPending?.affected ?? []) {
-      const currentFields = affected.get(pendingItemId);
-      if (currentFields === undefined) {
-        affected.set(pendingItemId, fields);
-        continue;
+    const previousFields = previousPending?.affected.get(itemId);
+    if (previousFields !== undefined) {
+      const currentFields = affected.get(itemId);
+      if (currentFields === undefined) affected.set(itemId, previousFields);
+      else {
+        const mergedFields = new Set([...currentFields, ...previousFields]);
+        if (mergedFields.size !== currentFields.size) affected.set(itemId, mergedFields);
       }
-      const mergedFields = new Set([...currentFields, ...fields]);
-      if (mergedFields.size !== currentFields.size) affected.set(pendingItemId, mergedFields);
     }
     const pending = { ...snapshot, affected };
     const scheduled = this.store.scheduleNoteSave(pending.state, false);

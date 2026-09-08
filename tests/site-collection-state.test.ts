@@ -223,6 +223,28 @@ test('completes a note save when the pending draft reverts before flush', async 
   assert.deepEqual(notifications, [ITEM_A, ITEM_A, ITEM_A, ITEM_A]);
 });
 
+test('does not carry a settled concurrent item into later note notifications', async () => {
+  const { controller, immediateSaves, noteSaves } = makeHarness({
+    active: [
+      { itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0 },
+      { itemId: ITEM_B, status: 'ordered', quantityOwned: 0, quantityOrdered: 1 },
+    ],
+  });
+  const notifications: Array<string | undefined> = [];
+  controller.onChange((itemId) => notifications.push(itemId));
+
+  const statusSave = controller.setStatus(ITEM_A, 'skip');
+  assert.deepEqual(controller.scheduleNote(ITEM_B, 'first'), { ok: true });
+  immediateSaves[0].resolve(saved);
+  await statusSave;
+  assert.deepEqual(controller.scheduleNote(ITEM_B, 'second'), { ok: true });
+
+  const flush = controller.flushNote();
+  noteSaves[0].resolve(saved);
+  assert.deepEqual(await flush, { ok: true, skipped: undefined });
+  assert.deepEqual(notifications, [ITEM_A, ITEM_A, ITEM_B, ITEM_A, ITEM_B, ITEM_B, ITEM_B]);
+});
+
 test('canonicalizes equivalent quantity drafts on no-op and persisted commits', async () => {
   const unchanged = makeHarness({
     active: [{ itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],
