@@ -2026,7 +2026,7 @@ async function renderCollection(
   const renderOverview = (nextState: PrivateStateRead): void => {
     if (progressOverview === null) return;
     const updated = renderProgressOverview(catalogue, nextState);
-    progressOverview.replaceChildren(...updated.childNodes);
+    progressOverview.replaceChildren(updated);
   };
   renderOverview(renderState);
   if (stateController !== undefined) {

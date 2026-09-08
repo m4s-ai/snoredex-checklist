@@ -688,6 +688,16 @@ try {
         1,
         `${name}: overall progress overview`,
       );
+      assert.equal(
+        await page.locator('[data-progress-overview] > .progress-overview').count(),
+        1,
+        `${name}: progress overview landmark wrapper`,
+      );
+      assert.equal(
+        await page.locator('.progress-overview').getAttribute('aria-labelledby'),
+        'progress-overview-title',
+        `${name}: progress overview accessible name`,
+      );
       assert.ok((await page.locator('.progress-card').count()) > 1, `${name}: localization progress cards`);
       assert.equal(await page.locator('[data-view]').getAttribute('aria-live'), null, `${name}: results are not live`);
       assert.equal(
