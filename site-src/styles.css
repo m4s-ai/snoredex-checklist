@@ -358,6 +358,9 @@ select {
   font-size: 1rem;
   font-weight: 400;
 }
+select {
+  white-space: normal;
+}
 .query-form button {
   align-self: end;
 }
