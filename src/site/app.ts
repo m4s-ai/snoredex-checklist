@@ -1,4 +1,5 @@
 import {
+  localizationDisplayLabel,
   localizationLabel,
   validateProvenance,
   validateSnapshot,
@@ -238,16 +239,6 @@ function renderProvenance(container: HTMLElement, catalogue: DirectoryCatalogue,
 
 function sortedLocalizations(catalogue: DirectoryCatalogue): SnapshotLocalization[] {
   return [...catalogue.localizations].sort((left, right) => (left.displayOrder ?? 0) - (right.displayOrder ?? 0));
-}
-
-function localizationDisplayLabel(
-  localization: SnapshotLocalization,
-  labelCounts: ReadonlyMap<string, number>,
-): string {
-  const label = localizationLabel(localization);
-  const key = `${localization.locality ?? ''}\u0000${label}`;
-  if ((labelCounts.get(key) ?? 0) <= 1) return label;
-  return `${label} (${presentText(localization.languageTag) ?? 'variant'})`;
 }
 
 function renderLocalizationLinks(container: HTMLElement, catalogue: DirectoryCatalogue): void {
@@ -582,10 +573,14 @@ function renderProgress(
   return section;
 }
 
-function progressScopeLabel(catalogue: CatalogueSnapshot, localizationId: string): string {
+function progressScopeLabel(
+  catalogue: CatalogueSnapshot,
+  localizationId: string,
+  labelCounts: ReadonlyMap<string, number>,
+): string {
   const localization = catalogue.localizations.find((candidate) => candidate.localizationId === localizationId);
   if (!localization) return 'Unknown localization';
-  const label = localizationLabel(localization);
+  const label = localizationDisplayLabel(localization, labelCounts);
   return localization.locality ? `${label} (${localization.locality})` : label;
 }
 
@@ -599,10 +594,16 @@ function renderProgressOverview(catalogue: CatalogueSnapshot, state: PrivateStat
     text('p', 'Overall and localization progress use the unfiltered current-known catalogue scope.'),
   );
 
+  const localizationLabelCounts = new Map<string, number>();
+  for (const localization of catalogue.localizations) {
+    const label = localizationLabel(localization);
+    const key = `${localization.locality ?? ''}\u0000${label}`;
+    localizationLabelCounts.set(key, (localizationLabelCounts.get(key) ?? 0) + 1);
+  }
   const scopes: Array<{ readonly label: string; readonly items: readonly SnapshotItem[] }> = [
     { label: 'Overall', items: catalogue.items },
     ...sortedLocalizations(catalogue).map((localization) => ({
-      label: progressScopeLabel(catalogue, localization.localizationId),
+      label: progressScopeLabel(catalogue, localization.localizationId, localizationLabelCounts),
       items: catalogue.items.filter((item) => item.localizationId === localization.localizationId),
     })),
   ];
@@ -2039,6 +2040,13 @@ async function renderCollection(
       renderOverview(stateController.state);
     });
   }
+  const onPageshow = (event: PageTransitionEvent): void => {
+    if (!event.persisted || progressOverview?.hidden === true) return;
+    void readPrivateState(catalogue.meta.catalogueFingerprint, knownTrackableItemIds).then((restoredState) => {
+      renderOverview(restoredState);
+    });
+  };
+  window.addEventListener('pageshow', onPageshow);
   renderQueryForm($('[data-query]'), parsed.criteria, catalogue);
   renderResults($('[data-view]'), parsed.criteria, catalogue, renderState, stateController);
   const recoveryTools = document.querySelector<HTMLElement>('[data-recovery-tools]');

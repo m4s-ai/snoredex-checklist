@@ -3,7 +3,12 @@ import test from 'node:test';
 
 import fixture from './fixtures/collector-catalogue.fixture.json' with { type: 'json' };
 import { semanticFingerprint } from '../src/catalogue/validate.ts';
-import { localizationLabel, validateProvenance, validateSnapshot } from '../src/site/catalogue.ts';
+import {
+  localizationDisplayLabel,
+  localizationLabel,
+  validateProvenance,
+  validateSnapshot,
+} from '../src/site/catalogue.ts';
 import {
   directoryEnvelopeDigest,
   directoryProjectionDigest,
@@ -119,6 +124,21 @@ test('validates generated provenance and keeps localization labels nonempty', ()
   assert.equal(
     localizationLabel({ localizationId: 'loc-2', displayName: '  Spanish  ', languageTag: 'en' }),
     'Spanish',
+  );
+  const duplicateLabels = new Map([['WEST\u0000Spanish', 2]]);
+  assert.equal(
+    localizationDisplayLabel(
+      { localizationId: 'loc-en', locality: 'WEST', displayName: 'Spanish', languageTag: 'en' },
+      duplicateLabels,
+    ),
+    'Spanish (en)',
+  );
+  assert.equal(
+    localizationDisplayLabel(
+      { localizationId: 'loc-de', locality: 'WEST', displayName: 'Spanish', languageTag: 'de' },
+      duplicateLabels,
+    ),
+    'Spanish (de)',
   );
 });
 

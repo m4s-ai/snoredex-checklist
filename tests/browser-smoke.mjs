@@ -814,6 +814,32 @@ try {
       });
       assert.notEqual(synthetic, null, `${name}: synthetic trackable item`);
       if (synthetic !== null) {
+        await page.evaluate(
+          ({ fingerprint, itemId }) => {
+            localStorage.setItem(
+              'snoredex-checklist.private-state',
+              JSON.stringify({
+                schema: 'snoredex-collection-state',
+                schemaVersion: '1.0.0',
+                datasetId: 'snoredex-data/snorlax-current-known',
+                catalogueFingerprint: fingerprint,
+                items: [{ itemId, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],
+              }),
+            );
+            const event = new Event('pageshow');
+            Object.defineProperty(event, 'persisted', { value: true });
+            window.dispatchEvent(event);
+          },
+          { fingerprint: synthetic.fingerprint, itemId: synthetic.itemId },
+        );
+        await page.waitForFunction(() =>
+          [...document.querySelectorAll('.progress-card')].some((card) => /1 Have/u.test(card.textContent ?? '')),
+        );
+        assert.equal(
+          (await page.locator('.progress-card').filter({ hasText: '1 Have' }).count()) > 0,
+          true,
+          `${name}: persisted pageshow refreshes overview`,
+        );
         await page.evaluate(() => {
           for (const key of Object.keys(localStorage))
             if (key.startsWith('snoredex-checklist.private-state')) localStorage.removeItem(key);
