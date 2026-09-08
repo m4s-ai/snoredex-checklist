@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { chromium, firefox, webkit } from '@playwright/test';
 
 import { runtimeShellBindings, sha256 } from '../scripts/runtime-assets.mjs';
+import { assertArtifactHtmlBrowserBoundary } from './artifact-html-browser.mjs';
 
 const root = resolve(process.env.SNOREDEX_SITE_ROOT ?? 'dist/site');
 const mimeTypes = new Map([
@@ -231,6 +232,7 @@ async function probePrivateAccess(page) {
 async function assertRetainedRoutes(browser, name) {
   const page = await browser.newPage();
   try {
+    await page.setViewportSize({ width: 320, height: 900 });
     let retainedShell = false;
     const requests = [];
     page.on('request', (request) => requests.push(new URL(request.url()).pathname));
@@ -265,6 +267,27 @@ async function assertRetainedRoutes(browser, name) {
           .locator(path === '/' ? '.localization-group' : '.query-primary')
           .first()
           .waitFor();
+        assert.equal(
+          await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+          true,
+          `${name}: shared CSS keeps active/retained routes within the small viewport`,
+        );
+        assert.equal(
+          await page.evaluate(() =>
+            [...document.styleSheets].some((sheet) => sheet.href?.endsWith('/styles.css') && sheet.cssRules.length > 0),
+          ),
+          true,
+          `${name}: shared stylesheet remains available across rollback`,
+        );
+        await page.locator('a[href]').first().focus();
+        assert.equal(
+          await page
+            .locator('a[href]')
+            .first()
+            .evaluate((element) => document.activeElement === element),
+          true,
+          `${name}: shared presentation preserves keyboard focus across rollback`,
+        );
         const prefix = `/${retained ? retainedRuntime.runtimePath : `assets/${moduleManifest.runtimeAssetSet.path}/`}`;
         assert.ok(
           requests
@@ -752,6 +775,7 @@ try {
     }
     try {
       await assertRetainedRoutes(browser, name);
+      await assertArtifactHtmlBrowserBoundary(browser, baseUrl, name);
       await assertFailureStates(browser, name);
       const page = await browser.newPage();
       await probePrivateAccess(page);

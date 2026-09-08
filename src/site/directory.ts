@@ -1,3 +1,4 @@
+import { canonicalize } from './canonical-json.ts';
 import type { SnapshotLocalization, SnapshotMeta } from './catalogue.js';
 
 export interface DirectorySnapshot {
@@ -11,16 +12,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isOptionalString(value: unknown): boolean {
   return value === undefined || (typeof value === 'string' && value.length > 0);
-}
-
-function canonicalize(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (!isRecord(value)) return value;
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map((key) => [key, canonicalize(value[key])]),
-  );
 }
 
 async function canonicalDigest(value: unknown): Promise<string | undefined> {

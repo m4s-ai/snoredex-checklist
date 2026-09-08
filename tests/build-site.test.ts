@@ -301,6 +301,34 @@ test('stamps the exact app revision into served shells and module', async () => 
     assert.ok(home.includes(`integrity="${homeBindings.themeIntegrity}"`));
     assert.ok(home.includes(`script-src 'self' '${homeBindings.importMapCsp}'`));
     assert.ok(collection.includes(`script-src 'self' '${collectionBindings.importMapCsp}'`));
+    const importMapTag = `<script type="importmap">${homeBindings.importMap}</script>`;
+    const parserCases: Array<[string, string, boolean]> = [
+      ['valid', home, true],
+      [
+        'quoted tag boundary',
+        home.replace('<script type="importmap">', '<script data-label=">" type="importmap">'),
+        true,
+      ],
+      ['map after module', home.replace(importMapTag, '').replace('</body>', `${importMapTag}</body>`), false],
+      ['comment map', home.replace(importMapTag, `<!--${importMapTag}-->`), false],
+      ['template map', home.replace(importMapTag, `<template>${importMapTag}</template>`), false],
+      ['wrong first type', home.replace('type="importmap"', 'type="text/plain" type="importmap"'), false],
+      [
+        'changed hashed map text',
+        home.replace(importMapTag, `<script type="importmap"> ${homeBindings.importMap}</script>`),
+        false,
+      ],
+    ];
+    for (const [name, html, valid] of parserCases) {
+      await writeFile(resolve(output, 'index.html'), html);
+      const checked = spawnSync(process.execPath, [resolve(root, 'scripts/check-artifact.mjs'), output], {
+        cwd: root,
+        env: { ...process.env, SNOREDEX_APP_REVISION: revision },
+        encoding: 'utf8',
+      });
+      assert.equal(checked.status === 0, valid, `${name}: ${checked.stdout}${checked.stderr}`);
+    }
+    await writeFile(resolve(output, 'index.html'), home);
     for (const entry of runtimeManifest.modules) {
       const module = await readFile(resolve(output, 'assets', moduleManifest.runtimeAssetSet.path, entry.path), 'utf8');
       assert.match(module, new RegExp(`snoredex-app-revision:${revision}`, 'u'));

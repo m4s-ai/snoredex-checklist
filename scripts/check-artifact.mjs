@@ -2,7 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join, resolve, relative, posix } from 'node:path';
 import process from 'node:process';
-import { parse } from 'parse5';
+import { parseArtifactHtml, htmlAttribute, hasActiveCsp, scriptText } from './artifact-html.mjs';
 import { SyntaxKind } from 'typescript/unstable/ast';
 import { API } from 'typescript/unstable/sync';
 import {
@@ -83,336 +83,6 @@ function decodeHtmlAttribute(value) {
 
 function hasResidualHtmlReference(value) {
   return /&(?:#(?:x[\da-f]+|\d+)|[a-z][a-z\d]+);/iu.test(value);
-}
-
-function readAttributeLegacy(tag, name) {
-  const pattern = new RegExp(`(?:^|[\\t\\n\\f\\r /])${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>\`]+))`, 'iu');
-  const match = pattern.exec(tag);
-  return match?.[1] ?? match?.[2] ?? match?.[3];
-}
-
-function readAttribute(tag, name) {
-  const target = name.toLowerCase();
-  let index = 1;
-  while (index < tag.length && !/[\t\n\f\r />]/u.test(tag[index])) index += 1;
-  while (index < tag.length) {
-    while (index < tag.length && /[\t\n\f\r /]/u.test(tag[index])) index += 1;
-    if (index >= tag.length || tag[index] === '>') break;
-    const start = index;
-    while (index < tag.length && !/[\t\n\f\r />=]/u.test(tag[index])) index += 1;
-    const attributeName = tag.slice(start, index).toLowerCase();
-    while (index < tag.length && /[\t\n\f\r ]/u.test(tag[index])) index += 1;
-    let value;
-    if (tag[index] === '=') {
-      index += 1;
-      while (index < tag.length && /[\t\n\f\r ]/u.test(tag[index])) index += 1;
-      const quote = tag[index] === '"' || tag[index] === "'" ? tag[index++] : undefined;
-      const valueStart = index;
-      if (quote !== undefined) {
-        while (index < tag.length && tag[index] !== quote) index += 1;
-      } else {
-        while (index < tag.length && !/[\t\n\f\r >]/u.test(tag[index])) index += 1;
-      }
-      value = tag.slice(valueStart, index);
-      if (quote !== undefined && tag[index] === quote) index += 1;
-    }
-    if (attributeName === target) return value;
-    if (index === start) index += 1;
-  }
-  return undefined;
-}
-
-function parseHtmlTagAt(html, start) {
-  let cursor = start + 1;
-  let quote;
-  let tagNameComplete = false;
-  let tagNameValid = false;
-  let attributeName = false;
-  let expectingValue = false;
-  let unquotedValue = false;
-  while (cursor < html.length) {
-    const character = html[cursor];
-    if (quote !== undefined) {
-      if (character === quote) quote = undefined;
-    } else if (character === '>') {
-      const raw = html.slice(start, cursor + 1);
-      const match = /^<(?:(\/))?([a-z][\w:-]*)(?=[\t\n\f\r />])/iu.exec(raw);
-      return {
-        closing: match?.[1] !== undefined,
-        name: match?.[2]?.toLowerCase(),
-        raw,
-        end: cursor + 1,
-      };
-    } else if (!tagNameComplete) {
-      if (cursor === start + 1 && character === '/') {
-        cursor += 1;
-        continue;
-      }
-      if (cursor === start + 1 && !/^[a-z]$/iu.test(character)) return { end: cursor };
-      if (!tagNameValid) {
-        if (/^[a-z]$/iu.test(character)) tagNameValid = true;
-      } else if (/^[\w:-]$/u.test(character)) {
-        // Continue the tag name.
-      } else if (/[\t\n\f\r /]/u.test(character)) {
-        tagNameComplete = true;
-      } else {
-        tagNameValid = false;
-      }
-    } else if (unquotedValue) {
-      if (/[\t\n\f\r ]/u.test(character)) {
-        unquotedValue = false;
-        attributeName = false;
-      }
-    } else if (expectingValue && (character === '"' || character === "'")) {
-      quote = character;
-      expectingValue = false;
-    } else if (expectingValue && !/[\t\n\f\r ]/u.test(character)) {
-      expectingValue = false;
-      attributeName = false;
-      unquotedValue = true;
-    } else if (character === '=' && attributeName) {
-      expectingValue = true;
-      attributeName = false;
-    } else if (/[\t\n\f\r /]/u.test(character)) {
-      attributeName = false;
-    } else {
-      attributeName = true;
-    }
-    cursor += 1;
-  }
-  return { end: html.length };
-}
-
-function hasTagNameAt(html, index, name) {
-  const prefix = `<${name}`;
-  return (
-    html.slice(index, index + prefix.length).toLowerCase() === prefix &&
-    /[\t\n\f\r />]/u.test(html[index + prefix.length] ?? '')
-  );
-}
-
-function hasClosingTagNameAt(html, index, name) {
-  const prefix = `</${name}`;
-  return (
-    html.slice(index, index + prefix.length).toLowerCase() === prefix &&
-    /[\t\n\f\r />]/u.test(html[index + prefix.length] ?? '')
-  );
-}
-
-function rawTextClosingEnd(html, index, name) {
-  const tag = parseHtmlTagAt(html, index);
-  return tag.closing && tag.name === name ? tag.end : -1;
-}
-
-function findRawTextEnd(html, index, name) {
-  if (name === 'plaintext') return { end: html.length };
-  if (name !== 'script') {
-    while (index < html.length) {
-      const end = rawTextClosingEnd(html, index, name);
-      if (end >= 0) return { end, closeStart: index };
-      index += 1;
-    }
-    return { end: html.length };
-  }
-  let state = 'data';
-  while (index < html.length) {
-    if (state === 'data') {
-      if (html.startsWith('<!--', index)) {
-        state = 'escaped';
-        index += 4;
-      } else {
-        const end = rawTextClosingEnd(html, index, name);
-        if (end >= 0) return { end, closeStart: index };
-        index += 1;
-      }
-    } else if (state === 'escaped') {
-      const end = rawTextClosingEnd(html, index, name);
-      if (end >= 0) return { end, closeStart: index };
-      if (hasTagNameAt(html, index, 'script')) {
-        state = 'double-escaped';
-        index += 1;
-      } else if (html.startsWith('-->', index)) {
-        state = 'data';
-        index += 3;
-      } else {
-        index += 1;
-      }
-    } else {
-      if (hasClosingTagNameAt(html, index, name)) {
-        state = 'escaped';
-        index += name.length + 2;
-      } else if (hasTagNameAt(html, index, 'script')) {
-        index += 1;
-      } else {
-        index += 1;
-      }
-    }
-  }
-  return { end: html.length };
-}
-
-function* htmlTags(html) {
-  let index = 0;
-  while (index < html.length) {
-    const start = html.indexOf('<', index);
-    if (start < 0) return;
-    const tag = parseHtmlTagAt(html, start);
-    if (tag.name !== undefined) yield { ...tag, index: start };
-    index = tag.end;
-    if (index <= start) index = start + 1;
-  }
-}
-
-function hasInlineEventHandler(html) {
-  const nodes = [parse(html)];
-  while (nodes.length > 0) {
-    const node = nodes.pop();
-    if (node === undefined) continue;
-    if ('attrs' in node && node.attrs.some(({ name }) => /^on[a-z]+$/iu.test(name))) return true;
-    if ('childNodes' in node) nodes.push(...node.childNodes);
-    if ('content' in node) nodes.push(node.content);
-  }
-  return false;
-}
-
-function stripHtmlComments(html) {
-  let output = '';
-  let index = 0;
-  let commentDepth = 0;
-  let commentStart = false;
-  let commentStartDash = false;
-  let rawTextTag;
-  let selectDepth = 0;
-  let framesetDepth = 0;
-  const namespaceStack = [{ name: '', namespace: 'html', integrationPoint: false }];
-  const svgIntegrationPoints = new Set(['desc', 'foreignobject', 'title']);
-  const htmlVoidElements = new Set([
-    'area',
-    'base',
-    'br',
-    'col',
-    'embed',
-    'hr',
-    'img',
-    'input',
-    'link',
-    'meta',
-    'param',
-    'source',
-    'track',
-    'wbr',
-  ]);
-  const rawTextElements = new Set([
-    'iframe',
-    'noembed',
-    'noframes',
-    'noscript',
-    'plaintext',
-    'script',
-    'style',
-    'textarea',
-    'title',
-    'xmp',
-  ]);
-  const resolveNamespace = (name) => {
-    const parent = namespaceStack.at(-1);
-    if (parent.namespace === 'html' || parent.integrationPoint) return name === 'svg' ? 'svg' : 'html';
-    return 'svg';
-  };
-  const popNamespace = (name) => {
-    for (let stackIndex = namespaceStack.length - 1; stackIndex > 0; stackIndex -= 1) {
-      if (namespaceStack[stackIndex].name === name) {
-        namespaceStack.length = stackIndex;
-        return;
-      }
-    }
-  };
-  while (index < html.length) {
-    if (commentDepth === 0) {
-      if (rawTextTag !== undefined) {
-        const rawText = findRawTextEnd(html, index, rawTextTag);
-        const contentEnd = rawText.closeStart ?? rawText.end;
-        output += html.slice(index, contentEnd).replaceAll('<', '\u0000');
-        if (rawText.closeStart !== undefined) {
-          output += html.slice(rawText.closeStart, rawText.end);
-          popNamespace(rawTextTag);
-        }
-        index = rawText.end;
-        rawTextTag = undefined;
-        continue;
-      }
-      if (html.startsWith('<!--', index)) {
-        commentDepth = 1;
-        commentStart = true;
-        commentStartDash = false;
-        index += 4;
-      } else if (html[index] === '<') {
-        const tag = parseHtmlTagAt(html, index);
-        if (tag.name !== undefined) {
-          output += tag.raw;
-          index = tag.end;
-          if (tag.closing) {
-            if (tag.name === 'select') selectDepth = Math.max(0, selectDepth - 1);
-            if (tag.name === 'frameset') framesetDepth = Math.max(0, framesetDepth - 1);
-            popNamespace(tag.name);
-            continue;
-          }
-          const namespace = resolveNamespace(tag.name);
-          if (tag.name === 'select') selectDepth += 1;
-          if (tag.name === 'frameset') framesetDepth += 1;
-          if (
-            namespace === 'html' &&
-            rawTextElements.has(tag.name) &&
-            !(
-              (selectDepth > 0 && tag.name !== 'script') ||
-              (framesetDepth > 0 && tag.name !== 'script' && tag.name !== 'noframes')
-            )
-          )
-            rawTextTag = tag.name;
-          const selfClosing = /\/\s*>$/u.test(tag.raw);
-          if (!selfClosing && !(namespace === 'html' && htmlVoidElements.has(tag.name))) {
-            namespaceStack.push({
-              name: tag.name,
-              namespace,
-              integrationPoint: namespace === 'svg' && svgIntegrationPoints.has(tag.name),
-            });
-          }
-        } else {
-          output += html[index];
-          index += 1;
-        }
-      } else {
-        output += html[index];
-        index += 1;
-      }
-      continue;
-    }
-    if (html.startsWith('--!>', index)) {
-      commentDepth -= 1;
-      commentStart = false;
-      commentStartDash = false;
-      index += 4;
-    } else if (html.startsWith('-->', index)) {
-      commentDepth -= 1;
-      commentStart = false;
-      commentStartDash = false;
-      index += 3;
-    } else if ((commentStart || commentStartDash) && html[index] === '>') {
-      commentDepth -= 1;
-      commentStart = false;
-      commentStartDash = false;
-      index += 1;
-    } else if (commentStart && html[index] === '-') {
-      commentStart = false;
-      commentStartDash = true;
-      index += 1;
-    } else {
-      commentStart = false;
-      commentStartDash = false;
-      index += 1;
-    }
-  }
-  return output;
 }
 
 function isArtifactAssetTarget(source, page, relativeFiles) {
@@ -540,172 +210,6 @@ function artifactModuleDependencies(files) {
     api.close();
   }
   return dependencies;
-}
-
-function hasMetaRefresh(html) {
-  for (const tag of htmlTags(html)) {
-    if (tag.closing || tag.name !== 'meta') continue;
-    const httpEquiv = readAttribute(tag.raw, 'http-equiv');
-    if (httpEquiv !== undefined && decodeHtmlAttribute(httpEquiv).trim().toLowerCase() === 'refresh') return true;
-  }
-  return false;
-}
-
-function extractHead(html) {
-  const rawTextElements = new Set([
-    'iframe',
-    'noembed',
-    'noframes',
-    'noscript',
-    'plaintext',
-    'script',
-    'style',
-    'textarea',
-    'title',
-    'xmp',
-  ]);
-  const inertElements = new Set(['template']);
-  const preHeadElements = new Set([
-    'base',
-    'head',
-    'html',
-    'link',
-    'meta',
-    'noscript',
-    'script',
-    'style',
-    'template',
-    'title',
-  ]);
-  let rawTextTag;
-  let inertDepth = 0;
-  let headStart = -1;
-  let implicitHead = false;
-  let explicitHeadTagStart = -1;
-  let explicitHeadContentStart = -1;
-  let bodyStarted = false;
-  let previousEnd = 0;
-  for (const tag of htmlTags(html)) {
-    const { closing, name } = tag;
-    if (
-      rawTextTag === undefined &&
-      inertDepth === 0 &&
-      !bodyStarted &&
-      /\S/u.test(html.slice(previousEnd, tag.index).replace(/<![^>]*>/gu, ''))
-    ) {
-      bodyStarted = true;
-    }
-    if (rawTextTag !== undefined) {
-      if (rawTextTag !== 'plaintext' && closing && name === rawTextTag) rawTextTag = undefined;
-      previousEnd = tag.index + tag.raw.length;
-      continue;
-    }
-    if (inertDepth > 0) {
-      if (!closing && rawTextElements.has(name)) rawTextTag = name;
-      else if (name === 'template') inertDepth += closing ? -1 : 1;
-      previousEnd = tag.index + tag.raw.length;
-      continue;
-    }
-    if (!closing && name === 'body') {
-      if (headStart >= 0) return bodyStarted ? '' : html.slice(headStart, tag.index);
-      bodyStarted = true;
-      previousEnd = tag.index + tag.raw.length;
-      continue;
-    }
-    if (closing && headStart < 0 && !bodyStarted) {
-      bodyStarted = true;
-      previousEnd = tag.index + tag.raw.length;
-      continue;
-    }
-    if (bodyStarted) {
-      previousEnd = tag.index + tag.raw.length;
-      continue;
-    }
-    if (!closing && headStart < 0 && !preHeadElements.has(name)) {
-      bodyStarted = true;
-      previousEnd = tag.index + tag.raw.length;
-      continue;
-    }
-    if (closing) {
-      if (headStart >= 0 && name === 'head') {
-        if (bodyStarted) return '';
-        if (implicitHead && explicitHeadTagStart >= 0) {
-          return html.slice(headStart, explicitHeadTagStart) + html.slice(explicitHeadContentStart, tag.index);
-        }
-        return html.slice(headStart, tag.index);
-      }
-      if (!bodyStarted && headStart >= 0 && ['body', 'br', 'html'].includes(name)) {
-        bodyStarted = true;
-      }
-      previousEnd = tag.index + tag.raw.length;
-      continue;
-    }
-    if (headStart < 0 && name === 'head') {
-      headStart = tag.index + tag.raw.length;
-    } else if (headStart >= 0 && name === 'head' && implicitHead) {
-      explicitHeadTagStart = tag.index;
-      explicitHeadContentStart = tag.index + tag.raw.length;
-    }
-    if (headStart < 0 && preHeadElements.has(name) && !['head', 'html', 'template'].includes(name)) {
-      headStart = tag.index;
-      implicitHead = true;
-    }
-    if (rawTextElements.has(name)) {
-      rawTextTag = name;
-      previousEnd = tag.index + tag.raw.length;
-      continue;
-    }
-    if (inertElements.has(name)) {
-      inertDepth += 1;
-      previousEnd = tag.index + tag.raw.length;
-      continue;
-    }
-    previousEnd = tag.index + tag.raw.length;
-  }
-  return '';
-}
-
-function hasActiveCspMeta(head, expectedCsp) {
-  const voidElements = new Set([
-    'area',
-    'base',
-    'br',
-    'col',
-    'embed',
-    'hr',
-    'img',
-    'input',
-    'link',
-    'meta',
-    'param',
-    'source',
-    'track',
-    'wbr',
-  ]);
-  const stack = [];
-  const allowedHeadElements = new Set(['base', 'link', 'meta', 'noscript', 'script', 'style', 'template', 'title']);
-  let cspSeen = false;
-  let controlledResourceBeforeCsp = false;
-  let headTerminated = false;
-  for (const tag of htmlTags(head)) {
-    const { closing, name, raw } = tag;
-    if (closing) {
-      if (stack.at(-1) === name) stack.pop();
-      continue;
-    }
-    if (!allowedHeadElements.has(name)) headTerminated = true;
-    if (['base', 'link', 'script', 'style'].includes(name) && !cspSeen) controlledResourceBeforeCsp = true;
-    if (
-      name === 'meta' &&
-      stack.length === 0 &&
-      readAttribute(raw, 'http-equiv')?.toLowerCase() === 'content-security-policy' &&
-      decodeHtmlAttribute(readAttribute(raw, 'content') ?? '') === expectedCsp
-    ) {
-      cspSeen = true;
-    }
-    if (!voidElements.has(name)) stack.push(name);
-  }
-  return cspSeen && !controlledResourceBeforeCsp && !headTerminated;
 }
 
 async function filesIn(directory) {
@@ -876,38 +380,44 @@ try {
   const forbiddenContent = /\.snoredex-private\.json|synthetic-secret|PRIVATE-NOTE-DO-NOT-LOG/iu;
   for (const page of ['index.html', 'collection/index.html']) {
     const html = await readFile(join(root, page), 'utf8');
-    const withoutComments = stripHtmlComments(html);
+    const { allElements, activeElements } = parseArtifactHtml(html);
     const prefix = page === 'index.html' ? '' : '../';
     const bindings = pinnedCatalogue
       ? runtimeShellBindings(activeRuntimeManifest, `${prefix}assets/${moduleManifest.runtimeAssetSet.path}/`)
       : undefined;
     const csp = `default-src 'none'; base-uri 'none'; form-action 'self'; img-src 'self'; script-src 'self'${bindings ? ` '${bindings.importMapCsp}'` : ''}; style-src 'self'; connect-src 'none'; object-src 'none'; worker-src 'none'; frame-src 'none'; font-src 'self'; media-src 'none'; manifest-src 'none'`;
-    const head = extractHead(withoutComments);
-    const hasCspMeta = hasActiveCspMeta(head, csp);
+    const hasCspMeta = hasActiveCsp(activeElements, csp);
     if (!hasCspMeta) throw new Error(`ARTIFACT_CSP_MISSING: ${page}`);
-    if (hasMetaRefresh(withoutComments)) throw new Error(`ARTIFACT_META_REFRESH_PRESENT: ${page}`);
+    if (
+      activeElements.some(
+        (element) =>
+          element.tagName === 'meta' && htmlAttribute(element, 'http-equiv')?.trim().toLowerCase() === 'refresh',
+      )
+    )
+      throw new Error(`ARTIFACT_META_REFRESH_PRESENT: ${page}`);
     if (/\b(?:unsafe-inline|unsafe-eval)\b/iu.test(html)) throw new Error(`ARTIFACT_CSP_UNSAFE_DIRECTIVE: ${page}`);
-    if (hasInlineEventHandler(html)) throw new Error(`ARTIFACT_INLINE_HANDLER_PRESENT: ${page}`);
-    if (pinnedCatalogue) {
-      const expectedImportMap = `<script type="importmap">${bindings.importMap}</script>`;
-      if (!withoutComments.includes(expectedImportMap)) throw new Error(`ARTIFACT_RUNTIME_IMPORT_MAP_INVALID: ${page}`);
-    }
+    if (allElements.some((element) => element.attrs.some((attribute) => /^on[a-z]+$/iu.test(attribute.name))))
+      throw new Error(`ARTIFACT_INLINE_HANDLER_PRESENT: ${page}`);
     let importMapCount = 0;
     let runtimeAppSeen = false;
     let runtimeThemeSeen = false;
-    for (const match of stripHtmlComments(html).matchAll(/<script\b[^>]*>/giu)) {
-      const encodedSource = readAttribute(match[0], 'src');
-      if (encodedSource === undefined) {
+    let importMapOffset;
+    for (const script of activeElements.filter((element) => element.tagName === 'script')) {
+      const source = htmlAttribute(script, 'src');
+      if (source === undefined) {
         if (
           pinnedCatalogue &&
-          decodeHtmlAttribute(readAttribute(match[0], 'type') ?? '').toLowerCase() === 'importmap'
+          script.namespaceURI === 'http://www.w3.org/1999/xhtml' &&
+          htmlAttribute(script, 'type')?.toLowerCase() === 'importmap'
         ) {
+          if (scriptText(script) !== bindings.importMap)
+            throw new Error(`ARTIFACT_RUNTIME_IMPORT_MAP_INVALID: ${page}`);
           importMapCount += 1;
+          importMapOffset = script.sourceCodeLocation?.startOffset;
           continue;
         }
         throw new Error(`ARTIFACT_INLINE_SCRIPT_PRESENT: ${page}`);
       }
-      const source = decodeHtmlAttribute(encodedSource);
       if (
         !source ||
         source !== source.trim() ||
@@ -922,9 +432,17 @@ try {
         throw new Error(`ARTIFACT_EXTERNAL_SCRIPT_PRESENT: ${page}`);
       if (pinnedCatalogue) {
         const expectedBase = `${prefix}assets/${moduleManifest.runtimeAssetSet.path}/`;
-        const type = decodeHtmlAttribute(readAttribute(match[0], 'type') ?? '').toLowerCase();
-        const integrity = decodeHtmlAttribute(readAttribute(match[0], 'integrity') ?? '');
-        if (source === `${expectedBase}app.js` && type === 'module' && integrity === bindings.appIntegrity) {
+        const type = (htmlAttribute(script, 'type') ?? '').toLowerCase();
+        const integrity = htmlAttribute(script, 'integrity') ?? '';
+        if (script.namespaceURI !== 'http://www.w3.org/1999/xhtml')
+          throw new Error(`ARTIFACT_RUNTIME_SCRIPT_INVALID: ${page}`);
+        if (
+          source === `${expectedBase}app.js` &&
+          type === 'module' &&
+          integrity === bindings.appIntegrity &&
+          importMapOffset !== undefined &&
+          importMapOffset < script.sourceCodeLocation.startOffset
+        ) {
           runtimeAppSeen = true;
         } else if (source === `${expectedBase}theme.js` && type === '' && integrity === bindings.themeIntegrity) {
           runtimeThemeSeen = true;
@@ -936,16 +454,15 @@ try {
     if (pinnedCatalogue && (importMapCount !== 1 || !runtimeAppSeen || !runtimeThemeSeen)) {
       throw new Error(`ARTIFACT_RUNTIME_SCRIPT_INVALID: ${page}`);
     }
-    for (const tag of htmlTags(withoutComments)) {
-      if (tag.closing || tag.name !== 'link') continue;
-      const rel = decodeHtmlAttribute(readAttribute(tag.raw, 'rel') ?? '')
+    for (const tag of activeElements) {
+      if (tag.tagName !== 'link') continue;
+      const rel = (htmlAttribute(tag, 'rel') ?? '')
         .trim()
         .toLowerCase()
         .split(/[\t\n\f\r ]+/u)
         .filter(Boolean);
       if (!rel.includes('stylesheet')) continue;
-      const encodedSource = readAttribute(tag.raw, 'href');
-      const source = encodedSource === undefined ? '' : decodeHtmlAttribute(encodedSource);
+      const source = htmlAttribute(tag, 'href') ?? '';
       if (
         !source ||
         source !== source.trim() ||

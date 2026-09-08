@@ -15,6 +15,9 @@ catalogue-update lifecycle is recorded in
 [`snoredex-data#332`](https://github.com/m4s-ai/snoredex-data/issues/332). Runtime-asset coherence,
 publication, and rollback follow-up is recorded in
 [`snoredex-checklist#81`](https://github.com/m4s-ai/snoredex-checklist/issues/81).
+The current audit implementation graph is
+[`snoredex-checklist#89`](https://github.com/m4s-ai/snoredex-checklist/issues/89); historical v1
+checklists in #2 do not reopen completed gates.
 
 [`catalogue.lock.json`](catalogue.lock.json) is the repository authority for the accepted producer
 revision, immutable artifact URLs, contract version, semantic fingerprint, and byte digests used by
@@ -116,8 +119,24 @@ browser gate on Ubuntu with pinned Chromium, Firefox and WebKit binaries:
 ```sh
 npx playwright install --with-deps chromium firefox webkit
 npm run build:site
-npm run test:browser
+npm run test:browser:built
 ```
+
+`test:browser:built` runs Chromium, Firefox, WebKit and accessibility/responsive checks against
+one existing `dist/site` build. It requires the expected app revision and checks every artifact file
+between suites; rebuilding or changing bytes stops the gate. CI builds once, and deployment reuses
+the build already verified by `npm run check`. For an isolated accessibility run,
+`npm run test:accessibility` still builds first. Do not rebuild while browser gates are running.
+
+HTML artifact validation uses the locked parse5 parser with scripting enabled, including effective
+duplicate attributes, inert templates, raw text and source positions. CSP must be active in the head
+before controlled resources, and the exact hashed import map must precede the module entry.
+CSS/private-data canaries remain lexical; JavaScript dependency analysis uses the pinned TypeScript
+AST. `tsconfig.tools.json` strictly checks the extracted parser, deployment and shared-browser guards;
+their executable boundary tests accompany the normal TypeScript checks.
+
+Workflow Actions are pinned to full upstream commit SHAs. The existing weekly GitHub Actions
+Dependabot configuration proposes updates; the same review and repository gates apply to them.
 
 Formatting is enforced with the exact Prettier dependency through `npm run format:check`; use
 `npm run format` to update authored files changed by the current branch. Linting is intentionally
@@ -228,6 +247,20 @@ workflow. An older commit without them is not an eligible rollback target.
 When the immediate rollback target predates browser integrity bindings, the current recovery
 tooling validates it first and then republishes that same application module set with its stamped
 theme and generated SRI/integrity shell bindings.
+The compatibility window is the active application and its one declared rollback generation,
+not an age-based promise for every cached page. Keep the legacy manifest, pre-integrity shell,
+theme and transitional publication-binding adapters while an eligible target can still need them.
+Removal requires an issue recording that neither active nor declared rollback tuples depend on the
+old format, plus complete asset, promotion and browser regression evidence for both generations.
+An unused-import scan is not sufficient evidence to remove these recovery paths.
+
+`styles.css`, fonts and placeholder image URLs remain shared presentation resources rather than
+revision-pinned modules. Preserve the selectors, layout and asset paths needed by both supported
+generations, including keyboard focus and small-screen usability. Retiring a selector or stable URL
+requires the same issue-backed compatibility proof; older pages outside that window are not a
+reason to keep every historical selector indefinitely. No CSS compatibility adapter is removed here.
+The current workflow preserves its executable input/rollback and browser guards before checking out
+an old consumer, and the live smoke expectations come from that consumer's built provenance.
 Do not edit browser-local collection state or rewrite a lock in place. Verify the deployed
 `deployment.json` and `provenance.json` tuple before considering the rollback complete.
 The HTTPS smoke runs after GitHub Pages publication. A smoke failure marks the workflow failed and

@@ -3,10 +3,21 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import test from 'node:test';
+import test, { afterEach, beforeEach } from 'node:test';
 import { validateRuntimeAssetSetDirectory, writeRuntimeAssetSet } from '../scripts/runtime-assets.mjs';
 
 const root = resolve(import.meta.dirname, '..');
+
+let ambientPublicationId: string | undefined;
+beforeEach(() => {
+  // Legacy fixtures deliberately omit publication binding; workflow environment is not fixture authority.
+  ambientPublicationId = process.env.SNOREDEX_PUBLICATION_ID;
+  delete process.env.SNOREDEX_PUBLICATION_ID;
+});
+afterEach(() => {
+  if (ambientPublicationId === undefined) delete process.env.SNOREDEX_PUBLICATION_ID;
+  else process.env.SNOREDEX_PUBLICATION_ID = ambientPublicationId;
+});
 
 test('upgrades a validated pre-integrity rollback shell before publication', async () => {
   const directory = await mkdtemp(resolve(tmpdir(), 'snoredex-runtime-promotion-'));
@@ -338,14 +349,8 @@ test('production adoption validates the reviewed target migration without requir
     manifestScript,
     /rollbackSource && lock\.catalogueFingerprint === rollbackSource\.catalogueFingerprint/u,
   );
-  assert.match(workflow, /rollback target must match the exact published recovery tuple/u);
+  assert.match(workflow, /node "\$RUNNER_TEMP\/deployment-boundaries\.mjs" rollback/u);
   assert.match(workflow, /consumer_revision lacks recoverable deployment provenance/u);
-  assert.match(
-    workflow,
-    /sameCatalogueDeployment = current\?\.catalogueFingerprint === previous\?\.catalogueFingerprint/u,
-  );
-  assert.match(workflow, /new Set\(sources\)\.size !== sources\.length \|\|\s+!sameCatalogueDeployment/u);
-  assert.match(workflow, /!digest\.test\(current\.catalogueFingerprint \?\? ''\)/u);
   assert.match(workflow, /push:\s+branches:\s+- main/u);
   assert.match(workflow, /name: Trigger independent catalogue intake/u);
   assert.match(workflow, /gh workflow run catalogue-release\.yml --repo "\$GITHUB_REPOSITORY" --ref main/u);
@@ -354,11 +359,7 @@ test('production adoption validates the reviewed target migration without requir
   assert.match(workflow, /run-name: Deploy Pages \/ \$\{\{/u);
   assert.match(workflow, /group: pages-\$\{\{/u);
   assert.match(workflow, /deployment-lane:/u);
-  assert.match(workflow, /automatic adoption deferred while a rollback run is queued or active/u);
-  assert.match(workflow, /activeStatuses = new Set\(\['queued', 'in_progress', 'waiting', 'pending'\]\)/u);
-  assert.match(workflow, /const isRollbackRun = \(run\) => run\.event === 'workflow_dispatch'/u);
-  assert.match(workflow, /const activeRuns = runs\.filter\(\(run\) => !isRollbackRun\(run\)\)/u);
-  assert.match(workflow, /\.\.\.currentRuns\(\)\.filter\(\(run\) => !isRollbackRun\(run\)\)/u);
+  assert.match(workflow, /node scripts\/deployment-boundaries\.mjs lane/u);
   assert.match(workflow, /needs: deployment-lane/u);
   assert.match(workflow, /if: needs\.deployment-lane\.outputs\.proceed == 'true'/u);
   assert.match(
@@ -366,7 +367,6 @@ test('production adoption validates the reviewed target migration without requir
     /description: Optional full consumer commit SHA \(rollback only; adopt uses the workflow revision\)/u,
   );
   assert.match(workflow, /description: Explicitly authorize first publication when no production manifest exists/u);
-  assert.match(workflow, /bootstrap authorization requires workflow_dispatch/u);
   assert.match(workflow, /state=missing/u);
   assert.match(workflow, /provenance_status=.*provenance\.json/u);
   assert.match(workflow, /current production publication evidence exists despite a missing deployment manifest/u);
@@ -386,8 +386,7 @@ test('production adoption validates the reviewed target migration without requir
     /SNOREDEX_BOOTSTRAP_AUTHORIZED: \$\{\{ steps\.deployment-inputs\.outputs\.bootstrap_authorized \}\}/u,
   );
   assert.match(workflow, /required: false/u);
-  assert.match(workflow, /consumer_revision is required for rollback/u);
-  assert.match(workflow, /consumer_revision="\$\{CONSUMER_REVISION_INPUT:-\$WORKFLOW_REVISION\}"/u);
+  assert.match(workflow, /node scripts\/deployment-boundaries\.mjs inputs/u);
   assert.match(
     workflow,
     /git show "\$WORKFLOW_REVISION:scripts\/check-production-adoption\.mjs" > "\$RUNNER_TEMP\/check-production-adoption\.mjs"/u,
@@ -400,7 +399,7 @@ test('production adoption validates the reviewed target migration without requir
     /SNOREDEX_EXPECTED_GITHUB_SHA: \$\{\{ steps\.deployment-inputs\.outputs\.consumer_revision \}\}/u,
   );
   const deployedSmokeStep = workflow.slice(workflow.indexOf('- name: Smoke-test deployed Pages site'));
-  assert.match(deployedSmokeStep, /dist\/site\/provenance\.json/u);
+  assert.match(deployedSmokeStep, /node scripts\/deployment-boundaries\.mjs smoke/u);
   assert.doesNotMatch(deployedSmokeStep, /catalogue\.lock\.json/u);
   assert.match(smokeScript, /readRuntimeAssetSet\(\s*pointer,\s*runtime,\s*getRuntimeBytes,?\s*\)/u);
   assert.match(smokeScript, /readRuntimeAssetSet\(\s*retained\[0\],\s*deployment\.rollback,\s*getRuntimeBytes,?\s*\)/u);

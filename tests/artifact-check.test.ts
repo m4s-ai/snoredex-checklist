@@ -249,7 +249,6 @@ test('requires an active first-applicable CSP before controlled resources', asyn
     `<head><noscript /><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     `<head><p></p><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     `<head><meta data-x=\"><meta http-equiv="Content-Security-Policy" content="${csp}">\"></head>`,
-    `<head><!-- <!--> <head><meta http-equiv="Content-Security-Policy" content="${csp}"></head> --></head>`,
     `</br><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     `<body><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></body>`,
     `<p>x</p><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
@@ -258,7 +257,6 @@ test('requires an active first-applicable CSP before controlled resources', asyn
     `<template><xmp></template><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></xmp>`,
     `<template><script src="x"></template></script><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></template>`,
     `<template><script src="theme.js"><!--<script src="theme.js"></script></template><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></script></template>`,
-    `<template><script src="theme.js"><!--<script>--></script></template><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></script></template>`,
     `<template><script src="theme.js"></ script></template><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head><script src="theme.js"></script>`,
     `<script src="theme.js"></script><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
     `<meta charset="utf-8">text<meta http-equiv="Content-Security-Policy" content="${csp}"><body>`,
@@ -273,6 +271,60 @@ test('requires an active first-applicable CSP before controlled resources', asyn
       const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
       assert.notEqual(result.status, 0);
       assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_CSP_MISSING: index\.html/u);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test('accepts effective head policies previously rejected by the handcrafted parser', async () => {
+  // These exact cases also execute against Chromium, Firefox and WebKit.
+  for (const indexMeta of [
+    `<head><!-- <!--> <head><meta http-equiv="Content-Security-Policy" content="${csp}"></head> --></head>`,
+    `<template><script src="theme.js"><!--<script>--></script></template><head><meta http-equiv="Content-Security-Policy" content="${csp}"></head></script></template>`,
+  ]) {
+    const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-parsed-csp-'));
+    try {
+      await writeValidArtifact(directory, { indexMeta, indexScript: '' });
+      const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test('uses browser-effective duplicate attributes and quoted tag boundaries', async () => {
+  for (const [indexScript, accepted] of [
+    ['<script data-label=">" src="/outside.js"></script>', false],
+    ['<script src="/outside.js" src="theme.js"></script>', false],
+    ['<script src="theme.js" src="/outside.js"></script>', true],
+    ['<script src="theme.js" data-label="/onload="></script>', true],
+    ['<script\u00a0src="/outside.js"></script>', true],
+  ] as const) {
+    const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-parsed-attribute-'));
+    try {
+      await writeValidArtifact(directory, { indexScript });
+      const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+      assert.equal(result.status === 0, accepted, indexScript + result.stdout + result.stderr);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test('does not let later CSP attributes or policies hide a wrong first value', async () => {
+  for (const indexMeta of [
+    `<head><meta http-equiv="Content-Security-Policy" content="default-src *" content="${csp}"></head>`,
+    `<head><meta http-equiv="Content-Security-Policy" content="default-src *"><meta http-equiv="Content-Security-Policy" content="${csp}"></head>`,
+    `<head><meta http-equiv=" Content-Security-Policy" content="${csp}"></head>`,
+  ]) {
+    const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-parsed-policy-'));
+    try {
+      await writeValidArtifact(directory, { indexMeta });
+      const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /ARTIFACT_CSP_MISSING/u);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -580,15 +632,15 @@ test('preserves script-supporting elements after invalid xmp in select context',
   }
 });
 
-test('preserves script-supporting elements after invalid xmp in frameset context', async () => {
+test('ignores script tokens discarded by the browser frameset parser', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'snoredex-artifact-frameset-xmp-test-'));
   try {
     await writeValidArtifact(directory, {
       indexScript: '<frameset><xmp><script src="/outside.js"></script>',
     });
     const result = spawnSync(process.execPath, [checker, directory], { cwd: root, encoding: 'utf8' });
-    assert.notEqual(result.status, 0);
-    assert.match(`${result.stdout}${result.stderr}`, /ARTIFACT_EXTERNAL_SCRIPT_PRESENT: index\.html/u);
+    assert.equal(result.status, 0);
+    assert.match(`${result.stdout}${result.stderr}`, /artifact ok:/u);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

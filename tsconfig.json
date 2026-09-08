@@ -8,6 +8,7 @@
     "types": ["node"],
     "esModuleInterop": true,
     "allowImportingTsExtensions": true,
+    "allowJs": true,
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
     "forceConsistentCasingInFileNames": true,
