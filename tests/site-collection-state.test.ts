@@ -176,15 +176,159 @@ test('publishes one durable revision for a multi-item confirmation fan-out', asy
       { itemId: ITEM_B, status: 'ordered', quantityOwned: 0, quantityOrdered: 1 },
     ],
   });
-  let notifications = 0;
-  controller.onChange(() => notifications++);
+  const notifications: Array<string | undefined> = [];
+  controller.onChange((itemId) => notifications.push(itemId));
 
   const save = controller.setStatus(ITEM_A, 'skip');
   immediateSaves[0].resolve(saved);
   await save;
 
-  assert.ok(notifications > 1, 'the item-level fan-out remains available to row consumers');
+  assert.deepEqual(notifications, [ITEM_A, ITEM_A], 'only the changed item receives saving and saved events');
   assert.equal(controller.confirmedRevision, 1, 'overview consumers can gate on one durable revision');
+});
+
+test('keeps note-only notifications bounded to the edited item', async () => {
+  const { controller, noteSaves } = makeHarness({
+    active: [
+      { itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0 },
+      { itemId: ITEM_B, status: 'ordered', quantityOwned: 0, quantityOrdered: 1 },
+    ],
+  });
+  const notifications: Array<string | undefined> = [];
+  controller.onChange((itemId) => notifications.push(itemId));
+
+  assert.deepEqual(controller.scheduleNote(ITEM_A, 'private note'), { ok: true });
+  const flush = controller.flushNote();
+  noteSaves[0].resolve(saved);
+  assert.deepEqual(await flush, { ok: true, skipped: undefined });
+  assert.deepEqual(notifications, [ITEM_A, ITEM_A, ITEM_A]);
+});
+
+test('completes a note save when the pending draft reverts before flush', async () => {
+  const { controller, noteSaves } = makeHarness({
+    active: [{ itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0, note: 'old' }],
+  });
+  const notifications: Array<string | undefined> = [];
+  controller.onChange((itemId) => notifications.push(itemId));
+
+  assert.deepEqual(controller.scheduleNote(ITEM_A, 'new'), { ok: true });
+  assert.equal(controller.item(ITEM_A).save.phase, 'saving');
+  assert.deepEqual(controller.scheduleNote(ITEM_A, 'old'), { ok: true });
+  assert.equal(controller.item(ITEM_A).save.phase, 'saving');
+
+  const flush = controller.flushNote();
+  noteSaves[0].resolve(saved);
+  assert.deepEqual(await flush, { ok: true, skipped: undefined });
+  assert.equal(controller.item(ITEM_A).save.phase, 'saved');
+  assert.deepEqual(notifications, [ITEM_A, ITEM_A, ITEM_A, ITEM_A]);
+});
+
+test('does not carry a settled concurrent item into later note notifications', async () => {
+  const { controller, immediateSaves, noteSaves } = makeHarness({
+    active: [
+      { itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0 },
+      { itemId: ITEM_B, status: 'ordered', quantityOwned: 0, quantityOrdered: 1 },
+    ],
+  });
+  const notifications: Array<string | undefined> = [];
+  controller.onChange((itemId) => notifications.push(itemId));
+
+  const statusSave = controller.setStatus(ITEM_A, 'skip');
+  assert.deepEqual(controller.scheduleNote(ITEM_B, 'first'), { ok: true });
+  immediateSaves[0].resolve(saved);
+  await statusSave;
+  assert.deepEqual(controller.scheduleNote(ITEM_B, 'second'), { ok: true });
+
+  const flush = controller.flushNote();
+  noteSaves[0].resolve(saved);
+  assert.deepEqual(await flush, { ok: true, skipped: undefined });
+  assert.deepEqual(notifications, [ITEM_A, ITEM_A, ITEM_B, ITEM_A, ITEM_B, ITEM_B, ITEM_B]);
+});
+
+test('retains pending note completions across item switches and reverts', async () => {
+  const { controller, noteSaves } = makeHarness({
+    active: [
+      { itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0, note: 'old-a' },
+      { itemId: ITEM_B, status: 'ordered', quantityOwned: 0, quantityOrdered: 1, note: 'old-b' },
+    ],
+  });
+  const notifications: Array<string | undefined> = [];
+  controller.onChange((itemId) => notifications.push(itemId));
+
+  assert.deepEqual(controller.scheduleNote(ITEM_A, 'new-a'), { ok: true });
+  assert.deepEqual(controller.scheduleNote(ITEM_B, 'new-b'), { ok: true });
+  assert.deepEqual(controller.scheduleNote(ITEM_A, 'old-a'), { ok: true });
+  assert.deepEqual(controller.scheduleNote(ITEM_B, 'old-b'), { ok: true });
+
+  const flush = controller.flushNote();
+  noteSaves[0].resolve(saved);
+  assert.deepEqual(await flush, { ok: true, skipped: undefined });
+  assert.equal(controller.item(ITEM_A).save.phase, 'saved');
+  assert.equal(controller.item(ITEM_B).save.phase, 'saved');
+  assert.equal(notifications.filter((itemId) => itemId === ITEM_A).length, 6);
+  assert.equal(notifications.filter((itemId) => itemId === ITEM_B).length, 5);
+  assert.ok(notifications.every((itemId) => itemId === ITEM_A || itemId === ITEM_B));
+});
+
+test('completes a reverted note before an immediate status save', async () => {
+  const { controller, immediateSaves } = makeHarness({
+    active: [
+      { itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0, note: 'old-a' },
+      { itemId: ITEM_B, status: 'ordered', quantityOwned: 0, quantityOrdered: 1 },
+    ],
+  });
+  const notifications: Array<string | undefined> = [];
+  controller.onChange((itemId) => notifications.push(itemId));
+
+  controller.scheduleNote(ITEM_A, 'new-a');
+  controller.scheduleNote(ITEM_A, 'old-a');
+  const save = controller.setStatus(ITEM_B, 'have');
+  immediateSaves[0].resolve(saved);
+  assert.deepEqual(await save, { ok: true, skipped: undefined });
+
+  assert.equal(controller.item(ITEM_A).save.phase, 'saved');
+  assert.equal(controller.item(ITEM_A).confirmed?.note, 'old-a');
+  assert.equal(notifications.filter((itemId) => itemId === ITEM_A).length, 4);
+});
+
+test('completes a reverted note before an immediate quantity save', async () => {
+  const { controller, immediateSaves } = makeHarness({
+    active: [
+      { itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0, note: 'old-a' },
+      { itemId: ITEM_B, status: 'ordered', quantityOwned: 0, quantityOrdered: 1 },
+    ],
+  });
+
+  controller.scheduleNote(ITEM_A, 'new-a');
+  controller.scheduleNote(ITEM_A, 'old-a');
+  controller.setQuantityDraft(ITEM_B, '2', '1');
+  const save = controller.commitQuantities(ITEM_B);
+  immediateSaves[0].resolve(saved);
+  assert.deepEqual(await save, { ok: true, skipped: undefined });
+
+  assert.equal(controller.item(ITEM_A).save.phase, 'saved');
+  assert.equal(controller.item(ITEM_A).confirmed?.note, 'old-a');
+});
+
+test('recomputes note failures after a concurrent status save settles', async () => {
+  const { controller, immediateSaves, noteSaves } = makeHarness({
+    active: [
+      { itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0 },
+      { itemId: ITEM_B, status: 'ordered', quantityOwned: 0, quantityOrdered: 1 },
+    ],
+  });
+
+  const statusSave = controller.setStatus(ITEM_A, 'skip');
+  controller.scheduleNote(ITEM_B, 'private note');
+  immediateSaves[0].resolve(saved);
+  assert.deepEqual(await statusSave, { ok: true, skipped: undefined });
+
+  const flush = controller.flushNote();
+  noteSaves[0].resolve({ ok: false, error: 'STORAGE_WRITE_FAILED' });
+  assert.deepEqual(await flush, { ok: false, error: 'STORAGE_WRITE_FAILED' });
+  assert.equal(controller.item(ITEM_A).save.phase, 'saved');
+  assert.equal(controller.item(ITEM_A).save.error, undefined);
+  assert.equal(controller.item(ITEM_B).save.phase, 'failed');
 });
 
 test('canonicalizes equivalent quantity drafts on no-op and persisted commits', async () => {

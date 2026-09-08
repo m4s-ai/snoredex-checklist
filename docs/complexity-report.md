@@ -3,9 +3,9 @@
 > Advisory AST-derived estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (38 production code files).
-Lines: 14,975.
-Function-like nodes: 923.
-McCabe estimate: sum 4,363; mean 4.7; median 2; P90 10; P95 19.
+Lines: 15,019.
+Function-like nodes: 925.
+McCabe estimate: sum 4,374; mean 4.7; median 2; P90 10; P95 19.
 Hotspots: 91 functions exceed 10; 41 exceed 20.
 
 The report parses each source file with the bundled TypeScript compiler and counts runtime function-like declarations plus structural decision nodes: if/for/while/do/catch/case statements, conditional expressions and logical (&&/||/??) binary expressions. Type-only function signatures and nested function bodies are excluded from their enclosing function. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
@@ -13,8 +13,8 @@ The report parses each source file with the bundled TypeScript compiler and coun
 | Location                                  | Function                         | Complexity |
 | ----------------------------------------- | -------------------------------- | ---------: |
 | `src/site/catalogue.ts:237`               | `validateSnapshot`               |         90 |
-| `src/site/app.ts:1671`                    | `renderResults`                  |         75 |
 | `src/state/storage.ts:716`                | `persistPendingNoteDraft`        |         75 |
+| `src/site/app.ts:1691`                    | `renderResults`                  |         74 |
 | `src/state/reconciliation.ts:515`         | `reconcilePrivateState`          |         58 |
 | `src/catalogue/validate.ts:235`           | `validateSemantics`              |         56 |
 | `src/catalogue/validate.ts:416`           | `validateCatalogueFixture`       |         54 |
@@ -28,7 +28,7 @@ The report parses each source file with the bundled TypeScript compiler and coun
 | `scripts/check-artifact.mjs:278`          | `stripHtmlComments`              |         32 |
 | `src/state/domain.ts:211`                 | `parseState`                     |         32 |
 | `src/catalogue/sync.ts:763`               | `syncCataloguePair`              |         29 |
-| `src/site/app.ts:1367`                    | `refresh`                        |         29 |
+| `src/site/app.ts:1387`                    | `refresh`                        |         29 |
 | `src/site/catalogue.ts:93`                | `validateProvenance`             |         29 |
 | `src/site/query.ts:57`                    | `criteriaFromParameters`         |         28 |
 | `src/state/browser-reconciliation.ts:127` | `writeAuthority`                 |         28 |

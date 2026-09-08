@@ -235,6 +235,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
   private listeners = new Set<(itemId?: string) => void>();
   private activeOperations = new Map<number, SaveOperation>();
   private pendingNote: PendingNoteSave | undefined;
+  private pendingNoteNotifications = new Set<string>();
   private noteFlushTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
   private nextRevision = 0;
   private nextOperationId = 0;
@@ -411,14 +412,23 @@ export class BrowserCollectionStateController implements CollectionStateControll
     const result = this.domain.applyNoteEdit(itemId, this.records.get(itemId), note);
     if (!result.ok) return failure(result.error ?? 'EDIT_INVALID_NOTE');
     const previousNote = this.records.get(itemId)?.note;
-    this.setRecord(itemId, result.value);
     const meta = this.editMeta(itemId);
+    const noteChanged = previousNote !== result.value?.note || meta.noteDraft !== previousNote;
+    this.setRecord(itemId, result.value);
     meta.noteDraft = note;
-    if (previousNote !== result.value?.note || meta.noteDraft !== previousNote) {
+    if (noteChanged) {
       meta.versions.note = ++this.nextRevision;
     }
     this.clearFailureAfterEdit(meta, 'note');
-    const pending = this.pendingSnapshot();
+    if (noteChanged) this.pendingNoteNotifications.add(itemId);
+    const snapshot = this.pendingSnapshot();
+    const affected = new Map(snapshot.affected);
+    for (const pendingItemId of this.pendingNoteNotifications) {
+      const currentFields = affected.get(pendingItemId);
+      if (currentFields === undefined) affected.set(pendingItemId, new Set(['note']));
+      else if (!currentFields.has('note')) affected.set(pendingItemId, new Set([...currentFields, 'note']));
+    }
+    const pending = { ...snapshot, affected };
     const scheduled = this.store.scheduleNoteSave(pending.state, false);
     this.pendingNote = { ...pending, scheduled: scheduled.ok };
     if (!scheduled.ok) {
@@ -439,15 +449,19 @@ export class BrowserCollectionStateController implements CollectionStateControll
     const blocked = this.editBlockError();
     if (blocked !== undefined) {
       this.pendingNote = undefined;
+      this.pendingNoteNotifications.clear();
       this.notify();
       return failure(blocked);
     }
     const pending = this.pendingNote;
     if (pending === undefined) return { ok: true, skipped: true };
+    const pendingNoteItemIds = new Set(this.pendingNoteNotifications);
     this.pendingNote = undefined;
-    const operation = this.beginOperation(pending);
+    this.pendingNoteNotifications.clear();
+    const snapshot = this.pendingSnapshotWithNoteNotifications(pendingNoteItemIds);
+    const operation = this.beginOperation(snapshot);
     if (!pending.scheduled || !this.store.hasPendingNote()) {
-      const scheduled = this.store.scheduleNoteSave(pending.state, false);
+      const scheduled = this.store.scheduleNoteSave(snapshot.state, false);
       if (!scheduled.ok) {
         const outcome = failure(scheduled.error ?? 'STORAGE_WRITE_FAILED');
         this.finishOperation(operation, outcome);
@@ -508,6 +522,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
       }
       this.cancelNoteTimer();
       this.pendingNote = undefined;
+      this.pendingNoteNotifications.clear();
       this.activeOperations.clear();
       this.records = new Map(draft.items.map((record) => [record.itemId, record]));
       this.confirmedRecords = new Map(this.records);
@@ -570,6 +585,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     this.commitUncertain = true;
     this.cancelNoteTimer();
     this.pendingNote = undefined;
+    this.pendingNoteNotifications.clear();
     return true;
   }
 
@@ -580,12 +596,15 @@ export class BrowserCollectionStateController implements CollectionStateControll
 
   private saveImmediate(): Promise<CollectionEditResult> {
     this.cancelNoteTimer();
+    const pendingNoteItemIds = new Set(this.pendingNoteNotifications);
     this.pendingNote = undefined;
     if (this.commitUncertain) {
+      this.pendingNoteNotifications.clear();
       this.notify();
       return Promise.resolve(failure('STORAGE_COMMIT_UNCERTAIN'));
     }
-    const operation = this.beginOperation(this.pendingSnapshot());
+    this.pendingNoteNotifications.clear();
+    const operation = this.beginOperation(this.pendingSnapshotWithNoteNotifications(pendingNoteItemIds));
     return this.store.saveImmediate(operation.state).then((result) => {
       const outcome = persistenceResult(result);
       this.finishOperation(operation, outcome);
@@ -600,6 +619,17 @@ export class BrowserCollectionStateController implements CollectionStateControll
     for (const [itemId, meta] of this.edits) versions.set(itemId, { ...meta.versions });
     const affected = this.affectedFields(records);
     return { state, records, versions, affected };
+  }
+
+  private pendingSnapshotWithNoteNotifications(noteItemIds: ReadonlySet<string>): Omit<PendingNoteSave, 'scheduled'> {
+    const snapshot = this.pendingSnapshot();
+    const affected = new Map(snapshot.affected);
+    for (const itemId of noteItemIds) {
+      const fields = affected.get(itemId);
+      if (fields === undefined) affected.set(itemId, new Set(['note']));
+      else if (!fields.has('note')) affected.set(itemId, new Set([...fields, 'note']));
+    }
+    return { ...snapshot, affected };
   }
 
   private affectedFields(records: ReadonlyMap<string, PrivateItemState>): ReadonlyMap<string, ReadonlySet<EditField>> {
@@ -657,8 +687,6 @@ export class BrowserCollectionStateController implements CollectionStateControll
     if (result.ok && !result.skipped && operation.id > this.lastConfirmedOperationId) {
       this.lastConfirmedOperationId = operation.id;
       this.durableRevision += 1;
-      for (const itemId of this.confirmedRecords.keys()) touched.add(itemId);
-      for (const itemId of operation.records.keys()) touched.add(itemId);
       this.confirmedRecords = new Map(operation.records);
       this.hasActiveState = true;
       for (const [itemId, fields] of operation.affected) {
