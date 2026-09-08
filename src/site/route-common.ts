@@ -27,6 +27,7 @@ export function link(href: string, label: string, className?: string): HTMLAncho
 export function enableThemeControl(): void {
   const button = document.querySelector<HTMLButtonElement>('[data-theme-toggle]');
   if (!button) return;
+  button.disabled = false;
   const update = (): void => {
     const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
     button.textContent = 'Dark theme';
@@ -45,16 +46,52 @@ export function enableThemeControl(): void {
   update();
 }
 
-export function renderInvalid(container: HTMLElement, recoverableLocalization?: string, failClosed = false): void {
-  if (failClosed) {
-    for (const element of document.querySelectorAll<HTMLElement>('[data-catalogue-dependent]')) element.hidden = true;
-  }
+export function finishStartup(): void {
+  const fallback = document.querySelector<HTMLElement>('[data-startup-fallback]');
+  if (fallback) fallback.hidden = true;
+  for (const element of document.querySelectorAll<HTMLElement>('[data-catalogue-dependent]')) element.hidden = false;
+}
+
+function hideCatalogueUi(): void {
+  const fallback = document.querySelector<HTMLElement>('[data-startup-fallback]');
+  if (fallback) fallback.hidden = true;
+  for (const element of document.querySelectorAll<HTMLElement>('[data-catalogue-dependent]')) element.hidden = true;
+}
+
+export function renderUnavailable(container: HTMLElement, unsupported = false): void {
+  hideCatalogueUi();
+  container.hidden = false;
+  const heading = unsupported ? 'Catalogue format not supported' : 'Catalogue unavailable';
+  const section = text('section', undefined, 'state-panel');
+  section.setAttribute('aria-live', 'polite');
+  section.append(
+    text('h2', heading),
+    text(
+      'p',
+      unsupported
+        ? 'This version of the checklist cannot open this catalogue. Reload to check for an updated app.'
+        : 'The catalogue could not be loaded or verified. Reload the page to try again.',
+    ),
+    text('p', 'Your saved collection has not been changed.'),
+  );
+  const actions = text('p');
+  actions.append(
+    link('', 'Reload page'),
+    ' · ',
+    link(document.body.dataset.page === 'collection' ? '../' : './', 'Home'),
+  );
+  section.append(actions);
+  container.replaceChildren(section);
+  setViewStatus(heading);
+}
+
+export function renderInvalid(container: HTMLElement, recoverableLocalization?: string): void {
+  hideCatalogueUi();
   container.hidden = false;
   const section = text('section', undefined, 'state-panel');
   section.setAttribute('aria-live', 'polite');
-  const stateMessage = failClosed
-    ? 'The complete link could not be validated. No catalogue or private collection state was read.'
-    : 'The complete link could not be validated. No private collection state was read.';
+  const stateMessage =
+    'Some filters in this link are invalid. Clear them to continue. Your saved collection has not been changed.';
   section.append(text('h2', 'Invalid checklist link'), text('p', stateMessage));
   const actions = text('p');
   if (recoverableLocalization || window.location.search) {
@@ -70,7 +107,7 @@ export function renderInvalid(container: HTMLElement, recoverableLocalization?: 
   actions.append(link(homeHref, 'Home'));
   section.append(actions);
   container.replaceChildren(section);
-  setViewStatus(failClosed ? 'Catalogue unavailable.' : 'Invalid checklist link.');
+  setViewStatus('Invalid checklist link.');
 }
 
 export function isRuntimeRecord(value: unknown): value is Record<string, unknown> {

@@ -21,7 +21,7 @@
     <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="site-header">
       <a class="brand" href="./">Snoredex Checklist</a
-      ><button type="button" data-theme-toggle aria-pressed="false">Dark theme</button>
+      ><button type="button" data-theme-toggle disabled aria-pressed="false">Dark theme</button>
     </header>
     <main id="main-content" class="page-shell">
       <section class="hero" aria-labelledby="hero-title">
@@ -33,7 +33,7 @@
         </p>
         <p><a class="button" href="collection/">Open collection</a></p>
       </section>
-      <section class="surface persuasion" data-catalogue-dependent aria-labelledby="about-title">
+      <section class="surface persuasion" data-catalogue-dependent hidden aria-labelledby="about-title">
         <h2 id="about-title">Made for slow, careful collecting</h2>
         <p class="persuasion-copy">
           Work from an evidence-bound catalogue, keep every collection decision in this browser, and carry your progress
@@ -50,7 +50,7 @@
           <li><strong>Your state stays portable.</strong> Export and recovery remain under your control.</li>
         </ul>
       </section>
-      <section class="surface directory" data-catalogue-dependent aria-labelledby="directory-title">
+      <section class="surface directory" data-catalogue-dependent hidden aria-labelledby="directory-title">
         <div class="directory-heading">
           <div>
             <h2 id="directory-title">Browse by locality and language</h2>
@@ -62,7 +62,7 @@
           <div data-localizations><p>Loading localizations…</p></div>
         </nav>
       </section>
-      <section class="surface" data-catalogue-dependent aria-labelledby="trust-title">
+      <section class="surface" data-catalogue-dependent hidden aria-labelledby="trust-title">
         <h2 id="trust-title">Public data, private collection</h2>
         <p>
           Search and filter links contain public catalogue criteria and the explicitly public status criterion only.
@@ -71,7 +71,13 @@
         </p>
         <div data-provenance></div>
       </section>
-      <section data-view class="state-panel" hidden aria-live="polite"></section>
+      <section data-startup-fallback class="state-panel">
+        <h2>Catalogue has not loaded</h2>
+        <p>If this message remains, reload the page. JavaScript must be enabled to browse the checklist.</p>
+        <p>Your saved collection stays in this browser.</p>
+        <p><a href="">Reload page</a></p>
+      </section>
+      <div data-view hidden></div>
     </main>
     <footer class="site-footer">
       <span>English interface · static GitHub Pages site</span

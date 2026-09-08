@@ -51,11 +51,20 @@ const collectionBindings = runtimeShellBindings(runtimeManifest, `../assets/${mo
 
 // A second complete runtime generation, with independently bound module bytes and
 // the same catalogue identity. Serve it in memory like a retained deployment.
-async function retainedRuntimeFixture() {
+async function retainedRuntimeFixture({ unsupported = false, invalidDigest = false, publicationId } = {}) {
   const revision = runtimeManifest.runtime.appRevision === 'f'.repeat(40) ? 'e'.repeat(40) : 'f'.repeat(40);
   const directory = await import(pathToFileURL(join(root, 'assets/directory-snapshot.js')));
   const { directoryEnvelopeDigest } = await import(pathToFileURL(join(root, 'assets/directory.js')));
-  const digest = await directoryEnvelopeDigest(directory.default, { ...directory.provenance, appRevision: revision });
+  const catalogue = await import(pathToFileURL(join(root, 'assets/snapshot.js')));
+  const provenance = { ...directory.provenance, appRevision: revision, ...(publicationId ? { publicationId } : {}) };
+  const directoryValue = structuredClone(directory.default);
+  const catalogueValue = structuredClone(catalogue.default);
+  if (unsupported) {
+    directoryValue.meta.schemaVersion = '9.0.0';
+    catalogueValue.meta.schemaVersion = '9.0.0';
+  }
+  const digest = await directoryEnvelopeDigest(directoryValue, provenance);
+  if (invalidDigest) directoryValue.localizations[0].displayName = 'Synthetic changed directory';
   const modules = new Map(
     await Promise.all(
       runtimeManifest.modules.map(async ({ path }) => [
@@ -67,8 +76,20 @@ async function retainedRuntimeFixture() {
       ]),
     ),
   );
+  if (unsupported || invalidDigest || publicationId) {
+    for (const [path, value] of [
+      ['directory-snapshot.js', directoryValue],
+      ['snapshot.js', catalogueValue],
+    ]) {
+      modules.set(
+        path,
+        `export default ${JSON.stringify(value)}; export const provenance = ${JSON.stringify(provenance)};`,
+      );
+    }
+  }
   const manifest = {
     ...runtimeManifest,
+    ...(publicationId ? { publicationId } : {}),
     runtime: { ...runtimeManifest.runtime, appRevision: revision },
     modules: [...modules].map(([path, source]) => ({
       path,
@@ -94,9 +115,105 @@ async function retainedRuntimeFixture() {
         .replace(/(name="snoredex-directory-sha256" content=")[^"]+/u, `$1${digest}`),
     );
   }
-  return { modules, shells, runtimePath };
+  return { modules, shells, runtimePath, manifest };
 }
 const retainedRuntime = await retainedRuntimeFixture();
+const unsupportedRuntime = await retainedRuntimeFixture({ unsupported: true });
+const publishedRuntime = await retainedRuntimeFixture({ publicationId: 'pages-123-2' });
+const digestMismatchRuntime = await retainedRuntimeFixture({ invalidDigest: true });
+
+async function captureFailure(page, name) {
+  if (process.env.SNOREDEX_VISUAL_EVIDENCE) {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.screenshot({ path: join(process.env.SNOREDEX_VISUAL_EVIDENCE, `${name}.png`), fullPage: true });
+  }
+}
+
+async function assertFailureStates(browser, name) {
+  for (const path of ['/', '/collection/']) {
+    const staticPage = await browser.newPage({ javaScriptEnabled: false });
+    await staticPage.goto(`${baseUrl}${path}`);
+    assert.equal(await staticPage.locator('[data-startup-fallback]').isVisible(), true, `${name}: static recovery`);
+    assert.equal(await staticPage.getByRole('link', { name: 'Reload page' }).isVisible(), true);
+    assert.equal(await staticPage.locator('[data-theme-toggle]').isDisabled(), true);
+    if (name === 'chromium')
+      await captureFailure(staticPage, `issue-99-static-${path === '/' ? 'home' : 'collection'}`);
+    await staticPage.close();
+    for (const module of [
+      'app.js',
+      path === '/' ? 'home.js' : 'collection.js',
+      path === '/' ? 'directory-snapshot.js' : 'snapshot.js',
+    ]) {
+      const page = await browser.newPage();
+      await probePrivateAccess(page);
+      await page.route(`**/assets/runtime/**/${module}`, (route) => route.abort());
+      await page.goto(`${baseUrl}${path}?q=Snorlax`, { waitUntil: 'networkidle' });
+      assert.equal(
+        await page.locator(module === 'app.js' ? '[data-startup-fallback]' : '[data-view]').isVisible(),
+        true,
+      );
+      if (module !== 'app.js')
+        assert.equal(await page.locator('[data-view] h2').textContent(), 'Catalogue unavailable');
+      assert.equal(await page.getByRole('link', { name: 'Reload page' }).getAttribute('href'), '');
+      assert.equal(await page.evaluate(() => window.privateAccesses), 0, `${name}: missing ${module} preserves state`);
+      if (name === 'chromium') await captureFailure(page, `issue-99-missing-${module}`);
+      await page.close();
+    }
+    for (const [fixture, expectedHeading] of [
+      [unsupportedRuntime, 'Catalogue format not supported'],
+      [publishedRuntime, undefined],
+      ...(path === '/' ? [[digestMismatchRuntime, 'Catalogue unavailable']] : []),
+    ]) {
+      const page = await browser.newPage();
+      await probePrivateAccess(page);
+      await page.route(`${baseUrl}/${fixture.runtimePath}**`, (route) => {
+        const module = new URL(route.request().url()).pathname.slice(fixture.runtimePath.length + 1);
+        return route.fulfill({ contentType: 'text/javascript', body: fixture.modules.get(module) });
+      });
+      await page.route(`${baseUrl}${path}`, (route) =>
+        route.fulfill({ contentType: 'text/html', body: fixture.shells.get(path) }),
+      );
+      await page.goto(`${baseUrl}${path}`, { waitUntil: 'networkidle' });
+      if (expectedHeading) {
+        assert.equal(await page.locator('[data-view] h2').textContent(), expectedHeading);
+        assert.equal(
+          await page.evaluate(() => window.privateAccesses),
+          0,
+          `${name}: unsupported contract preserves state`,
+        );
+      } else {
+        await page.locator('.provenance-disclosure > summary').click();
+        const revision = await page.locator('meta[name="snoredex-app-revision"]').getAttribute('content');
+        assert.equal(
+          await page
+            .locator('dt')
+            .filter({ hasText: /^App revision$/u })
+            .locator('+ dd')
+            .textContent(),
+          revision,
+        );
+        assert.equal(
+          await page
+            .locator('dt')
+            .filter({ hasText: /^Publication$/u })
+            .locator('+ dd')
+            .textContent(),
+          fixture.manifest.publicationId,
+        );
+        assert.equal(
+          await page.getByRole('link', { name: 'View publication run (external site)' }).getAttribute('href'),
+          'https://github.com/m4s-ai/snoredex-checklist/actions/runs/123/attempts/2',
+        );
+      }
+      if (name === 'chromium')
+        await captureFailure(
+          page,
+          `issue-99-${expectedHeading ?? 'publication'}-${path === '/' ? 'home' : 'collection'}`,
+        );
+      await page.close();
+    }
+  }
+}
 
 async function probePrivateAccess(page) {
   await page.addInitScript(() => {
@@ -635,6 +752,7 @@ try {
     }
     try {
       await assertRetainedRoutes(browser, name);
+      await assertFailureStates(browser, name);
       const page = await browser.newPage();
       await probePrivateAccess(page);
       const failures = [];
@@ -727,7 +845,7 @@ try {
       assert.equal(staleValidatorHome?.status(), 200, `${name}: stale validator home status`);
       assert.equal(
         await staleValidatorPage.locator('[data-view] h2').textContent(),
-        'Invalid checklist link',
+        'Catalogue unavailable',
         `${name}: stable entry point rejects digest mismatch despite a permissive cached validator`,
       );
       assert.equal(
@@ -749,7 +867,7 @@ try {
       assert.equal(staleProvenanceHome?.status(), 200, `${name}: stale provenance home status`);
       assert.equal(
         await staleProvenancePage.locator('[data-view] h2').textContent(),
-        'Invalid checklist link',
+        'Catalogue unavailable',
         `${name}: directory envelope rejects internally consistent stale provenance`,
       );
       assert.equal(
@@ -838,7 +956,7 @@ try {
         );
         assert.equal(
           await mixedRuntimePage.locator('[data-view] h2').textContent(),
-          'Invalid checklist link',
+          'Catalogue unavailable',
           `${name}: mixed ${modulePath} fails closed`,
         );
         assert.equal(
@@ -1308,6 +1426,8 @@ try {
             if (key.startsWith('snoredex-checklist.private-state')) localStorage.removeItem(key);
         });
         await page.goto(focusUrl, { waitUntil: 'networkidle' });
+        assert.equal(await page.locator('.query-advanced').getAttribute('open'), null);
+        assert.equal(await page.locator('.query-advanced > summary').innerText(), 'More filters · Need');
         const focusIds = await page
           .locator('[data-view] [data-item-id]')
           .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-item-id')));
@@ -1479,6 +1599,10 @@ try {
         });
         await openRecoveryTools();
         await recoveryStatus.filter({ hasText: 'Saved collection is unreadable.' }).waitFor();
+        assert.equal(await page.getByRole('heading', { name: 'Saved collection unavailable', exact: true }).count(), 1);
+        assert.equal(await page.evaluate(() => localStorage.getItem('snoredex-checklist.private-state')), '{malformed');
+        await page.getByRole('link', { name: 'Open backup and recovery' }).click();
+        assert.equal(await page.locator('#backup-and-recovery > details').getAttribute('open'), '');
         assert.equal(await exportButton.isEnabled(), false, `${name}: unreadable active disables active export`);
         assert.equal(
           await exportRecoveryButton.isEnabled(),

@@ -8,7 +8,16 @@ import {
 import type { SiteProvenance } from './snapshot.js';
 import { presentText } from './item-presentation.js';
 import { serializeQuery } from './query.js';
-import { $, text, link, shellAppRevision, matchesShellRevision, renderInvalid } from './route-common.js';
+import {
+  $,
+  text,
+  link,
+  shellAppRevision,
+  matchesShellRevision,
+  renderUnavailable,
+  finishStartup,
+  isRuntimeRecord,
+} from './route-common.js';
 import { renderProvenance, sortedLocalizations, type DirectoryCatalogue } from './catalogue-view.js';
 
 function renderLocalizationLinks(container: HTMLElement, catalogue: DirectoryCatalogue): void {
@@ -48,19 +57,29 @@ function renderLocalizationLinks(container: HTMLElement, catalogue: DirectoryCat
 }
 
 function renderIndex(catalogue: DirectoryCatalogue, provenance: SiteProvenance): void {
+  finishStartup();
   renderProvenance($('[data-provenance]'), catalogue, provenance);
   renderLocalizationLinks($('[data-localizations]'), catalogue);
 }
 
 async function renderFullSnapshotHome(appRevision: string): Promise<void> {
-  const snapshotModule = await import('./snapshot.js');
+  let snapshotModule: typeof import('./snapshot.js');
+  try {
+    snapshotModule = await import('./snapshot.js');
+  } catch {
+    renderUnavailable($('[data-view]'));
+    return;
+  }
   const validated = await validateSnapshot(snapshotModule.default);
+  if (!validated.ok) {
+    renderUnavailable($('[data-view]'), validated.reason === 'unsupported');
+    return;
+  }
   if (
-    !validated.ok ||
     !matchesShellRevision(snapshotModule.provenance, appRevision) ||
     !validateProvenance(snapshotModule.provenance, validated.snapshot)
   ) {
-    renderInvalid($('[data-view]'), undefined, true);
+    renderUnavailable($('[data-view]'));
     return;
   }
   renderIndex(validated.snapshot, snapshotModule.provenance);
@@ -99,7 +118,7 @@ async function matchesPinnedDirectoryEnvelopeDigest(
 export async function renderHome(): Promise<void> {
   const appRevision = shellAppRevision();
   if (!appRevision) {
-    renderInvalid($('[data-view]'), undefined, true);
+    renderUnavailable($('[data-view]'));
     return;
   }
   const expectedDigest = document.querySelector<HTMLMetaElement>('meta[name="snoredex-directory-sha256"]')?.content;
@@ -117,18 +136,32 @@ export async function renderHome(): Promise<void> {
   } catch {
     // A shell that pins a directory must not treat an integrity rejection as
     // permission to load different data. Only the legacy no-digest shell falls back.
-    renderInvalid($('[data-view]'), undefined, true);
+    renderUnavailable($('[data-view]'));
     return;
   }
   const projectionDigest = await canonicalDirectoryDigest(snapshotModule.default);
   if (
     !projectionDigest ||
-    !(await matchesPinnedDirectoryEnvelopeDigest(snapshotModule.default, snapshotModule.provenance, expectedDigest)) ||
+    !(await matchesPinnedDirectoryEnvelopeDigest(snapshotModule.default, snapshotModule.provenance, expectedDigest))
+  ) {
+    renderUnavailable($('[data-view]'));
+    return;
+  }
+  if (
+    isRuntimeRecord(snapshotModule.default) &&
+    isRuntimeRecord(snapshotModule.default.meta) &&
+    (snapshotModule.default.meta.schema !== 'snoredex-collector-catalogue' ||
+      snapshotModule.default.meta.schemaVersion !== '1.0.0')
+  ) {
+    renderUnavailable($('[data-view]'), true);
+    return;
+  }
+  if (
     !(await directoryModule.validateDirectorySnapshot(snapshotModule.default, projectionDigest)) ||
     !matchesShellRevision(snapshotModule.provenance, appRevision) ||
     !validateProvenance(snapshotModule.provenance, snapshotModule.default)
   ) {
-    renderInvalid($('[data-view]'), undefined, true);
+    renderUnavailable($('[data-view]'));
     return;
   }
   renderIndex(snapshotModule.default, snapshotModule.provenance);

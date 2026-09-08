@@ -570,7 +570,7 @@ select {
 }
 .status-controls {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 5.5rem), 1fr));
   gap: 0.4rem;
   min-inline-size: 0;
   border: 0;
@@ -834,8 +834,27 @@ textarea {
   }
 }
 @media (max-width: 520px) {
-  .status-controls {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .collection-shell {
+    padding-inline: min(1rem, 4vw);
+  }
+  .collection-shell .surface {
+    padding: 1rem;
+    padding-inline: min(1rem, 4vw);
+  }
+  .item-row,
+  .collection-controls {
+    padding-inline: min(0.75rem, 3vw);
+  }
+  .collection-shell h1 {
+    font-size: 2rem;
+  }
+  .item-image-placeholder img {
+    display: none;
+  }
+  .status-option {
+    gap: 0.25rem;
+    padding-inline: 0.25rem;
+    font-size: 0.9rem;
   }
   .item-row {
     grid-template-columns: 1fr;

@@ -74,3 +74,11 @@ Those automated regressions support the later builds; they do not retroactively 
 manual session into a blanket claim for every future revision, browser, assistive technology, or
 catalogue snapshot. A future material interaction change must update its owning issue and rerun the
 appropriate manual rows.
+
+Issue #99 removes inspection controls for authored placeholders, labels them “No card image”,
+keeps active advanced filters visible in a collapsed native disclosure, and separates link,
+catalogue, startup and private-state recovery messages. Its dated, exact-revision visual and
+keyboard observations are recorded in [issue #99](https://github.com/m4s-ai/snoredex-checklist/issues/99).
+The observations use fresh browser contexts with synthetic state, including 320px reflow, 200%
+text, long CJK labels, light/dark themes and reduced motion. They do not claim new physical-device
+or assistive-technology certification, or extend the historical owner acceptance to a new revision.

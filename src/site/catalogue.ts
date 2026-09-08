@@ -93,6 +93,8 @@ function isArtifactUrl(value: unknown): value is string {
 export function validateProvenance(value: unknown, catalogue: Pick<CatalogueSnapshot, 'meta'>): boolean {
   if (
     !isRecord(value) ||
+    (value.publicationId !== undefined &&
+      (typeof value.publicationId !== 'string' || !/^[a-z0-9][a-z0-9._-]{1,127}$/u.test(value.publicationId))) ||
     value.contractVersion !== catalogue.meta.schemaVersion ||
     value.sourceRepository !== catalogue.meta.sourceRepository
   ) {
