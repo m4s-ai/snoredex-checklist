@@ -89,6 +89,18 @@ must provide a reviewed route from every retained source fingerprint. A syntheti
 never production is not treated as a migration source, and no consumer-side identity mapping is
 inferred.
 
+The stable `app.js` entry loads either `home.js` or `collection.js`. The normal homepage
+uses the directory projection and does not load collection controllers or private-state modules.
+Site and browser State modules are checked in one TypeScript program: `rootDirs` resolves
+the runtime-relative `./state/` imports to their source owners, and type-only imports reuse
+those owners' APIs. The build flattens emitted `site/` files into `assets/` alongside `state/`
+before creating the exact runtime manifest and integrity bindings. No bundler is involved.
+
+After building, `node scripts/measure-route-payloads.mjs [artifact-directory]` reports cold
+Chromium requests, per-response raw/gzip bytes, AST-derived static/dynamic import edges,
+and runtime manifest membership as JSON. The directory defaults to `dist/site`. Measure
+each revision's artifact separately; totals describe payload size, not transfer timing.
+
 The build also copies the authored card-shaped placeholders from `site-src/assets/` into the
 same-origin `assets/images/` tree and writes a digest-pinned `assets/image-manifest.json`. The
 image resolver currently retains the local placeholder for every catalogue reference. Producer

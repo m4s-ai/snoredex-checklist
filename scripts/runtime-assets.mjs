@@ -35,6 +35,10 @@ export function runtimeShellBindings(manifest, prefix) {
   if (!validateRuntimeAssetSetManifest(manifest) || typeof prefix !== 'string' || !prefix.endsWith('/')) {
     throw new Error('RUNTIME_ASSET_SHELL_BINDING_INVALID');
   }
+  // Import-map integrity keys use URL-like specifiers, not bare relative paths.
+  if (!prefix.startsWith('./') && !prefix.startsWith('../') && !prefix.startsWith('/') && !URL.canParse(prefix)) {
+    prefix = `./${prefix}`;
+  }
   const integrity = Object.fromEntries(
     manifest.modules.map((module) => [`${prefix}${module.path}`, sriSha256(module.sha256)]),
   );

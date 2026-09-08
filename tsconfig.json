@@ -11,7 +11,8 @@
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
     "forceConsistentCasingInFileNames": true,
-    "skipLibCheck": false
+    "skipLibCheck": false,
+    "rootDirs": ["src/site", "src"]
   },
   "include": ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"]
 }

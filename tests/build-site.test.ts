@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -17,6 +17,49 @@ import {
 } from '../scripts/runtime-assets.mjs';
 
 const root = resolve(import.meta.dirname, '..');
+
+test('breaking State API signatures fail compilation at both Site consumers', async () => {
+  const fixture = await mkdtemp(resolve(tmpdir(), 'snoredex-site-state-types-'));
+  try {
+    await Promise.all([
+      cp(resolve(root, 'src/site'), resolve(fixture, 'src/site'), { recursive: true }),
+      cp(resolve(root, 'src/state'), resolve(fixture, 'src/state'), { recursive: true }),
+      cp(resolve(root, 'tsconfig.json'), resolve(fixture, 'tsconfig.json')),
+      cp(resolve(root, 'tsconfig.site.json'), resolve(fixture, 'tsconfig.site.json')),
+    ]);
+    const compile = () =>
+      spawnSync(
+        process.execPath,
+        [resolve(root, 'node_modules/typescript/bin/tsc'), '-p', resolve(fixture, 'tsconfig.site.json'), '--noEmit'],
+        { encoding: 'utf8' },
+      );
+    const baseline = compile();
+    assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
+    const path = resolve(fixture, 'src/state/storage.ts');
+    const source = await readFile(path, 'utf8');
+    const broken = source.replace('getBrowserStorage()', 'getBrowserStorage(requiredOwner: string)');
+    assert.notEqual(broken, source);
+    await writeFile(path, broken);
+    const result = compile();
+    assert.notEqual(result.status, 0);
+    assert.match(result.stdout, /site\/collection\.ts\(.*error TS2554/u);
+    assert.match(result.stdout, /site\/collection-state\.ts\(.*error TS2554/u);
+    await writeFile(path, source);
+    const backupPath = resolve(fixture, 'src/state/backup.ts');
+    const backupSource = await readFile(backupPath, 'utf8');
+    const brokenBackup = backupSource.replace(
+      'commitImport(plan: ImportPlan, confirmed: boolean)',
+      'commitImport(plan: ImportPlan, confirmed: boolean, requiredOwner: string)',
+    );
+    assert.notEqual(brokenBackup, backupSource);
+    await writeFile(backupPath, brokenBackup);
+    const backupResult = compile();
+    assert.notEqual(backupResult.status, 0);
+    assert.match(backupResult.stdout, /site\/collection\.ts\(.*error TS2554/u);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
 
 test('validates every fetched runtime asset byte', async () => {
   const runtime = {
@@ -220,15 +263,17 @@ test('stamps the exact app revision into served shells and module', async () => 
     assert.match(home, new RegExp(`assets/runtime/${revision}/app\\.js`, 'u'));
     assert.match(collection, new RegExp(`\\.\\./assets/runtime/${revision}/app\\.js`, 'u'));
     assert.doesNotMatch(app, /from ['"]\.\/(?:snapshot|migrations)\.js['"]/u);
-    assert.match(app, /import\(['"]\.\/snapshot\.js['"]\)/u);
-    assert.match(app, /import\(['"]\.\/migrations\.js['"]\)/u);
-    assert.match(app, /import\(['"]\.\/directory-snapshot\.js['"]\)/u);
-    assert.match(app, /crypto\.subtle\.digest\(['"]SHA-256['"]/u);
+    const homeRoute = await readFile(resolve(output, 'assets/home.js'), 'utf8');
+    const collectionRoute = await readFile(resolve(output, 'assets/collection.js'), 'utf8');
+    assert.match(collectionRoute, /import\(['"]\.\/snapshot\.js['"]\)/u);
+    assert.match(collectionRoute, /import\(['"]\.\/migrations\.js['"]\)/u);
+    assert.match(homeRoute, /import\(['"]\.\/directory-snapshot\.js['"]\)/u);
+    assert.match(homeRoute, /crypto\.subtle\.digest\(['"]SHA-256['"]/u);
     assert.match(
-      app,
+      homeRoute,
       /matchesPinnedDirectoryEnvelopeDigest\(snapshotModule\.default, snapshotModule\.provenance, expectedDigest\)/u,
     );
-    assert.match(app, /validateDirectorySnapshot\(snapshotModule\.default, projectionDigest\)/u);
+    assert.match(homeRoute, /validateDirectorySnapshot\(snapshotModule\.default, projectionDigest\)/u);
     assert.match(theme, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     assert.match(collectionTheme, new RegExp(`snoredex-app-revision:${revision}`, 'u'));
     assert.deepEqual(font400, sourceFont400);

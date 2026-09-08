@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { chromium, firefox, webkit } from '@playwright/test';
 
-import { runtimeShellBindings } from '../scripts/runtime-assets.mjs';
+import { runtimeShellBindings, sha256 } from '../scripts/runtime-assets.mjs';
 
 const root = resolve(process.env.SNOREDEX_SITE_ROOT ?? 'dist/site');
 const mimeTypes = new Map([
@@ -47,6 +48,155 @@ const runtimeManifest = JSON.parse(
 );
 const homeBindings = runtimeShellBindings(runtimeManifest, `assets/${moduleManifest.runtimeAssetSet.path}/`);
 const collectionBindings = runtimeShellBindings(runtimeManifest, `../assets/${moduleManifest.runtimeAssetSet.path}/`);
+
+// A second complete runtime generation, with independently bound module bytes and
+// the same catalogue identity. Serve it in memory like a retained deployment.
+async function retainedRuntimeFixture() {
+  const revision = runtimeManifest.runtime.appRevision === 'f'.repeat(40) ? 'e'.repeat(40) : 'f'.repeat(40);
+  const directory = await import(pathToFileURL(join(root, 'assets/directory-snapshot.js')));
+  const { directoryEnvelopeDigest } = await import(pathToFileURL(join(root, 'assets/directory.js')));
+  const digest = await directoryEnvelopeDigest(directory.default, { ...directory.provenance, appRevision: revision });
+  const modules = new Map(
+    await Promise.all(
+      runtimeManifest.modules.map(async ({ path }) => [
+        path,
+        (await readFile(join(root, 'assets', moduleManifest.runtimeAssetSet.path, path), 'utf8')).replaceAll(
+          runtimeManifest.runtime.appRevision,
+          revision,
+        ),
+      ]),
+    ),
+  );
+  const manifest = {
+    ...runtimeManifest,
+    runtime: { ...runtimeManifest.runtime, appRevision: revision },
+    modules: [...modules].map(([path, source]) => ({
+      path,
+      byteLength: Buffer.byteLength(source),
+      sha256: sha256(Buffer.from(source)),
+    })),
+  };
+  const runtimePath = `assets/${moduleManifest.runtimeAssetSet.path.replace(runtimeManifest.runtime.appRevision, revision)}/`;
+  const shells = new Map();
+  for (const [route, file, original, prefix] of [
+    ['/', 'index.html', homeBindings, runtimePath],
+    ['/collection/', 'collection/index.html', collectionBindings, `../${runtimePath}`],
+  ]) {
+    const bindings = runtimeShellBindings(manifest, prefix);
+    shells.set(
+      route,
+      (await readFile(join(root, file), 'utf8'))
+        .replace(original.importMap, bindings.importMap)
+        .replaceAll(original.importMapCsp, bindings.importMapCsp)
+        .replaceAll(original.appIntegrity, bindings.appIntegrity)
+        .replaceAll(original.themeIntegrity, bindings.themeIntegrity)
+        .replaceAll(runtimeManifest.runtime.appRevision, revision)
+        .replace(/(name="snoredex-directory-sha256" content=")[^"]+/u, `$1${digest}`),
+    );
+  }
+  return { modules, shells, runtimePath };
+}
+const retainedRuntime = await retainedRuntimeFixture();
+
+async function probePrivateAccess(page) {
+  await page.addInitScript(() => {
+    window.privateAccesses = 0;
+    for (const method of ['getItem', 'setItem', 'removeItem']) {
+      const original = Storage.prototype[method];
+      Storage.prototype[method] = function (key, ...args) {
+        if (String(key).startsWith('snoredex-checklist.private-state')) window.privateAccesses++;
+        return original.call(this, key, ...args);
+      };
+    }
+  });
+}
+
+async function assertRetainedRoutes(browser, name) {
+  const page = await browser.newPage();
+  try {
+    let retainedShell = false;
+    const requests = [];
+    page.on('request', (request) => requests.push(new URL(request.url()).pathname));
+    await page.route(`${baseUrl}/${retainedRuntime.runtimePath}**`, async (route) => {
+      const path = new URL(route.request().url()).pathname.slice(retainedRuntime.runtimePath.length + 1);
+      const body = retainedRuntime.modules.get(path);
+      assert.notEqual(body, undefined, `${name}: exact retained runtime membership`);
+      await route.fulfill({ contentType: 'text/javascript', body });
+    });
+    for (const path of ['/', '/collection/']) {
+      await page.route(`${baseUrl}${path}`, (route) =>
+        retainedShell
+          ? route.fulfill({ contentType: 'text/html', body: retainedRuntime.shells.get(path) })
+          : route.continue(),
+      );
+    }
+    await page.goto(`${baseUrl}/missing`);
+    const state = JSON.stringify({
+      schema: 'snoredex-collection-state',
+      schemaVersion: '1.0.0',
+      datasetId: 'snoredex-data/snorlax-current-known',
+      catalogueFingerprint: runtimeManifest.runtime.catalogueFingerprint,
+      items: [],
+    });
+    await page.evaluate((value) => localStorage.setItem('snoredex-checklist.private-state', value), state);
+    for (const retained of [false, true, false]) {
+      retainedShell = retained;
+      for (const path of ['/', '/collection/']) {
+        requests.length = 0;
+        await page.goto(`${baseUrl}${path}`, { waitUntil: 'networkidle' });
+        await page
+          .locator(path === '/' ? '.localization-group' : '.query-primary')
+          .first()
+          .waitFor();
+        const prefix = `/${retained ? retainedRuntime.runtimePath : `assets/${moduleManifest.runtimeAssetSet.path}/`}`;
+        assert.ok(
+          requests
+            .filter((request) => request.includes('/assets/runtime/'))
+            .every((request) => request.startsWith(prefix)),
+          `${name}: coherent ${retained ? 'retained' : 'active'} route`,
+        );
+        assert.equal(
+          await page.evaluate(() => localStorage.getItem('snoredex-checklist.private-state')),
+          state,
+          `${name}: forward/rollback/restoration conserves synthetic state`,
+        );
+      }
+    }
+    await probePrivateAccess(page);
+    for (const retained of [false, true]) {
+      retainedShell = retained;
+      for (const [path, module] of [
+        ['/', 'home.js'],
+        ['/collection/', 'collection.js'],
+      ]) {
+        const target = `${baseUrl}/${retained ? retainedRuntime.runtimePath : `assets/${moduleManifest.runtimeAssetSet.path}/`}${module}`;
+        const body = retained
+          ? await readFile(join(root, 'assets', module), 'utf8')
+          : retainedRuntime.modules.get(module);
+        let intercepted = false;
+        await page.route(target, (route) => {
+          intercepted = true;
+          return route.fulfill({ contentType: 'text/javascript', body });
+        });
+        await page.goto(`${baseUrl}${path}`, { waitUntil: 'networkidle' });
+        assert.ok(intercepted, `${name}: mixed ${retained ? 'retained' : 'active'} ${module} bytes requested`);
+        assert.equal(
+          await page.locator(path === '/' ? '.localization-group' : '.query-primary').count(),
+          0,
+          `${name}: cross-generation ${module} rejected in both directions`,
+        );
+        assert.equal(
+          await page.evaluate(() => window.privateAccesses),
+          0,
+          `${name}: mixed route never accesses private state`,
+        );
+        await page.unroute(target);
+      }
+    }
+  } finally {
+    await page.close();
+  }
+}
 const staleRuntimeSnapshotSource = snapshotSource.replace(
   /"appRevision":"[0-9a-f]{40}"/u,
   `"appRevision":"${'e'.repeat(40)}"`,
@@ -484,7 +634,9 @@ try {
       });
     }
     try {
+      await assertRetainedRoutes(browser, name);
       const page = await browser.newPage();
+      await probePrivateAccess(page);
       const failures = [];
       const unexpectedRequests = [];
       const requestedPaths = [];
@@ -513,13 +665,38 @@ try {
       );
       await assertSecurityBoundary(page, `${name}/home`);
       assert.equal(
-        requestedPaths.some((path) => path.endsWith('/snapshot.js') || path.endsWith('/migrations.js')),
+        await page.evaluate(() => window.privateAccesses),
+        0,
+        `${name}: homepage never accesses private state`,
+      );
+      assert.equal(
+        requestedPaths.some(
+          (path) =>
+            path.includes('/state/') ||
+            [
+              'collection.js',
+              'collection-state.js',
+              'private-state.js',
+              'results.js',
+              'filter.js',
+              'snapshot.js',
+              'migrations.js',
+            ].some((name) => path.endsWith(`/${name}`)),
+        ),
         false,
-        `${name}: home omits full catalogue payloads`,
+        `${name}: home omits collection controllers, state/storage/backup and full catalogue payloads`,
       );
       const rollbackPage = await browser.newPage();
       const rollbackRequests = [];
       rollbackPage.on('request', (request) => rollbackRequests.push(new URL(request.url()).pathname));
+      const legacyShell = (await readFile(join(root, 'index.html'), 'utf8')).replace(
+        /<meta name="snoredex-directory-sha256" content="sha256:[0-9a-f]{64}" \/>/u,
+        '',
+      );
+      assert.ok(!legacyShell.includes('name="snoredex-directory-sha256"'));
+      await rollbackPage.route(`${baseUrl}/`, (route) =>
+        route.fulfill({ contentType: 'text/html', body: legacyShell }),
+      );
       await rollbackPage.route('**/assets/runtime/**/directory.js', (route) => route.abort());
       await rollbackPage.route('**/assets/runtime/**/directory-snapshot.js', (route) => route.abort());
       const rollbackHome = await rollbackPage.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
@@ -608,6 +785,10 @@ try {
       for (const [modulePath, source] of [
         ['app.js', `localStorage.setItem('${PRIVATE_STATE_KEY}', 'mutated');`],
         [
+          'collection.js',
+          `localStorage.setItem('${PRIVATE_STATE_KEY}', 'mutated'); export async function startCollection() {}`,
+        ],
+        [
           'private-state.js',
           `localStorage.setItem('${PRIVATE_STATE_KEY}', 'mutated'); export async function readPrivateState() { return { readable: true, hasActiveState: false, statuses: new Map() }; }`,
         ],
@@ -636,6 +817,7 @@ try {
         ['migrations.js', staleRuntimeMigrationsSource],
       ]) {
         const mixedRuntimePage = await browser.newPage();
+        await probePrivateAccess(mixedRuntimePage);
         await mixedRuntimePage.route(`**/assets/runtime/**/${modulePath}`, (route) =>
           route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: source }),
         );
@@ -649,6 +831,11 @@ try {
           waitUntil: 'networkidle',
         });
         assert.equal(mixedRuntimeCollection?.status(), 200, `${name}: mixed ${modulePath} collection status`);
+        assert.equal(
+          await mixedRuntimePage.evaluate(() => window.privateAccesses),
+          0,
+          `${name}: tuple failure precedes every private-state access`,
+        );
         assert.equal(
           await mixedRuntimePage.locator('[data-view] h2').textContent(),
           'Invalid checklist link',

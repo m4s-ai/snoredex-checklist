@@ -1,8 +1,11 @@
+import type { ReconciliationManifest } from './state/reconciliation.js';
+
 /**
  * Replaced by the build from the pinned producer migration artifact.
- * Keeping a typed source module lets the site compile independently.
+ * The placeholder uses the State owner's boundary type; the build still validates
+ * the pinned producer manifest before replacing these empty fixture values.
  */
-export const migrationManifest = Object.freeze({
+export const migrationManifest: ReconciliationManifest = Object.freeze({
   catalogueTransitions: [],
 });
 
