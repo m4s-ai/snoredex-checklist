@@ -169,6 +169,24 @@ test('advances the confirmed revision only after durable state changes', async (
   assert.equal(controller.confirmedRevision, initialRevision + 1);
 });
 
+test('publishes one durable revision for a multi-item confirmation fan-out', async () => {
+  const { controller, immediateSaves } = makeHarness({
+    active: [
+      { itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0 },
+      { itemId: ITEM_B, status: 'ordered', quantityOwned: 0, quantityOrdered: 1 },
+    ],
+  });
+  let notifications = 0;
+  controller.onChange(() => notifications++);
+
+  const save = controller.setStatus(ITEM_A, 'skip');
+  immediateSaves[0].resolve(saved);
+  await save;
+
+  assert.ok(notifications > 1, 'the item-level fan-out remains available to row consumers');
+  assert.equal(controller.confirmedRevision, 1, 'overview consumers can gate on one durable revision');
+});
+
 test('canonicalizes equivalent quantity drafts on no-op and persisted commits', async () => {
   const unchanged = makeHarness({
     active: [{ itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],

@@ -2030,11 +2030,12 @@ async function renderCollection(
   };
   renderOverview(renderState);
   if (stateController !== undefined) {
-    let previousOverviewStatus = statusKey(stateController.state);
+    let previousOverviewRevision = stateController.confirmedRevision;
     stateController.onChange(() => {
-      const nextOverviewStatus = statusKey(stateController.state);
-      if (nextOverviewStatus === previousOverviewStatus) return;
-      previousOverviewStatus = nextOverviewStatus;
+      const nextOverviewRevision = stateController.confirmedRevision;
+      if (nextOverviewRevision === previousOverviewRevision) return;
+      previousOverviewRevision = nextOverviewRevision;
+      if (progressOverview?.hidden === true) return;
       renderOverview(stateController.state);
     });
   }
