@@ -235,6 +235,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
   private listeners = new Set<(itemId?: string) => void>();
   private activeOperations = new Map<number, SaveOperation>();
   private pendingNote: PendingNoteSave | undefined;
+  private pendingNoteNotifications = new Set<string>();
   private noteFlushTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
   private nextRevision = 0;
   private nextOperationId = 0;
@@ -411,24 +412,21 @@ export class BrowserCollectionStateController implements CollectionStateControll
     const result = this.domain.applyNoteEdit(itemId, this.records.get(itemId), note);
     if (!result.ok) return failure(result.error ?? 'EDIT_INVALID_NOTE');
     const previousNote = this.records.get(itemId)?.note;
-    this.setRecord(itemId, result.value);
     const meta = this.editMeta(itemId);
+    const noteChanged = previousNote !== result.value?.note || meta.noteDraft !== previousNote;
+    this.setRecord(itemId, result.value);
     meta.noteDraft = note;
-    if (previousNote !== result.value?.note || meta.noteDraft !== previousNote) {
+    if (noteChanged) {
       meta.versions.note = ++this.nextRevision;
     }
     this.clearFailureAfterEdit(meta, 'note');
-    const previousPending = this.pendingNote;
+    if (noteChanged) this.pendingNoteNotifications.add(itemId);
     const snapshot = this.pendingSnapshot();
     const affected = new Map(snapshot.affected);
-    const previousFields = previousPending?.affected.get(itemId);
-    if (previousFields !== undefined) {
-      const currentFields = affected.get(itemId);
-      if (currentFields === undefined) affected.set(itemId, previousFields);
-      else {
-        const mergedFields = new Set([...currentFields, ...previousFields]);
-        if (mergedFields.size !== currentFields.size) affected.set(itemId, mergedFields);
-      }
+    for (const pendingItemId of this.pendingNoteNotifications) {
+      const currentFields = affected.get(pendingItemId);
+      if (currentFields === undefined) affected.set(pendingItemId, new Set(['note']));
+      else if (!currentFields.has('note')) affected.set(pendingItemId, new Set([...currentFields, 'note']));
     }
     const pending = { ...snapshot, affected };
     const scheduled = this.store.scheduleNoteSave(pending.state, false);
@@ -451,12 +449,14 @@ export class BrowserCollectionStateController implements CollectionStateControll
     const blocked = this.editBlockError();
     if (blocked !== undefined) {
       this.pendingNote = undefined;
+      this.pendingNoteNotifications.clear();
       this.notify();
       return failure(blocked);
     }
     const pending = this.pendingNote;
     if (pending === undefined) return { ok: true, skipped: true };
     this.pendingNote = undefined;
+    this.pendingNoteNotifications.clear();
     const operation = this.beginOperation(pending);
     if (!pending.scheduled || !this.store.hasPendingNote()) {
       const scheduled = this.store.scheduleNoteSave(pending.state, false);
@@ -520,6 +520,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
       }
       this.cancelNoteTimer();
       this.pendingNote = undefined;
+      this.pendingNoteNotifications.clear();
       this.activeOperations.clear();
       this.records = new Map(draft.items.map((record) => [record.itemId, record]));
       this.confirmedRecords = new Map(this.records);
@@ -582,6 +583,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     this.commitUncertain = true;
     this.cancelNoteTimer();
     this.pendingNote = undefined;
+    this.pendingNoteNotifications.clear();
     return true;
   }
 
@@ -593,6 +595,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
   private saveImmediate(): Promise<CollectionEditResult> {
     this.cancelNoteTimer();
     this.pendingNote = undefined;
+    this.pendingNoteNotifications.clear();
     if (this.commitUncertain) {
       this.notify();
       return Promise.resolve(failure('STORAGE_COMMIT_UNCERTAIN'));

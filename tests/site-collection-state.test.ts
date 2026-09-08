@@ -245,6 +245,31 @@ test('does not carry a settled concurrent item into later note notifications', a
   assert.deepEqual(notifications, [ITEM_A, ITEM_A, ITEM_B, ITEM_A, ITEM_B, ITEM_B, ITEM_B]);
 });
 
+test('retains pending note completions across item switches and reverts', async () => {
+  const { controller, noteSaves } = makeHarness({
+    active: [
+      { itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0, note: 'old-a' },
+      { itemId: ITEM_B, status: 'ordered', quantityOwned: 0, quantityOrdered: 1, note: 'old-b' },
+    ],
+  });
+  const notifications: Array<string | undefined> = [];
+  controller.onChange((itemId) => notifications.push(itemId));
+
+  assert.deepEqual(controller.scheduleNote(ITEM_A, 'new-a'), { ok: true });
+  assert.deepEqual(controller.scheduleNote(ITEM_B, 'new-b'), { ok: true });
+  assert.deepEqual(controller.scheduleNote(ITEM_A, 'old-a'), { ok: true });
+  assert.deepEqual(controller.scheduleNote(ITEM_B, 'old-b'), { ok: true });
+
+  const flush = controller.flushNote();
+  noteSaves[0].resolve(saved);
+  assert.deepEqual(await flush, { ok: true, skipped: undefined });
+  assert.equal(controller.item(ITEM_A).save.phase, 'saved');
+  assert.equal(controller.item(ITEM_B).save.phase, 'saved');
+  assert.equal(notifications.filter((itemId) => itemId === ITEM_A).length, 6);
+  assert.equal(notifications.filter((itemId) => itemId === ITEM_B).length, 5);
+  assert.ok(notifications.every((itemId) => itemId === ITEM_A || itemId === ITEM_B));
+});
+
 test('canonicalizes equivalent quantity drafts on no-op and persisted commits', async () => {
   const unchanged = makeHarness({
     active: [{ itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],
