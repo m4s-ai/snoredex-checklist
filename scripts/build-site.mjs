@@ -151,13 +151,12 @@ try {
     stdio: 'inherit',
   });
   if (result.status !== 0) throw new Error(`site TypeScript build failed with status ${result.status ?? 'unknown'}`);
-  const stateResult = spawnSync(
-    process.execPath,
-    [tsc, '-p', resolve(root, 'tsconfig.site-state.json'), '--outDir', resolve(assets, 'state')],
-    { cwd: root, stdio: 'inherit' },
-  );
-  if (stateResult.status !== 0)
-    throw new Error(`browser state read API build failed with status ${stateResult.status ?? 'unknown'}`);
+  // rootDirs checks runtime-relative Site/State imports in one program.
+  // Flatten only Site output so its existing ./state/*.js paths stay valid.
+  for (const entry of await readdir(resolve(assets, 'site'))) {
+    await cp(resolve(assets, 'site', entry), resolve(assets, entry));
+  }
+  await rm(resolve(assets, 'site'), { recursive: true });
   await cp(resolve(root, 'site-src/theme.js'), resolve(assets, 'theme.js'));
   const siteAssets = await import(pathToFileURL(resolve(assets, 'assets.js')));
   const placeholderAssets = Object.values(siteAssets.PLACEHOLDER_ASSETS ?? {});

@@ -1,90 +1,26 @@
 import type { PrivateStateRead } from './private-state.js';
+import type { CollectionStatus, PrivateItemState, PrivateState } from './state/domain.js';
+import type { OrderedStateStore, PersistenceResult } from './state/storage.js';
+import type { ReconciliationContext } from './state/reconciliation.js';
+export type { CollectionStatus, PrivateItemState } from './state/domain.js';
+export type CollectionReconciliationOptions = ReconciliationContext;
 
-export type CollectionStatus = 'need' | 'ordered' | 'have' | 'skip';
-
-export interface PrivateItemState {
-  readonly itemId: string;
-  readonly status: CollectionStatus;
-  readonly quantityOwned: number;
-  readonly quantityOrdered: number;
-  readonly note?: string;
-}
-
-interface PrivateState {
-  readonly schema: 'snoredex-collection-state';
-  readonly schemaVersion: '1.0.0';
-  readonly datasetId: 'snoredex-data/snorlax-current-known';
-  readonly catalogueFingerprint: string;
-  readonly items: readonly PrivateItemState[];
-}
-
-interface PersistenceResult<T> {
-  readonly ok: boolean;
-  readonly value?: T;
-  readonly error?: string;
-}
-
-interface OrderedStateStoreLike {
-  read(): PersistenceResult<PrivateState | undefined>;
-  unsaved(): PrivateState | undefined;
-  readonly recoveryNeedsReview?: () => boolean;
-  readonly reconcileUnsavedDraft?: (
-    targetFingerprint: string,
-    knownTargetItemIds: ReadonlySet<string>,
-    reconciliation: CollectionReconciliationOptions,
-  ) => PersistenceResult<void>;
-  adoptUnsavedDraft(): PersistenceResult<PrivateState | undefined>;
-  discardUnsavedDraft(): void;
-  hasPendingNote(): boolean;
-  saveImmediate(state: PrivateState): Promise<PersistenceResult<{ readonly skipped?: boolean }>>;
-  scheduleNoteSave(state: PrivateState, scheduleFlush?: boolean): PersistenceResult<void>;
-  flushNote(): Promise<PersistenceResult<{ readonly skipped?: boolean }>>;
-}
-
-interface StorageModule {
-  readonly NOTE_AUTOSAVE_DELAY_MS: number;
-  readonly getBrowserStorage: () => PersistenceResult<unknown>;
-  readonly OrderedStateStore: new (storage: unknown) => OrderedStateStoreLike;
-}
-
-interface BrowserReconciliationModule {
-  readonly reconcileBrowserState: (
-    targetFingerprint: string,
-    knownItemIds: ReadonlySet<string>,
-    reconciliation: {
-      readonly migrations: readonly unknown[];
-      readonly knownSourceItemIds?: ReadonlySet<string>;
-      readonly knownSourceItemIdsByFingerprint?: ReadonlyMap<string, ReadonlySet<string>>;
-      readonly targetItemClasses?: ReadonlyMap<string, 'current-known' | 'research'>;
-    },
-  ) => Promise<{ readonly ok: boolean; readonly changed: boolean; readonly error?: string }>;
-}
-
-export interface CollectionReconciliationOptions {
-  readonly migrations: readonly unknown[];
-  readonly knownSourceItemIds?: ReadonlySet<string>;
-  readonly knownSourceItemIdsByFingerprint?: ReadonlyMap<string, ReadonlySet<string>>;
-  readonly targetItemClasses?: ReadonlyMap<string, 'current-known' | 'research'>;
-}
-
-interface DomainModule {
-  readonly applyStatusCommand: (
-    itemId: string,
-    current: PrivateItemState | undefined,
-    status: CollectionStatus,
-  ) => PersistenceResult<PrivateItemState | undefined>;
-  readonly applyQuantityEdit: (
-    itemId: string,
-    current: PrivateItemState | undefined,
-    quantityOwned: unknown,
-    quantityOrdered: unknown,
-  ) => PersistenceResult<PrivateItemState | undefined>;
-  readonly applyNoteEdit: (
-    itemId: string,
-    current: PrivateItemState | undefined,
-    note: unknown,
-  ) => PersistenceResult<PrivateItemState | undefined>;
-}
+type OrderedStateStoreLike = Pick<
+  OrderedStateStore,
+  | 'read'
+  | 'unsaved'
+  | 'adoptUnsavedDraft'
+  | 'discardUnsavedDraft'
+  | 'hasPendingNote'
+  | 'saveImmediate'
+  | 'scheduleNoteSave'
+  | 'flushNote'
+> &
+  Partial<Pick<OrderedStateStore, 'recoveryNeedsReview' | 'reconcileUnsavedDraft'>>;
+type DomainModule = Pick<
+  typeof import('./state/domain.js'),
+  'applyStatusCommand' | 'applyQuantityEdit' | 'applyNoteEdit'
+>;
 
 export type CollectionEditResult =
   { readonly ok: true; readonly skipped?: boolean } | { readonly ok: false; readonly error: string };
@@ -773,9 +709,7 @@ export async function createCollectionStateController(
 ): Promise<CollectionStateController | undefined> {
   try {
     if (reconciliation !== undefined) {
-      const reconciliationModule =
-        // @ts-expect-error The runtime-relative module is emitted by the separate state build.
-        (await import('./state/browser-reconciliation.js')) as BrowserReconciliationModule;
+      const reconciliationModule = await import('./state/browser-reconciliation.js');
       const migrated = await reconciliationModule.reconcileBrowserState(
         catalogueFingerprint,
         knownTrackableItemIds,
@@ -784,10 +718,8 @@ export async function createCollectionStateController(
       if (!migrated.ok) return undefined;
     }
     const [storageModule, domainModule] = await Promise.all([
-      // @ts-expect-error The runtime-relative module is emitted by the separate state build.
-      import('./state/storage.js') as Promise<StorageModule>,
-      // @ts-expect-error The runtime-relative module is emitted by the separate state build.
-      import('./state/domain.js') as Promise<DomainModule>,
+      import('./state/storage.js'),
+      import('./state/domain.js'),
     ]);
     const storage = storageModule.getBrowserStorage();
     if (!storage.ok) return undefined;
