@@ -4,11 +4,11 @@ import type {
   SnapshotLocalSet,
   SnapshotLocalization,
   SnapshotSetEdition,
-} from "./catalogue.js";
-import type { ResearchCriterion } from "./filter.js";
-import type { QueryCriteria } from "./query.js";
+} from './catalogue.js';
+import type { ResearchCriterion } from './filter.js';
+import type { QueryCriteria } from './query.js';
 
-export type CollectionStatus = "need" | "ordered" | "have" | "skip";
+export type CollectionStatus = 'need' | 'ordered' | 'have' | 'skip';
 
 export interface ResultViewModel {
   readonly activeItems: SnapshotItem[];
@@ -20,6 +20,10 @@ export interface ResultViewModel {
 
 export interface ProgressViewModel {
   readonly currentKnownTotal: number;
+  readonly haveTotal: number;
+  readonly orderedTotal: number;
+  readonly needTotal: number;
+  readonly skipTotal: number;
   readonly ownedTotal: number;
   readonly securedTotal: number;
   readonly researchTotal: number;
@@ -43,10 +47,11 @@ export interface BrowseLocalizationViewModel {
 }
 
 function publicSearchValue(value: unknown): string {
-  if (typeof value === "string") return value.normalize("NFC");
-  if (Array.isArray(value)) return value.map(publicSearchValue).filter(Boolean).join(" ");
-  if (typeof value === "object" && value !== null) return Object.values(value).map(publicSearchValue).filter(Boolean).join(" ");
-  return "";
+  if (typeof value === 'string') return value.normalize('NFC');
+  if (Array.isArray(value)) return value.map(publicSearchValue).filter(Boolean).join(' ');
+  if (typeof value === 'object' && value !== null)
+    return Object.values(value).map(publicSearchValue).filter(Boolean).join(' ');
+  return '';
 }
 
 function publicSearchText(item: SnapshotItem): string {
@@ -62,26 +67,39 @@ function publicSearchText(item: SnapshotItem): string {
     item.markings,
     item.distribution,
     item.cardSize,
-  ].map(publicSearchValue).filter(Boolean).join(" ").normalize("NFC").toLowerCase();
+  ]
+    .map(publicSearchValue)
+    .filter(Boolean)
+    .join(' ')
+    .normalize('NFC')
+    .toLowerCase();
 }
 
 function searchTerms(query: string | undefined): string[] {
-  return query?.trim().split(/\s+/u).filter(Boolean).map((term) => term.normalize("NFC").toLowerCase()) ?? [];
+  return (
+    query
+      ?.trim()
+      .split(/\s+/u)
+      .filter(Boolean)
+      .map((term) => term.normalize('NFC').toLowerCase()) ?? []
+  );
 }
 
 function sortKey(value: unknown): string {
-  return typeof value === "string" || typeof value === "number" ? String(value) : "";
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
 }
 
 function compareStable(a: unknown, b: unknown): number {
-  return sortKey(a).localeCompare(sortKey(b), "en", { numeric: true }) || 0;
+  return sortKey(a).localeCompare(sortKey(b), 'en', { numeric: true }) || 0;
 }
 
 function compareItems(a: SnapshotItem, b: SnapshotItem): number {
-  return compareStable(a.releaseSortKey, b.releaseSortKey) ||
+  return (
+    compareStable(a.releaseSortKey, b.releaseSortKey) ||
     compareStable(a.collectorNumberSortKey, b.collectorNumberSortKey) ||
     compareStable(a.finishGroupId, b.finishGroupId) ||
-    compareStable(a.itemId, b.itemId);
+    compareStable(a.itemId, b.itemId)
+  );
 }
 
 function matchesCriteria(
@@ -91,13 +109,15 @@ function matchesCriteria(
   privateStatuses?: ReadonlyMap<string, CollectionStatus>,
 ): boolean {
   const terms = searchTerms(criteria.q);
-  const status = privateStatuses?.get(item.itemId) ?? "need";
-  return (!criteria.localization || item.localizationId === criteria.localization) &&
+  const status = privateStatuses?.get(item.itemId) ?? 'need';
+  return (
+    (!criteria.localization || item.localizationId === criteria.localization) &&
     (!criteria.edition || item.setEditionId === criteria.edition) &&
     (terms.length === 0 || terms.every((term) => publicSearchText(item).includes(term))) &&
     (!criteria.kind || item.itemKind === criteria.kind) &&
-    (!criteria.research || matchesResearch(item.progressClass ?? "", criteria.research)) &&
-    (!criteria.status || (item.active && item.progressClass === "current-known" && status === criteria.status));
+    (!criteria.research || matchesResearch(item.progressClass ?? '', criteria.research)) &&
+    (!criteria.status || (item.active && item.progressClass === 'current-known' && status === criteria.status))
+  );
 }
 
 export function filterCatalogueItems(
@@ -106,29 +126,37 @@ export function filterCatalogueItems(
   matchesResearch: (progressClass: string, criterion?: ResearchCriterion) => boolean,
   privateStatuses?: ReadonlyMap<string, CollectionStatus>,
 ): SnapshotItem[] {
-  return catalogue.items.filter((item) => matchesCriteria(item, criteria, matchesResearch, privateStatuses)).sort(compareItems);
+  return catalogue.items
+    .filter((item) => matchesCriteria(item, criteria, matchesResearch, privateStatuses))
+    .sort(compareItems);
 }
 
 export function buildProgressViewModel(
   items: readonly SnapshotItem[],
   privateStatuses?: ReadonlyMap<string, CollectionStatus>,
 ): ProgressViewModel {
-  const currentKnown = items.filter((item) => item.active && item.progressClass === "current-known");
-  const researchTotal = items.filter((item) => item.active && item.progressClass === "research").length;
-  let ownedTotal = 0;
-  let securedTotal = 0;
+  const currentKnown = items.filter((item) => item.active && item.progressClass === 'current-known');
+  const researchTotal = items.filter((item) => item.active && item.progressClass === 'research').length;
+  let haveTotal = 0;
+  let orderedTotal = 0;
+  let needTotal = 0;
+  let skipTotal = 0;
   for (const item of currentKnown) {
-    const status = privateStatuses?.get(item.itemId) ?? "need";
-    if (status === "have") {
-      ownedTotal += 1;
-      securedTotal += 1;
-    } else if (status === "ordered") {
-      securedTotal += 1;
-    }
+    const status = privateStatuses?.get(item.itemId) ?? 'need';
+    if (status === 'have') haveTotal += 1;
+    else if (status === 'ordered') orderedTotal += 1;
+    else if (status === 'skip') skipTotal += 1;
+    else needTotal += 1;
   }
   const denominator = currentKnown.length;
+  const ownedTotal = haveTotal;
+  const securedTotal = haveTotal + orderedTotal;
   return {
     currentKnownTotal: denominator,
+    haveTotal,
+    orderedTotal,
+    needTotal,
+    skipTotal,
     ownedTotal,
     securedTotal,
     researchTotal,
@@ -147,15 +175,15 @@ export function buildResultViewModel(
   const activeItems: SnapshotItem[] = [];
   const inactiveItems: SnapshotItem[] = [];
   for (const item of filteredItems) (item.active ? activeItems : inactiveItems).push(item);
-  const activeSummary = `${activeItems.length} active public catalogue item${activeItems.length === 1 ? "" : "s"}.`;
+  const activeSummary = `${activeItems.length} active public catalogue item${activeItems.length === 1 ? '' : 's'}.`;
   return inactiveItems.length === 0
     ? { activeItems, inactiveItems, activeSummary }
     : {
         activeItems,
         inactiveItems,
         activeSummary,
-        inactiveHeading: "Inactive catalogue items",
-        inactiveSummary: `${inactiveItems.length} catalogue item${inactiveItems.length === 1 ? " is" : "s are"} inactive and excluded from the active checklist.`,
+        inactiveHeading: 'Inactive catalogue items',
+        inactiveSummary: `${inactiveItems.length} catalogue item${inactiveItems.length === 1 ? ' is' : 's are'} inactive and excluded from the active checklist.`,
       };
 }
 
@@ -185,8 +213,9 @@ export function buildBrowseHierarchy(
   }
   const sets = new Map(catalogue.localSets.map((set) => [set.localSetId, set] as const));
   const result: BrowseLocalizationViewModel[] = [];
-  for (const localization of [...catalogue.localizations].sort((a, b) =>
-    compareStable(a.displayOrder, b.displayOrder) || compareStable(a.localizationId, b.localizationId))) {
+  for (const localization of [...catalogue.localizations].sort(
+    (a, b) => compareStable(a.displayOrder, b.displayOrder) || compareStable(a.localizationId, b.localizationId),
+  )) {
     if (criteria.localization && localization.localizationId !== criteria.localization) continue;
     const bySet = new Map<string, BrowseEditionViewModel[]>();
     for (const edition of catalogue.setEditions) {
@@ -196,7 +225,11 @@ export function buildBrowseHierarchy(
       const editionItems = (itemByEdition.get(edition.setEditionId) ?? []).filter((item) => item.active);
       // A filtered/global search only displays groups containing a result. A plain
       // localization browse keeps empty editions visible as useful navigation.
-      if ((criteria.edition || criteria.q || criteria.kind || criteria.research || criteria.status) && editionItems.length === 0) continue;
+      if (
+        (criteria.edition || criteria.q || criteria.kind || criteria.research || criteria.status) &&
+        editionItems.length === 0
+      )
+        continue;
       const rows = bySet.get(set.localSetId) ?? [];
       rows.push({ edition, items: editionItems });
       bySet.set(set.localSetId, rows);

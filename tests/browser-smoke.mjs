@@ -683,6 +683,22 @@ try {
         `${name}: advanced filters closed`,
       );
       assert.equal(await page.locator('[data-view] > .empty-state').count(), 1, `${name}: neutral initial state`);
+      assert.equal(
+        await page.getByRole('heading', { name: 'Collection progress' }).count(),
+        1,
+        `${name}: overall progress overview`,
+      );
+      assert.equal(
+        await page.locator('[data-progress-overview] > .progress-overview').count(),
+        1,
+        `${name}: progress overview landmark wrapper`,
+      );
+      assert.equal(
+        await page.locator('.progress-overview').getAttribute('aria-labelledby'),
+        'progress-overview-title',
+        `${name}: progress overview accessible name`,
+      );
+      assert.ok((await page.locator('.progress-card').count()) > 1, `${name}: localization progress cards`);
       assert.equal(await page.locator('[data-view]').getAttribute('aria-live'), null, `${name}: results are not live`);
       assert.equal(
         await page.locator('[data-view-status]').getAttribute('role'),
@@ -798,6 +814,66 @@ try {
       });
       assert.notEqual(synthetic, null, `${name}: synthetic trackable item`);
       if (synthetic !== null) {
+        await page.evaluate(
+          ({ fingerprint, itemId }) => {
+            localStorage.setItem(
+              'snoredex-checklist.private-state',
+              JSON.stringify({
+                schema: 'snoredex-collection-state',
+                schemaVersion: '1.0.0',
+                datasetId: 'snoredex-data/snorlax-current-known',
+                catalogueFingerprint: fingerprint,
+                items: [{ itemId, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],
+              }),
+            );
+            const event = new Event('pageshow');
+            Object.defineProperty(event, 'persisted', { value: true });
+            window.dispatchEvent(event);
+          },
+          { fingerprint: synthetic.fingerprint, itemId: synthetic.itemId },
+        );
+        await page.waitForFunction(() =>
+          [...document.querySelectorAll('.progress-card')].some((card) => /1 Have/u.test(card.textContent ?? '')),
+        );
+        assert.equal(
+          (await page.locator('.progress-card').filter({ hasText: '1 Have' }).count()) > 0,
+          true,
+          `${name}: persisted pageshow refreshes overview`,
+        );
+        const overviewContext = await browser.newContext();
+        const overviewTab = await overviewContext.newPage();
+        const overviewWriter = await overviewContext.newPage();
+        try {
+          await overviewTab.goto(`${baseUrl}/collection/`, { waitUntil: 'networkidle' });
+          await overviewWriter.goto(`${baseUrl}/collection/`, { waitUntil: 'networkidle' });
+          await overviewWriter.evaluate(
+            (value) => {
+              localStorage.setItem('snoredex-checklist.private-state', JSON.stringify(value));
+            },
+            {
+              schema: 'snoredex-collection-state',
+              schemaVersion: '1.0.0',
+              datasetId: 'snoredex-data/snorlax-current-known',
+              catalogueFingerprint: synthetic.fingerprint,
+              items: [{ itemId: synthetic.itemId, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],
+            },
+          );
+          await overviewTab.waitForFunction(() => {
+            const overall = [...document.querySelectorAll('.progress-card')].find(
+              (card) => card.querySelector('h3')?.textContent === 'Overall',
+            );
+            return /1 Have/u.test(overall?.textContent ?? '');
+          });
+          await overviewWriter.evaluate((key) => localStorage.removeItem(key), PRIVATE_STATE_KEY);
+          await overviewTab.waitForFunction(() => {
+            const overall = [...document.querySelectorAll('.progress-card')].find(
+              (card) => card.querySelector('h3')?.textContent === 'Overall',
+            );
+            return /0 Have/u.test(overall?.textContent ?? '');
+          });
+        } finally {
+          await overviewContext.close();
+        }
         await page.evaluate(() => {
           for (const key of Object.keys(localStorage))
             if (key.startsWith('snoredex-checklist.private-state')) localStorage.removeItem(key);

@@ -1,4 +1,5 @@
 import {
+  localizationDisplayLabel,
   localizationLabel,
   validateProvenance,
   validateSnapshot,
@@ -238,16 +239,6 @@ function renderProvenance(container: HTMLElement, catalogue: DirectoryCatalogue,
 
 function sortedLocalizations(catalogue: DirectoryCatalogue): SnapshotLocalization[] {
   return [...catalogue.localizations].sort((left, right) => (left.displayOrder ?? 0) - (right.displayOrder ?? 0));
-}
-
-function localizationDisplayLabel(
-  localization: SnapshotLocalization,
-  labelCounts: ReadonlyMap<string, number>,
-): string {
-  const label = localizationLabel(localization);
-  const key = `${localization.locality ?? ''}\u0000${label}`;
-  if ((labelCounts.get(key) ?? 0) <= 1) return label;
-  return `${label} (${presentText(localization.languageTag) ?? 'variant'})`;
 }
 
 function renderLocalizationLinks(container: HTMLElement, catalogue: DirectoryCatalogue): void {
@@ -533,7 +524,7 @@ function renderProgress(
     section.append(
       text(
         'p',
-        `${progress.ownedTotal} of ${progress.currentKnownTotal} current-known items owned · ${progress.securedTotal} secured (Have or Ordered)`,
+        `${progress.haveTotal} Have · ${progress.orderedTotal} Ordered · ${progress.needTotal} Need · ${progress.skipTotal} Skip · ${progress.currentKnownTotal} Total`,
       ),
     );
     const bar = document.createElement('progress');
@@ -579,6 +570,84 @@ function renderProgress(
         `${progress.researchTotal} research item${progress.researchTotal === 1 ? '' : 's'} excluded from progress.`,
       ),
     );
+  return section;
+}
+
+function progressScopeLabel(
+  catalogue: CatalogueSnapshot,
+  localizationId: string,
+  labelCounts: ReadonlyMap<string, number>,
+): string {
+  const localization = catalogue.localizations.find((candidate) => candidate.localizationId === localizationId);
+  if (!localization) return 'Unknown localization';
+  const label = localizationDisplayLabel(localization, labelCounts);
+  return localization.locality ? `${label} (${localization.locality})` : label;
+}
+
+function renderProgressOverview(catalogue: CatalogueSnapshot, state: PrivateStateRead): HTMLElement {
+  const section = text('section', undefined, 'progress-overview');
+  const heading = text('h2', 'Collection progress');
+  heading.id = 'progress-overview-title';
+  section.setAttribute('aria-labelledby', heading.id);
+  section.append(
+    heading,
+    text('p', 'Overall and localization progress use the unfiltered current-known catalogue scope.'),
+  );
+
+  const localizationLabelCounts = new Map<string, number>();
+  for (const localization of catalogue.localizations) {
+    const label = localizationLabel(localization);
+    const key = `${localization.locality ?? ''}\u0000${label}`;
+    localizationLabelCounts.set(key, (localizationLabelCounts.get(key) ?? 0) + 1);
+  }
+  const scopes: Array<{ readonly label: string; readonly items: readonly SnapshotItem[] }> = [
+    { label: 'Overall', items: catalogue.items },
+    ...sortedLocalizations(catalogue).map((localization) => ({
+      label: progressScopeLabel(catalogue, localization.localizationId, localizationLabelCounts),
+      items: catalogue.items.filter((item) => item.localizationId === localization.localizationId),
+    })),
+  ];
+  const grid = text('div', undefined, 'progress-overview-grid');
+  for (const scope of scopes) {
+    const card = text('article', undefined, 'progress-card');
+    card.append(text('h3', scope.label));
+    const progress = buildProgressViewModel(scope.items, state.readable ? state.statuses : undefined);
+    if (!state.readable) {
+      card.append(text('p', 'Progress unavailable because the local state could not be read.'));
+      if (progress.researchTotal > 0)
+        card.append(
+          text('p', `${progress.researchTotal} Research item${progress.researchTotal === 1 ? '' : 's'} excluded.`),
+        );
+    } else if (progress.currentKnownTotal > 0) {
+      card.append(
+        text(
+          'p',
+          `${progress.haveTotal} Have · ${progress.orderedTotal} Ordered · ${progress.needTotal} Need · ${progress.skipTotal} Skip · ${progress.currentKnownTotal} Total`,
+          'progress-counts',
+        ),
+      );
+      const bar = document.createElement('progress');
+      bar.max = progress.currentKnownTotal;
+      bar.value = progress.haveTotal;
+      bar.setAttribute('aria-label', `${scope.label}: ${progress.haveTotal} Have of ${progress.currentKnownTotal}`);
+      card.append(bar);
+      if (progress.researchTotal > 0)
+        card.append(
+          text('p', `${progress.researchTotal} Research item${progress.researchTotal === 1 ? '' : 's'} excluded.`),
+        );
+    } else {
+      card.append(
+        text(
+          'p',
+          progress.researchTotal > 0
+            ? `${progress.researchTotal} Research item${progress.researchTotal === 1 ? '' : 's'} only; no current-known items to collect.`
+            : 'No current-known items to collect.',
+        ),
+      );
+    }
+    grid.append(card);
+  }
+  section.append(grid);
   return section;
 }
 
@@ -1952,6 +2021,41 @@ async function renderCollection(
     reconciliation,
   );
   const renderState = stateController?.state.readable === true ? stateController.state : state;
+  const progressOverview = document.querySelector<HTMLElement>('[data-progress-overview]');
+  if (progressOverview !== null)
+    progressOverview.hidden = Boolean(parsed.criteria.localization || parsed.criteria.edition);
+  const renderOverview = (nextState: PrivateStateRead): void => {
+    if (progressOverview === null) return;
+    const updated = renderProgressOverview(catalogue, nextState);
+    progressOverview.replaceChildren(updated);
+  };
+  renderOverview(renderState);
+  if (stateController !== undefined) {
+    let previousOverviewRevision = stateController.confirmedRevision;
+    stateController.onChange(() => {
+      const nextOverviewRevision = stateController.confirmedRevision;
+      if (nextOverviewRevision === previousOverviewRevision) return;
+      previousOverviewRevision = nextOverviewRevision;
+      if (progressOverview?.hidden === true) return;
+      renderOverview(stateController.state);
+    });
+  }
+  const refreshOverviewFromStorage = (): void => {
+    if (progressOverview?.hidden === true) return;
+    void readPrivateState(catalogue.meta.catalogueFingerprint, knownTrackableItemIds).then((restoredState) => {
+      renderOverview(restoredState);
+    });
+  };
+  const onPageshow = (event: PageTransitionEvent): void => {
+    if (!event.persisted) return;
+    refreshOverviewFromStorage();
+  };
+  const onStorage = (event: StorageEvent): void => {
+    if (event.key !== null && !RECOVERY_STORAGE_KEYS.has(event.key)) return;
+    refreshOverviewFromStorage();
+  };
+  window.addEventListener('pageshow', onPageshow);
+  window.addEventListener('storage', onStorage);
   renderQueryForm($('[data-query]'), parsed.criteria, catalogue);
   renderResults($('[data-view]'), parsed.criteria, catalogue, renderState, stateController);
   const recoveryTools = document.querySelector<HTMLElement>('[data-recovery-tools]');

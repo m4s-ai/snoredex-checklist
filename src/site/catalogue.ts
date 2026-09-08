@@ -142,6 +142,20 @@ export function localizationLabel(localization: SnapshotLocalization): string {
   return languageTag || localization.localizationId;
 }
 
+export function localizationDisplayLabel(
+  localization: SnapshotLocalization,
+  labelCounts: ReadonlyMap<string, number>,
+): string {
+  const label = localizationLabel(localization);
+  const key = `${localization.locality ?? ''}\u0000${label}`;
+  if ((labelCounts.get(key) ?? 0) <= 1) return label;
+  const languageTag =
+    typeof localization.languageTag === 'string'
+      ? localization.languageTag.normalize('NFC').trim().replace(/\s+/gu, ' ')
+      : '';
+  return `${label} (${languageTag || 'variant'})`;
+}
+
 export function partitionByActivity(items: readonly SnapshotItem[]): {
   active: SnapshotItem[];
   inactive: SnapshotItem[];
