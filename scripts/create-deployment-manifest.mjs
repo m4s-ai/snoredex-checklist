@@ -119,6 +119,8 @@ const sourceFingerprints = previous ? [...new Set([...previousSources, previous.
 const manifest = {
   schema: 'snoredex-checklist-deployment',
   schemaVersion: '1.0.0',
+  publicationFormat: 'provenance-history-v1',
+  publicationId: provenance.publicationId,
   pageUrl,
   publishedAt: new Date().toISOString(),
   appRevision: provenance.appRevision,
@@ -143,5 +145,10 @@ if (rollbackSource && lock.catalogueFingerprint === rollbackSource.catalogueFing
   }
   manifest.rollback = { ...rollback, runtimeAssetSet: retained };
 }
+await writeFile(
+  join(root, 'provenance.json'),
+  `${JSON.stringify({ ...provenance, sourceFingerprints }, null, 2)}\n`,
+  'utf8',
+);
 await writeFile(join(root, 'deployment.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 console.log('deployment manifest created');

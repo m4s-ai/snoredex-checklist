@@ -16,6 +16,12 @@ const root = resolve(process.cwd(), process.argv[2] ?? 'dist/site');
 const assets = join(root, 'assets');
 const pageUrl = process.env.SNOREDEX_PAGE_URL;
 const previousPath = process.env.SNOREDEX_CURRENT_DEPLOYMENT_PATH;
+const publicationId = process.env.SNOREDEX_PUBLICATION_ID;
+const publicationIdPattern = /^[a-z0-9][a-z0-9._-]{1,127}$/u;
+
+if (publicationId !== undefined && !publicationIdPattern.test(publicationId)) {
+  throw new Error('RUNTIME_PUBLICATION_ID_INVALID');
+}
 
 function isModulePath(value) {
   return (
@@ -77,7 +83,7 @@ async function retainLegacyTheme(candidate, manifest) {
   await writeFile(join(root, 'collection/theme.js'), theme);
 }
 
-async function promoteActiveShellIntegrity(pointer, runtime, modulePaths) {
+async function promoteActiveShellIntegrity(pointer, runtime, modulePaths, publicationId = pointer.publicationId) {
   const [theme, collectionTheme] = await Promise.all([
     readFile(join(root, 'theme.js')),
     readFile(join(root, 'collection/theme.js')),
@@ -92,6 +98,7 @@ async function promoteActiveShellIntegrity(pointer, runtime, modulePaths) {
     sourceRoot: directory,
     modulePaths: promotedPaths,
     runtime,
+    publicationId,
   });
   const promotedManifest = await readJson(join(directory, 'manifest.json'), 'RUNTIME_ACTIVE_MANIFEST_INVALID');
   for (const relativePath of ['index.html', 'collection/index.html']) {
@@ -122,7 +129,7 @@ async function promoteActiveShellIntegrity(pointer, runtime, modulePaths) {
   return { pointer: promotedPointer, runtime, legacyModules: promotedPaths };
 }
 
-async function promoteLegacyActiveSet(provenance, manifest) {
+async function promoteLegacyActiveSet(provenance, manifest, publicationId) {
   if (
     manifest?.schema !== 'snoredex-site-module-manifest' ||
     manifest?.schemaVersion !== '1.0.0' ||
@@ -140,6 +147,7 @@ async function promoteLegacyActiveSet(provenance, manifest) {
     assetsRoot: assets,
     modulePaths: manifest.modules,
     runtime,
+    publicationId,
   });
   for (const relativePath of ['index.html', 'collection/index.html']) {
     const path = join(root, relativePath);
@@ -153,26 +161,47 @@ async function promoteLegacyActiveSet(provenance, manifest) {
       'utf8',
     );
   }
-  return promoteActiveShellIntegrity(pointer, runtime, manifest.modules);
+  return promoteActiveShellIntegrity(pointer, runtime, manifest.modules, publicationId);
 }
 
-async function loadActiveSet(provenance, manifest) {
-  if (manifest?.schemaVersion === '1.0.0') return promoteLegacyActiveSet(provenance, manifest);
+async function loadActiveSet(provenance, manifest, publicationId) {
+  if (manifest?.schemaVersion === '1.0.0') return promoteLegacyActiveSet(provenance, manifest, publicationId);
   const runtime = runtimeTupleFromProvenance(provenance);
   if (
     manifest?.schema !== 'snoredex-site-module-manifest' ||
     manifest?.schemaVersion !== '2.0.0' ||
     manifest.appRevision !== provenance.appRevision ||
-    !validateRuntimeAssetSetPointer(manifest.runtimeAssetSet, provenance.appRevision) ||
-    !(await validateRuntimeAssetSetDirectory(assets, manifest.runtimeAssetSet, runtime))
+    !validateRuntimeAssetSetPointer(manifest.runtimeAssetSet, provenance.appRevision)
   ) {
     throw new Error('RUNTIME_ACTIVE_MANIFEST_INVALID');
   }
   const directory = join(assets, ...manifest.runtimeAssetSet.path.split('/'));
   const runtimeManifest = await readJson(join(directory, 'manifest.json'), 'RUNTIME_ACTIVE_MANIFEST_INVALID');
   const modulePaths = runtimeManifest.modules.map((module) => module.path);
+  const transitionalPublicationBinding =
+    manifest.runtimeAssetSet.publicationId !== undefined && runtimeManifest.publicationId === undefined;
+  if (transitionalPublicationBinding) {
+    const legacyPointer = { ...manifest.runtimeAssetSet, publicationId: undefined };
+    if (!(await validateRuntimeAssetSetDirectory(assets, legacyPointer, runtime))) {
+      throw new Error('RUNTIME_ACTIVE_MANIFEST_INVALID');
+    }
+    return {
+      pointer: await writeRuntimeAssetSet({
+        assetsRoot: assets,
+        sourceRoot: directory,
+        modulePaths,
+        runtime,
+        publicationId: publicationId ?? manifest.runtimeAssetSet.publicationId,
+      }),
+      runtime,
+      legacyModules: manifest.legacyModules ?? [],
+    };
+  }
+  if (!(await validateRuntimeAssetSetDirectory(assets, manifest.runtimeAssetSet, runtime))) {
+    throw new Error('RUNTIME_ACTIVE_MANIFEST_INVALID');
+  }
   if (!modulePaths.includes('theme.js')) {
-    return promoteActiveShellIntegrity(manifest.runtimeAssetSet, runtime, modulePaths);
+    return promoteActiveShellIntegrity(manifest.runtimeAssetSet, runtime, modulePaths, publicationId);
   }
   return { pointer: manifest.runtimeAssetSet, runtime, legacyModules: manifest.legacyModules ?? [] };
 }
@@ -192,39 +221,67 @@ function previousTuple(previous, currentRuntime) {
   return tuple;
 }
 
-async function retainPublishedSet(previous, currentRuntime) {
-  const candidate = previous.appRevision === currentRuntime.appRevision ? previous.rollback : previous;
-  if (!candidate || candidate.catalogueFingerprint !== currentRuntime.catalogueFingerprint) return undefined;
+async function fetchPublishedRuntimeSet(candidate, currentRuntime) {
   const runtime = previousTuple(candidate, currentRuntime);
   const publishedPointer = candidate.runtimeAssetSet;
-  if (publishedPointer !== undefined) {
-    if (!validateRuntimeAssetSetPointer(publishedPointer, candidate.appRevision)) {
-      throw new Error('RUNTIME_PREVIOUS_POINTER_INVALID');
-    }
-    const fetched = await fetchJson(`assets/${publishedPointer.path}/manifest.json`);
-    if (
-      fetched.bytes.byteLength !== publishedPointer.manifestByteLength ||
-      sha256(fetched.bytes) !== publishedPointer.manifestSha256 ||
-      !validateRuntimeAssetSetManifest(fetched.value, runtime)
-    ) {
-      throw new Error('RUNTIME_PREVIOUS_MANIFEST_INVALID');
-    }
-    const directory = join(assets, ...publishedPointer.path.split('/'));
-    await mkdir(directory, { recursive: true });
-    await writeFile(join(directory, 'manifest.json'), fetched.bytes);
-    for (const module of fetched.value.modules) {
+  if (publishedPointer === undefined) return { runtime, publishedPointer };
+  if (!validateRuntimeAssetSetPointer(publishedPointer, candidate.appRevision)) {
+    throw new Error('RUNTIME_PREVIOUS_POINTER_INVALID');
+  }
+  const fetched = await fetchJson(`assets/${publishedPointer.path}/manifest.json`);
+  const transitionalPublicationBinding =
+    publishedPointer.publicationId !== undefined && fetched.value.publicationId === undefined;
+  if (
+    fetched.bytes.byteLength !== publishedPointer.manifestByteLength ||
+    sha256(fetched.bytes) !== publishedPointer.manifestSha256 ||
+    !validateRuntimeAssetSetManifest(fetched.value, runtime) ||
+    (!transitionalPublicationBinding && fetched.value.publicationId !== publishedPointer.publicationId)
+  ) {
+    throw new Error('RUNTIME_PREVIOUS_MANIFEST_INVALID');
+  }
+  const fetchedModules = await Promise.all(
+    fetched.value.modules.map(async (module) => {
       const bytes = await fetchBytes(`assets/${publishedPointer.path}/${module.path}`);
       if (bytes.byteLength !== module.byteLength || sha256(bytes) !== module.sha256) {
         throw new Error('RUNTIME_PREVIOUS_MODULE_INVALID');
       }
+      return { module, bytes };
+    }),
+  );
+  return { runtime, publishedPointer, fetched, fetchedModules, transitionalPublicationBinding };
+}
+
+async function retainPublishedSet(previous, currentRuntime, publicationId) {
+  const previousPublished = await fetchPublishedRuntimeSet(previous, currentRuntime);
+  const candidate = previous.appRevision === currentRuntime.appRevision ? previous.rollback : previous;
+  if (!candidate) return undefined;
+  const published =
+    candidate === previous ? previousPublished : await fetchPublishedRuntimeSet(candidate, currentRuntime);
+  const { runtime, publishedPointer, fetched, fetchedModules, transitionalPublicationBinding } = published;
+  if (publishedPointer !== undefined) {
+    if (candidate.catalogueFingerprint !== currentRuntime.catalogueFingerprint) return undefined;
+    const directory = join(assets, ...publishedPointer.path.split('/'));
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'manifest.json'), fetched.bytes);
+    for (const { module, bytes } of fetchedModules) {
       const destination = join(directory, ...module.path.split('/'));
       await mkdir(dirname(destination), { recursive: true });
       await writeFile(destination, bytes);
     }
     await retainLegacyTheme(candidate, fetched.value);
+    if (transitionalPublicationBinding) {
+      return await writeRuntimeAssetSet({
+        assetsRoot: assets,
+        sourceRoot: directory,
+        modulePaths: fetched.value.modules.map((module) => module.path),
+        runtime,
+        publicationId: publishedPointer.publicationId,
+      });
+    }
     return publishedPointer;
   }
 
+  if (candidate.catalogueFingerprint !== currentRuntime.catalogueFingerprint) return undefined;
   const fetchedManifest = await fetchJson('assets/module-manifest.json');
   const legacy = fetchedManifest.value;
   if (
@@ -249,7 +306,13 @@ async function retainPublishedSet(previous, currentRuntime) {
       await writeFile(join(assets, ...modulePath.split('/')), bytes);
     }
     await retainLegacyTheme(candidate, legacy);
-    return await writeRuntimeAssetSet({ assetsRoot: assets, sourceRoot, modulePaths: legacy.modules, runtime });
+    return await writeRuntimeAssetSet({
+      assetsRoot: assets,
+      sourceRoot,
+      modulePaths: legacy.modules,
+      runtime,
+      publicationId,
+    });
   } finally {
     await rm(sourceRoot, { recursive: true, force: true });
   }
@@ -257,20 +320,45 @@ async function retainPublishedSet(previous, currentRuntime) {
 
 const provenance = await readJson(join(root, 'provenance.json'), 'RUNTIME_PROVENANCE_INVALID');
 const moduleManifest = await readJson(join(assets, 'module-manifest.json'), 'RUNTIME_ACTIVE_MANIFEST_INVALID');
-const active = await loadActiveSet(provenance, moduleManifest);
+const effectivePublicationId = publicationId ?? provenance.publicationId;
+if (effectivePublicationId !== undefined && !publicationIdPattern.test(effectivePublicationId)) {
+  throw new Error('RUNTIME_PUBLICATION_ID_INVALID');
+}
+const active = await loadActiveSet(provenance, moduleManifest, effectivePublicationId);
+let activePointer = active.pointer;
+if (effectivePublicationId !== undefined && activePointer.publicationId !== effectivePublicationId) {
+  const directory = join(assets, ...activePointer.path.split('/'));
+  const runtimeManifest = await readJson(join(directory, 'manifest.json'), 'RUNTIME_ACTIVE_MANIFEST_INVALID');
+  activePointer = await writeRuntimeAssetSet({
+    assetsRoot: assets,
+    sourceRoot: directory,
+    modulePaths: runtimeManifest.modules.map((module) => module.path),
+    runtime: active.runtime,
+    publicationId: effectivePublicationId,
+  });
+}
 let retained;
 if (previousPath) {
   const previous = await readJson(previousPath, 'RUNTIME_PREVIOUS_DEPLOYMENT_INVALID');
-  retained = await retainPublishedSet(previous, active.runtime);
+  retained = await retainPublishedSet(previous, active.runtime, effectivePublicationId);
 }
 const result = {
   schema: 'snoredex-site-module-manifest',
   schemaVersion: '2.0.0',
+  publicationFormat: 'provenance-history-v1',
+  publicationId: effectivePublicationId,
   appRevision: active.runtime.appRevision,
-  runtimeAssetSet: active.pointer,
+  runtimeAssetSet: activePointer,
   retainedRuntimeAssetSets: retained ? [retained] : [],
   legacyModules: active.legacyModules,
 };
+if (effectivePublicationId !== undefined) {
+  await writeFile(
+    join(root, 'provenance.json'),
+    `${JSON.stringify({ ...provenance, publicationId: effectivePublicationId }, null, 2)}\n`,
+    'utf8',
+  );
+}
 await writeFile(join(assets, 'module-manifest.json'), `${JSON.stringify(result, null, 2)}\n`, 'utf8');
 console.log(
   `runtime assets retained: active ${active.runtime.appRevision}; rollback ${retained?.appRevision ?? 'none'}`,

@@ -82,11 +82,12 @@ workflow. A manual `workflow_dispatch` remains available for rollback. For adopt
 an explicit full lowercase SHA is still required for rollback. The workflow validates and checks out
 the exact resolved consumer revision before building, and the smoke test verifies the same SHA.
 Deployment also fails closed until the pinned producer migration
-manifest is reviewed, complete and targets the accepted catalogue fingerprint. On the first
-deployment of a repository with no production manifest, no source fingerprint is required; later
-deployments must provide a reviewed route from the currently published fingerprint. A synthetic
-fixture that was never production is not treated as a migration source, and no consumer-side
-identity mapping is inferred.
+manifest is reviewed, complete and targets the accepted catalogue fingerprint. A missing
+production manifest blocks automatic adoption; a genuine first publication requires an explicit
+owner-authorized `workflow_dispatch` with the `bootstrap` input enabled. Established deployments
+must provide a reviewed route from every retained source fingerprint. A synthetic fixture that was
+never production is not treated as a migration source, and no consumer-side identity mapping is
+inferred.
 
 The build also copies the authored card-shaped placeholders from `site-src/assets/` into the
 same-origin `assets/images/` tree and writes a digest-pinned `assets/image-manifest.json`. The

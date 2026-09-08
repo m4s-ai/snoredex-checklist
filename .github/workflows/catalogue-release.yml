@@ -121,7 +121,11 @@ jobs:
         run: |
           set -euo pipefail
           manifest="$RUNNER_TEMP/current-deployment.json"
+          provenance="$RUNNER_TEMP/current-provenance.json"
+          module_manifest="$RUNNER_TEMP/current-module-manifest.json"
           rm -f "$manifest"
+          rm -f "$provenance"
+          rm -f "$module_manifest"
           set +e
           http_status="$(curl --silent --show-error --location --output "$manifest" --write-out '%{http_code}' "$SNOREDEX_PAGE_URL/deployment.json")"
           curl_status=$?
@@ -130,13 +134,33 @@ jobs:
             rm -f "$manifest"
             echo "state=unavailable" >> "$GITHUB_OUTPUT"
             echo "manifest=" >> "$GITHUB_OUTPUT"
+            echo "provenance=" >> "$GITHUB_OUTPUT"
+            echo "module_manifest=" >> "$GITHUB_OUTPUT"
           elif [[ "$http_status" == "200" ]]; then
-            echo "state=available" >> "$GITHUB_OUTPUT"
-            echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
+            set +e
+            provenance_status="$(curl --silent --show-error --location --output "$provenance" --write-out '%{http_code}' "$SNOREDEX_PAGE_URL/provenance.json")"
+            provenance_curl_status=$?
+            module_manifest_status="$(curl --silent --show-error --location --output "$module_manifest" --write-out '%{http_code}' "$SNOREDEX_PAGE_URL/assets/module-manifest.json")"
+            module_manifest_curl_status=$?
+            set -e
+            if [[ "$provenance_curl_status" -eq 0 && "$module_manifest_curl_status" -eq 0 && "$provenance_status" == "200" && "$module_manifest_status" == "200" ]]; then
+              echo "state=available" >> "$GITHUB_OUTPUT"
+              echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
+              echo "provenance=$provenance" >> "$GITHUB_OUTPUT"
+              echo "module_manifest=$module_manifest" >> "$GITHUB_OUTPUT"
+            else
+              rm -f "$manifest" "$provenance" "$module_manifest"
+              echo "state=unavailable" >> "$GITHUB_OUTPUT"
+              echo "manifest=" >> "$GITHUB_OUTPUT"
+              echo "provenance=" >> "$GITHUB_OUTPUT"
+              echo "module_manifest=" >> "$GITHUB_OUTPUT"
+            fi
           else
-            rm -f "$manifest"
+            rm -f "$manifest" "$provenance"
             echo "state=unavailable" >> "$GITHUB_OUTPUT"
             echo "manifest=" >> "$GITHUB_OUTPUT"
+            echo "provenance=" >> "$GITHUB_OUTPUT"
+            echo "module_manifest=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Validate adoption and stage committed pair
@@ -150,6 +174,8 @@ jobs:
           PRODUCER_REVISION: ${{ steps.producer.outputs.revision }}
           CURRENT_DEPLOYMENT_STATE: ${{ steps.current-production.outputs.state }}
           CURRENT_DEPLOYMENT_PATH: ${{ steps.current-production.outputs.manifest }}
+          CURRENT_PROVENANCE_PATH: ${{ steps.current-production.outputs.provenance }}
+          CURRENT_MODULE_MANIFEST_PATH: ${{ steps.current-production.outputs.module_manifest }}
         run: |
           set -euo pipefail
           set +e
@@ -170,7 +196,7 @@ jobs:
             sync_status=$?
             if [[ "$sync_status" -eq 0 ]]; then
               if [[ -n "$CURRENT_DEPLOYMENT_PATH" ]]; then
-                SNOREDEX_CURRENT_DEPLOYMENT_PATH="$CURRENT_DEPLOYMENT_PATH" node scripts/check-production-adoption.mjs
+                SNOREDEX_CURRENT_DEPLOYMENT_PATH="$CURRENT_DEPLOYMENT_PATH" SNOREDEX_CURRENT_PROVENANCE_PATH="$CURRENT_PROVENANCE_PATH" SNOREDEX_CURRENT_MODULE_MANIFEST_PATH="$CURRENT_MODULE_MANIFEST_PATH" node scripts/check-production-adoption.mjs
               else
                 node scripts/check-production-adoption.mjs
               fi
