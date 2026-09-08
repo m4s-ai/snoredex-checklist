@@ -200,6 +200,7 @@ try {
         await Promise.all([page.waitForURL(/\/collection\/$/u), collectionLink.press('Enter')]);
         await page.waitForLoadState('networkidle');
         assert.match(page.url(), /\/collection\/$/u, `${engineName}/${viewportName}: keyboard navigation`);
+        await inspectPage(page, engineName, viewportName, '/collection/');
         await inspectPage(page, engineName, viewportName, collectionScope);
         assert.equal(
           await page.getByRole('heading', { name: 'Current-known progress' }).count(),
