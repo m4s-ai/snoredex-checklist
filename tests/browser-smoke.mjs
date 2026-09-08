@@ -683,6 +683,12 @@ try {
         `${name}: advanced filters closed`,
       );
       assert.equal(await page.locator('[data-view] > .empty-state').count(), 1, `${name}: neutral initial state`);
+      assert.equal(
+        await page.getByRole('heading', { name: 'Collection progress' }).count(),
+        1,
+        `${name}: overall progress overview`,
+      );
+      assert.ok((await page.locator('.progress-card').count()) > 1, `${name}: localization progress cards`);
       assert.equal(await page.locator('[data-view]').getAttribute('aria-live'), null, `${name}: results are not live`);
       assert.equal(
         await page.locator('[data-view-status]').getAttribute('role'),

@@ -378,6 +378,39 @@ select {
   height: 1rem;
   accent-color: var(--primary);
 }
+.progress-overview {
+  margin-block: 1rem;
+}
+.progress-overview > p {
+  margin: 0.35rem 0 0.8rem;
+  color: var(--muted);
+}
+.progress-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: 0.75rem;
+}
+.progress-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.8rem;
+  background: var(--soft);
+}
+.progress-card h3 {
+  margin: 0 0 0.35rem;
+  overflow-wrap: anywhere;
+}
+.progress-card p {
+  margin: 0.35rem 0;
+  overflow-wrap: anywhere;
+}
+.progress-card progress {
+  display: block;
+  width: 100%;
+  height: 0.85rem;
+  accent-color: var(--primary);
+}
 .progress-empty {
   background: var(--primary-soft);
 }

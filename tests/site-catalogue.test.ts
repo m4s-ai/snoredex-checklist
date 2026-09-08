@@ -192,6 +192,10 @@ test('keeps research separate from current-known progress', () => {
   const need = buildProgressViewModel(fixture.catalogue.items);
   assert.deepEqual(need, {
     currentKnownTotal: 1,
+    haveTotal: 0,
+    orderedTotal: 0,
+    needTotal: 1,
+    skipTotal: 0,
     ownedTotal: 0,
     securedTotal: 0,
     researchTotal: 2,
@@ -201,9 +205,41 @@ test('keeps research separate from current-known progress', () => {
   const have = buildProgressViewModel(fixture.catalogue.items, new Map([[itemId, 'have']]));
   assert.equal(have.currentKnownTotal, 1);
   assert.equal(have.researchTotal, 2);
+  assert.equal(have.haveTotal, 1);
+  assert.equal(have.needTotal, 0);
   assert.equal(have.ownedTotal, 1);
   assert.equal(have.securedTotal, 1);
   assert.equal(have.ownedPercent, 100);
+});
+
+test('counts every current-known status without changing the denominator', () => {
+  const fixtureWithStatuses = structuredClone(fixture.catalogue);
+  const trackable = fixtureWithStatuses.items.find((item) => item.progressClass === 'current-known');
+  assert.ok(trackable);
+  fixtureWithStatuses.items.push(
+    { ...trackable, itemId: 'fixture-item-ordered', active: true },
+    { ...trackable, itemId: 'fixture-item-skip', active: true },
+    { ...trackable, itemId: 'fixture-item-inactive', active: false },
+  );
+  const progress = buildProgressViewModel(
+    fixtureWithStatuses.items,
+    new Map([
+      [trackable.itemId, 'have'],
+      ['fixture-item-ordered', 'ordered'],
+      ['fixture-item-skip', 'skip'],
+    ]),
+  );
+  assert.deepEqual(
+    {
+      currentKnownTotal: progress.currentKnownTotal,
+      haveTotal: progress.haveTotal,
+      orderedTotal: progress.orderedTotal,
+      needTotal: progress.needTotal,
+      skipTotal: progress.skipTotal,
+    },
+    { currentKnownTotal: 3, haveTotal: 1, orderedTotal: 1, needTotal: 0, skipTotal: 1 },
+  );
+  assert.equal(progress.researchTotal, 2);
 });
 
 test('groups browse results by opaque IDs despite duplicate set labels', () => {
