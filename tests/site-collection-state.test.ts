@@ -176,15 +176,32 @@ test('publishes one durable revision for a multi-item confirmation fan-out', asy
       { itemId: ITEM_B, status: 'ordered', quantityOwned: 0, quantityOrdered: 1 },
     ],
   });
-  let notifications = 0;
-  controller.onChange(() => notifications++);
+  const notifications: Array<string | undefined> = [];
+  controller.onChange((itemId) => notifications.push(itemId));
 
   const save = controller.setStatus(ITEM_A, 'skip');
   immediateSaves[0].resolve(saved);
   await save;
 
-  assert.ok(notifications > 1, 'the item-level fan-out remains available to row consumers');
+  assert.deepEqual(notifications, [ITEM_A, ITEM_A], 'only the changed item receives saving and saved events');
   assert.equal(controller.confirmedRevision, 1, 'overview consumers can gate on one durable revision');
+});
+
+test('keeps note-only notifications bounded to the edited item', async () => {
+  const { controller, noteSaves } = makeHarness({
+    active: [
+      { itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0 },
+      { itemId: ITEM_B, status: 'ordered', quantityOwned: 0, quantityOrdered: 1 },
+    ],
+  });
+  const notifications: Array<string | undefined> = [];
+  controller.onChange((itemId) => notifications.push(itemId));
+
+  assert.deepEqual(controller.scheduleNote(ITEM_A, 'private note'), { ok: true });
+  const flush = controller.flushNote();
+  noteSaves[0].resolve(saved);
+  assert.deepEqual(await flush, { ok: true, skipped: undefined });
+  assert.deepEqual(notifications, [ITEM_A, ITEM_A, ITEM_A]);
 });
 
 test('canonicalizes equivalent quantity drafts on no-op and persisted commits', async () => {

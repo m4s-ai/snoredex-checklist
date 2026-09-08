@@ -657,8 +657,6 @@ export class BrowserCollectionStateController implements CollectionStateControll
     if (result.ok && !result.skipped && operation.id > this.lastConfirmedOperationId) {
       this.lastConfirmedOperationId = operation.id;
       this.durableRevision += 1;
-      for (const itemId of this.confirmedRecords.keys()) touched.add(itemId);
-      for (const itemId of operation.records.keys()) touched.add(itemId);
       this.confirmedRecords = new Map(operation.records);
       this.hasActiveState = true;
       for (const [itemId, fields] of operation.affected) {

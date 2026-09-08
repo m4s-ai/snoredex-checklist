@@ -12,6 +12,7 @@ import {
   createCollectionStateController,
   type CollectionEditResult,
   type CollectionReconciliationOptions,
+  type CollectionStatus,
   type CollectionStateController,
 } from './collection-state.js';
 import { matchesResearch } from './filter.js';
@@ -961,11 +962,30 @@ function renderCollectionControls(
   return wrapper;
 }
 
-function statusKey(state: PrivateStateRead): string {
-  return [...state.statuses.entries()]
+function statusKey(statuses: ReadonlyMap<string, CollectionStatus>): string {
+  return [...statuses.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([itemId, status]) => `${itemId}:${status}`)
     .join('|');
+}
+
+function updateStatusSnapshot(
+  previous: Map<string, CollectionStatus>,
+  current: ReadonlyMap<string, CollectionStatus>,
+  changedItemId?: string,
+): boolean {
+  if (changedItemId !== undefined) {
+    const previousStatus = previous.get(changedItemId);
+    const nextStatus = current.get(changedItemId);
+    if (previousStatus === nextStatus) return false;
+    if (nextStatus === undefined) previous.delete(changedItemId);
+    else previous.set(changedItemId, nextStatus);
+    return true;
+  }
+  if (statusKey(previous) === statusKey(current)) return false;
+  previous.clear();
+  for (const [itemId, status] of current) previous.set(itemId, status);
+  return true;
 }
 
 interface ResultFocus {
@@ -1723,22 +1743,18 @@ function renderResults(
     return;
   }
   const progress = renderProgress(catalogue, criteria.localization, criteria.edition, state);
-  let previousProgressStatusKey = stateController === undefined ? '' : statusKey(stateController.state);
-  const stopProgressListener = stateController?.onChange(() => {
-    const nextStatusKey = statusKey(stateController.state);
-    if (nextStatusKey === previousProgressStatusKey) return;
-    previousProgressStatusKey = nextStatusKey;
+  const previousProgressStatuses = new Map(stateController?.state.statuses);
+  const stopProgressListener = stateController?.onChange((changedItemId) => {
+    if (!updateStatusSnapshot(previousProgressStatuses, stateController.state.statuses, changedItemId)) return;
     const updated = renderProgress(catalogue, criteria.localization, criteria.edition, stateController.state);
     progress.replaceChildren(...updated.childNodes);
   });
   if (stopProgressListener !== undefined) registerCleanup(stopProgressListener);
   if (criteria.status && stateController !== undefined) {
-    let previousStatusKey = statusKey(stateController.state);
+    const previousStatuses = new Map(stateController.state.statuses);
     let stopStatusListener: (() => void) | undefined;
-    stopStatusListener = stateController.onChange(() => {
-      const nextStatusKey = statusKey(stateController.state);
-      if (nextStatusKey === previousStatusKey) return;
-      previousStatusKey = nextStatusKey;
+    stopStatusListener = stateController.onChange((changedItemId) => {
+      if (!updateStatusSnapshot(previousStatuses, stateController.state.statuses, changedItemId)) return;
       const previousFocus = captureResultFocus(container);
       stopStatusListener?.();
       renderResults(container, criteria, catalogue, stateController.state, stateController, visibleItemLimit);
