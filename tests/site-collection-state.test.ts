@@ -310,6 +310,27 @@ test('completes a reverted note before an immediate quantity save', async () => 
   assert.equal(controller.item(ITEM_A).confirmed?.note, 'old-a');
 });
 
+test('recomputes note failures after a concurrent status save settles', async () => {
+  const { controller, immediateSaves, noteSaves } = makeHarness({
+    active: [
+      { itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0 },
+      { itemId: ITEM_B, status: 'ordered', quantityOwned: 0, quantityOrdered: 1 },
+    ],
+  });
+
+  const statusSave = controller.setStatus(ITEM_A, 'skip');
+  controller.scheduleNote(ITEM_B, 'private note');
+  immediateSaves[0].resolve(saved);
+  assert.deepEqual(await statusSave, { ok: true, skipped: undefined });
+
+  const flush = controller.flushNote();
+  noteSaves[0].resolve({ ok: false, error: 'STORAGE_WRITE_FAILED' });
+  assert.deepEqual(await flush, { ok: false, error: 'STORAGE_WRITE_FAILED' });
+  assert.equal(controller.item(ITEM_A).save.phase, 'saved');
+  assert.equal(controller.item(ITEM_A).save.error, undefined);
+  assert.equal(controller.item(ITEM_B).save.phase, 'failed');
+});
+
 test('canonicalizes equivalent quantity drafts on no-op and persisted commits', async () => {
   const unchanged = makeHarness({
     active: [{ itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],

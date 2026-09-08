@@ -455,11 +455,13 @@ export class BrowserCollectionStateController implements CollectionStateControll
     }
     const pending = this.pendingNote;
     if (pending === undefined) return { ok: true, skipped: true };
+    const pendingNoteItemIds = new Set(this.pendingNoteNotifications);
     this.pendingNote = undefined;
     this.pendingNoteNotifications.clear();
-    const operation = this.beginOperation(pending);
+    const snapshot = this.pendingSnapshotWithNoteNotifications(pendingNoteItemIds);
+    const operation = this.beginOperation(snapshot);
     if (!pending.scheduled || !this.store.hasPendingNote()) {
-      const scheduled = this.store.scheduleNoteSave(pending.state, false);
+      const scheduled = this.store.scheduleNoteSave(snapshot.state, false);
       if (!scheduled.ok) {
         const outcome = failure(scheduled.error ?? 'STORAGE_WRITE_FAILED');
         this.finishOperation(operation, outcome);
@@ -601,15 +603,8 @@ export class BrowserCollectionStateController implements CollectionStateControll
       this.notify();
       return Promise.resolve(failure('STORAGE_COMMIT_UNCERTAIN'));
     }
-    const snapshot = this.pendingSnapshot();
-    const affected = new Map(snapshot.affected);
-    for (const itemId of pendingNoteItemIds) {
-      const fields = affected.get(itemId);
-      if (fields === undefined) affected.set(itemId, new Set(['note']));
-      else if (!fields.has('note')) affected.set(itemId, new Set([...fields, 'note']));
-    }
     this.pendingNoteNotifications.clear();
-    const operation = this.beginOperation({ ...snapshot, affected });
+    const operation = this.beginOperation(this.pendingSnapshotWithNoteNotifications(pendingNoteItemIds));
     return this.store.saveImmediate(operation.state).then((result) => {
       const outcome = persistenceResult(result);
       this.finishOperation(operation, outcome);
@@ -624,6 +619,17 @@ export class BrowserCollectionStateController implements CollectionStateControll
     for (const [itemId, meta] of this.edits) versions.set(itemId, { ...meta.versions });
     const affected = this.affectedFields(records);
     return { state, records, versions, affected };
+  }
+
+  private pendingSnapshotWithNoteNotifications(noteItemIds: ReadonlySet<string>): Omit<PendingNoteSave, 'scheduled'> {
+    const snapshot = this.pendingSnapshot();
+    const affected = new Map(snapshot.affected);
+    for (const itemId of noteItemIds) {
+      const fields = affected.get(itemId);
+      if (fields === undefined) affected.set(itemId, new Set(['note']));
+      else if (!fields.has('note')) affected.set(itemId, new Set([...fields, 'note']));
+    }
+    return { ...snapshot, affected };
   }
 
   private affectedFields(records: ReadonlyMap<string, PrivateItemState>): ReadonlyMap<string, ReadonlySet<EditField>> {
