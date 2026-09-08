@@ -116,6 +116,14 @@ const $ = <T extends Element>(selector: string): T => {
 
 type Cleanup = () => void;
 const resultCleanups = new WeakMap<HTMLElement, Set<Cleanup>>();
+const recoveryToolsCleanups = new WeakMap<HTMLElement, Cleanup>();
+const RECOVERY_STORAGE_KEYS = new Set([
+  'snoredex-checklist.private-state',
+  'snoredex-checklist.private-state.recovery',
+  'snoredex-checklist.private-state.recovery-records',
+  'snoredex-checklist.private-state.authority.quarantine',
+  'snoredex-checklist.private-state.recovery-records.quarantine',
+]);
 
 function text(tag: string, value?: unknown, className?: string): HTMLElement {
   const element = document.createElement(tag);
@@ -891,6 +899,68 @@ function statusKey(state: PrivateStateRead): string {
     .join('|');
 }
 
+interface ResultFocus {
+  readonly itemId: string;
+  readonly index: number;
+  readonly nextItemIds: readonly string[];
+  readonly previousItemIds: readonly string[];
+}
+
+function captureResultFocus(container: HTMLElement): ResultFocus | undefined {
+  const active = document.activeElement;
+  const row = active?.closest<HTMLElement>('[data-item-id]');
+  if (!row || !container.contains(row) || !row.dataset.itemId) return undefined;
+  const rows = [...container.querySelectorAll<HTMLElement>('[data-item-id]')];
+  const index = rows.indexOf(row);
+  if (index < 0) return undefined;
+  return {
+    itemId: row.dataset.itemId,
+    index,
+    nextItemIds: rows
+      .slice(index + 1)
+      .flatMap((candidate) => (candidate.dataset.itemId ? [candidate.dataset.itemId] : [])),
+    previousItemIds: rows
+      .slice(0, index)
+      .reverse()
+      .flatMap((candidate) => (candidate.dataset.itemId ? [candidate.dataset.itemId] : [])),
+  };
+}
+
+function focusResultSuccessor(container: HTMLElement, previous: ResultFocus): void {
+  const rows = [...container.querySelectorAll<HTMLElement>('[data-item-id]')];
+  const rowsByItemId = new Map<string, HTMLElement>();
+  for (const row of rows) {
+    if (row.dataset.itemId) rowsByItemId.set(row.dataset.itemId, row);
+  }
+  const retained = rowsByItemId.get(previous.itemId);
+  const next = previous.nextItemIds
+    .map((itemId) => rowsByItemId.get(itemId))
+    .find((row): row is HTMLElement => row !== undefined);
+  const sameIndex = rows[previous.index];
+  const after = [next, sameIndex]
+    .filter((row): row is HTMLElement => row !== undefined)
+    .sort((left, right) => rows.indexOf(left) - rows.indexOf(right))[0];
+  const before = previous.previousItemIds
+    .map((itemId) => rowsByItemId.get(itemId))
+    .find((row): row is HTMLElement => row !== undefined);
+  const target = retained ?? after ?? before ?? rows[previous.index - 1];
+  if (target) {
+    target.tabIndex = -1;
+    target.focus();
+    return;
+  }
+  const summary = container.querySelector<HTMLElement>('[data-results-summary]');
+  if (!summary) return;
+  summary.tabIndex = -1;
+  summary.focus();
+}
+
+function announceStatusFilterUpdate(container: HTMLElement): void {
+  const summary = container.querySelector<HTMLElement>('[data-results-summary]');
+  const message = summary?.textContent?.trim();
+  setViewStatus(message ? `Status updated. ${message}` : 'Status updated.');
+}
+
 function renderRecoveryPanel(
   controller: CollectionStateController,
   onResolved?: (announcement: string) => void,
@@ -1178,7 +1248,10 @@ function renderRecoveryTools(
   lifecycle: BackupLifecycle | undefined,
   targetFingerprint: string,
   knownItemIds: ReadonlySet<string>,
+  stateController?: CollectionStateController,
 ): void {
+  recoveryToolsCleanups.get(container)?.();
+  recoveryToolsCleanups.delete(container);
   const actionsContainer = container.querySelector<HTMLElement>('[data-recovery-actions]');
   const previewContainer = container.querySelector<HTMLElement>('[data-recovery-preview]');
   const status = container.querySelector<HTMLElement>('[data-recovery-status]');
@@ -1462,6 +1535,21 @@ function renderRecoveryTools(
     fileInput,
   );
   refresh();
+  let previousConfirmedRevision = stateController?.confirmedRevision;
+  const stopChangeListener = stateController?.onChange(() => {
+    const nextConfirmedRevision = stateController.confirmedRevision;
+    if (nextConfirmedRevision === previousConfirmedRevision) return;
+    previousConfirmedRevision = nextConfirmedRevision;
+    refresh();
+  });
+  const onStorageChange = (event: StorageEvent): void => {
+    if (event.key === null || RECOVERY_STORAGE_KEYS.has(event.key)) refresh();
+  };
+  window.addEventListener('storage', onStorageChange);
+  recoveryToolsCleanups.set(container, () => {
+    stopChangeListener?.();
+    window.removeEventListener('storage', onStorageChange);
+  });
 }
 
 function renderItemRow(
@@ -1582,8 +1670,13 @@ function renderResults(
       const nextStatusKey = statusKey(stateController.state);
       if (nextStatusKey === previousStatusKey) return;
       previousStatusKey = nextStatusKey;
+      const previousFocus = captureResultFocus(container);
       stopStatusListener?.();
       renderResults(container, criteria, catalogue, stateController.state, stateController, visibleItemLimit);
+      if (previousFocus !== undefined) {
+        focusResultSuccessor(container, previousFocus);
+        announceStatusFilterUpdate(container);
+      }
     });
     registerCleanup(() => stopStatusListener?.());
   }
@@ -1715,8 +1808,12 @@ function renderResults(
     if (localizationHasItems) grouped.append(localizationSection);
   }
   if (items.length > 0 || (retainEmptyBrowseStructure && grouped.childElementCount > 0)) content.push(grouped);
-  else if (inactiveItems.length === 0)
-    content.push(text('p', 'No public catalogue items match these criteria.', 'empty-state'));
+  else if (inactiveItems.length === 0) {
+    const empty = text('p', 'No public catalogue items match these criteria.', 'empty-state');
+    empty.dataset.resultsSummary = '';
+    empty.tabIndex = -1;
+    content.push(empty);
+  }
   if (inactiveItems.length > 0) {
     const inactive = text('section', undefined, 'notice-panel');
     inactive.append(text('h2', model.inactiveHeading), text('p', model.inactiveSummary));
@@ -1766,6 +1863,7 @@ function renderResults(
   if (matchingItemCount > 0) {
     const more = text('div', undefined, 'results-more');
     more.dataset.resultsProgress = '';
+    more.dataset.resultsSummary = '';
     more.tabIndex = -1;
     more.append(
       text(
@@ -1859,7 +1957,13 @@ async function renderCollection(
   const recoveryTools = document.querySelector<HTMLElement>('[data-recovery-tools]');
   if (recoveryTools) {
     const lifecycle = await createBackupLifecycle(reconciliation, provenance.appRevision ?? provenance.sourceCommit);
-    renderRecoveryTools(recoveryTools, lifecycle, catalogue.meta.catalogueFingerprint, knownTrackableItemIds);
+    renderRecoveryTools(
+      recoveryTools,
+      lifecycle,
+      catalogue.meta.catalogueFingerprint,
+      knownTrackableItemIds,
+      stateController,
+    );
   }
 }
 

@@ -727,6 +727,13 @@ try {
             (candidate) => trackable.filter((other) => other.localizationId === candidate.localizationId).length > 1,
           ) ?? trackable[0];
         if (!item) return null;
+        const focusItem =
+          trackable.find(
+            (candidate) => trackable.filter((other) => other.localizationId === candidate.localizationId).length > 24,
+          ) ??
+          trackable.find(
+            (candidate) => trackable.filter((other) => other.localizationId === candidate.localizationId).length === 3,
+          );
         const activeEditionIds = new Set(
           catalogue.items
             .filter((candidate) => candidate.active && candidate.setEditionId)
@@ -740,12 +747,36 @@ try {
           fingerprint: catalogue.meta.catalogueFingerprint,
           itemId: item.itemId,
           localizationId: item.localizationId,
+          focusLocalizationId: focusItem?.localizationId,
+          focusLocalizationItemCount: focusItem
+            ? catalogue.items.filter(
+                (candidate) => candidate.active && candidate.localizationId === focusItem.localizationId,
+              ).length
+            : 0,
           localizationItemCount: catalogue.items.filter(
             (candidate) => candidate.active && candidate.localizationId === item.localizationId,
           ).length,
           secondItemId: trackable.find(
             (candidate) => candidate.localizationId === item.localizationId && candidate.itemId !== item.itemId,
           )?.itemId,
+          singletonEdition: trackable.find(
+            (candidate) =>
+              candidate.setEditionId &&
+              trackable.filter((other) => other.setEditionId === candidate.setEditionId).length === 1,
+          )
+            ? {
+                edition: trackable.find(
+                  (candidate) =>
+                    candidate.setEditionId &&
+                    trackable.filter((other) => other.setEditionId === candidate.setEditionId).length === 1,
+                ).setEditionId,
+                itemId: trackable.find(
+                  (candidate) =>
+                    candidate.setEditionId &&
+                    trackable.filter((other) => other.setEditionId === candidate.setEditionId).length === 1,
+                ).itemId,
+              }
+            : undefined,
           emptyBrowse: emptyEdition
             ? {
                 localizationId: emptyEdition.localizationId,
@@ -767,6 +798,92 @@ try {
       });
       assert.notEqual(synthetic, null, `${name}: synthetic trackable item`);
       if (synthetic !== null) {
+        await page.evaluate(() => {
+          for (const key of Object.keys(localStorage))
+            if (key.startsWith('snoredex-checklist.private-state')) localStorage.removeItem(key);
+        });
+        await page.goto(`${baseUrl}/collection/?localization=${encodeURIComponent(synthetic.localizationId)}`, {
+          waitUntil: 'networkidle',
+        });
+        const firstSaveControls = controlsForItem(page, synthetic.itemId);
+        while ((await firstSaveControls.count()) === 0 && (await page.locator('[data-show-more]').count()) > 0)
+          await page.locator('[data-show-more]').click();
+        await page.getByText('Backup and recovery', { exact: true }).click();
+        const firstSaveExport = page.getByRole('button', { name: 'Export collection' });
+        assert.equal(
+          await firstSaveExport.isEnabled(),
+          false,
+          `${name}: recovery export starts disabled without confirmed state`,
+        );
+        await page.evaluate((key) => {
+          const original = Storage.prototype.setItem;
+          globalThis.__snoredexRestoreSetItem = () => {
+            Storage.prototype.setItem = original;
+          };
+          globalThis.__snoredexFailNextStateWrite = true;
+          Storage.prototype.setItem = function failOneStateWrite(candidate, value) {
+            if (candidate === key && globalThis.__snoredexFailNextStateWrite) {
+              globalThis.__snoredexFailNextStateWrite = false;
+              globalThis.__snoredexFailedStateWrite = true;
+              throw new Error('synthetic state write failure');
+            }
+            return original.call(this, candidate, value);
+          };
+        }, PRIVATE_STATE_KEY);
+        await firstSaveControls.getByRole('radio', { name: 'Have' }).check();
+        await page.waitForFunction(() => globalThis.__snoredexFailedStateWrite === true);
+        await firstSaveControls.locator('.state-feedback').filter({ hasText: 'Save failed.' }).waitFor();
+        assert.equal(await firstSaveExport.isEnabled(), false, `${name}: failed save does not enable recovery export`);
+        await page.evaluate(() => globalThis.__snoredexRestoreSetItem?.());
+        await firstSaveControls.getByRole('button', { name: 'Retry save' }).click();
+        await firstSaveControls.locator('.state-feedback').filter({ hasText: 'Saved' }).waitFor();
+        assert.equal(
+          await firstSaveExport.isEnabled(),
+          true,
+          `${name}: recovery export follows a successful save without reload`,
+        );
+        const crossTabContext = await browser.newContext();
+        const firstTab = await crossTabContext.newPage();
+        const secondTab = await crossTabContext.newPage();
+        try {
+          await firstTab.goto(`${baseUrl}/collection/?localization=${encodeURIComponent(synthetic.localizationId)}`, {
+            waitUntil: 'networkidle',
+          });
+          await firstTab.getByText('Backup and recovery', { exact: true }).click();
+          const firstTabExport = firstTab.getByRole('button', { name: 'Export collection' });
+          await secondTab.goto(`${baseUrl}/collection/?localization=${encodeURIComponent(synthetic.localizationId)}`, {
+            waitUntil: 'networkidle',
+          });
+          const secondTabControls = controlsForItem(secondTab, synthetic.itemId);
+          while ((await secondTabControls.count()) === 0 && (await secondTab.locator('[data-show-more]').count()) > 0)
+            await secondTab.locator('[data-show-more]').click();
+          await secondTabControls.getByRole('radio', { name: 'Have' }).check();
+          await secondTabControls.locator('.state-feedback').filter({ hasText: 'Saved' }).waitFor();
+          await firstTab.waitForFunction(() => {
+            return [...document.querySelectorAll('button')].some(
+              (candidate) => candidate.textContent === 'Export collection' && !candidate.disabled,
+            );
+          });
+          assert.equal(
+            await firstTabExport.isEnabled(),
+            true,
+            `${name}: recovery export follows a confirmed save from another tab`,
+          );
+          await secondTab.evaluate((key) => localStorage.removeItem(key), PRIVATE_STATE_KEY);
+          await firstTab.waitForFunction(() =>
+            [...document.querySelectorAll('button')].some(
+              (candidate) => candidate.textContent === 'Export collection' && candidate.disabled,
+            ),
+          );
+          assert.equal(
+            await firstTabExport.isEnabled(),
+            false,
+            `${name}: recovery export follows a clear from another tab`,
+          );
+        } finally {
+          await crossTabContext.close();
+        }
+
         assert.notEqual(synthetic.emptyBrowse, undefined, `${name}: localization with an empty edition`);
         if (synthetic.emptyBrowse !== undefined) {
           assert.ok(synthetic.emptyBrowse.emptyEditionCount > 0, `${name}: empty edition regression fixture`);
@@ -868,6 +985,165 @@ try {
             `${name}: final progressive result summary`,
           );
         }
+
+        assert.notEqual(synthetic.focusLocalizationId, undefined, `${name}: focus localization fixture`);
+        const focusUrl = `${baseUrl}/collection/?localization=${encodeURIComponent(synthetic.focusLocalizationId)}&status=need`;
+        await page.evaluate(() => {
+          for (const key of Object.keys(localStorage))
+            if (key.startsWith('snoredex-checklist.private-state')) localStorage.removeItem(key);
+        });
+        await page.goto(focusUrl, { waitUntil: 'networkidle' });
+        const focusIds = await page
+          .locator('[data-view] [data-item-id]')
+          .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-item-id')));
+        assert.ok(focusIds.length >= 3, `${name}: focus fixture has first, middle, and last rows`);
+        const selectHaveWithoutWaitingForDetach = async (itemId) =>
+          page.evaluate((targetItemId) => {
+            const input = [...document.querySelectorAll('input[type="radio"]')].find(
+              (candidate) => candidate.name === `status-${targetItemId}` && candidate.value === 'have',
+            );
+            if (!(input instanceof HTMLInputElement)) throw new Error(`missing status input for ${targetItemId}`);
+            input.focus();
+            input.checked = true;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+          }, itemId);
+        const focusCases = [
+          [0, 1],
+          [1, 2],
+        ];
+        if (synthetic.focusLocalizationItemCount <= focusIds.length)
+          focusCases.push([focusIds.length - 1, focusIds.length - 2]);
+        for (const [index, expectedIndex] of focusCases) {
+          await page.evaluate(() => {
+            for (const key of Object.keys(localStorage))
+              if (key.startsWith('snoredex-checklist.private-state')) localStorage.removeItem(key);
+          });
+          await page.goto(focusUrl, { waitUntil: 'networkidle' });
+          const targetId = focusIds[index];
+          const expectedId = focusIds[expectedIndex];
+          const targetControls = controlsForItem(page, targetId);
+          await targetControls.getByRole('radio', { name: 'Have' }).waitFor();
+          await selectHaveWithoutWaitingForDetach(targetId);
+          await page.waitForFunction(
+            (itemId) => [...document.querySelectorAll('[data-item-id]')].every((row) => row.dataset.itemId !== itemId),
+            targetId,
+          );
+          assert.equal(
+            await page.evaluate(() => document.activeElement?.closest('[data-item-id]')?.getAttribute('data-item-id')),
+            expectedId,
+            `${name}: filtered row removal preserves ${index === focusIds.length - 1 ? 'previous' : 'next'} row focus`,
+          );
+          assert.match(
+            await page.locator('[data-view-status]').textContent(),
+            /Status updated\./u,
+            `${name}: filtered row removal announces the update`,
+          );
+        }
+        await page.evaluate(() => {
+          for (const key of Object.keys(localStorage))
+            if (key.startsWith('snoredex-checklist.private-state')) localStorage.removeItem(key);
+        });
+        await page.goto(focusUrl, { waitUntil: 'networkidle' });
+        await page.evaluate(
+          ([focusedId, removedId]) => {
+            const selectHave = (itemId, focus) => {
+              const input = [...document.querySelectorAll('input[type="radio"]')].find(
+                (candidate) => candidate.name === `status-${itemId}` && candidate.value === 'have',
+              );
+              if (!(input instanceof HTMLInputElement)) throw new Error(`missing status input for ${itemId}`);
+              if (focus) input.focus();
+              input.checked = true;
+              input.dispatchEvent(new Event('change', { bubbles: true }));
+            };
+            selectHave(focusedId, true);
+            selectHave(removedId, false);
+          },
+          [focusIds[1], focusIds[0]],
+        );
+        await page.waitForFunction(
+          ([focusedId, removedId]) =>
+            [...document.querySelectorAll('[data-item-id]')].every(
+              (row) => row.dataset.itemId !== focusedId && row.dataset.itemId !== removedId,
+            ),
+          [focusIds[1], focusIds[0]],
+        );
+        assert.equal(
+          await page.evaluate(() => document.activeElement?.closest('[data-item-id]')?.getAttribute('data-item-id')),
+          focusIds[2],
+          `${name}: batched removals focus the first surviving successor`,
+        );
+        if (synthetic.focusLocalizationItemCount > 24 && focusIds.length === 24) {
+          await page.evaluate(() => {
+            for (const key of Object.keys(localStorage))
+              if (key.startsWith('snoredex-checklist.private-state')) localStorage.removeItem(key);
+          });
+          await page.goto(focusUrl, { waitUntil: 'networkidle' });
+          const paginatedTargetId = focusIds[focusIds.length - 1];
+          const paginatedPredecessorId = focusIds[focusIds.length - 2];
+          await controlsForItem(page, paginatedTargetId).getByRole('radio', { name: 'Have' }).waitFor();
+          await selectHaveWithoutWaitingForDetach(paginatedTargetId);
+          await page.waitForFunction(
+            (itemId) => [...document.querySelectorAll('[data-item-id]')].every((row) => row.dataset.itemId !== itemId),
+            paginatedTargetId,
+          );
+          const revealedSuccessorId = await page
+            .locator('[data-view] [data-item-id]')
+            .nth(23)
+            .getAttribute('data-item-id');
+          assert.notEqual(
+            revealedSuccessorId,
+            paginatedPredecessorId,
+            `${name}: paginated removal reveals a distinct successor`,
+          );
+          assert.equal(
+            await page.evaluate(() => document.activeElement?.closest('[data-item-id]')?.getAttribute('data-item-id')),
+            revealedSuccessorId,
+            `${name}: paginated removal focuses the newly revealed successor`,
+          );
+        }
+        assert.notEqual(synthetic.singletonEdition, undefined, `${name}: singleton focus fixture`);
+        if (synthetic.singletonEdition !== undefined) {
+          await page.evaluate(() => {
+            for (const key of Object.keys(localStorage))
+              if (key.startsWith('snoredex-checklist.private-state')) localStorage.removeItem(key);
+          });
+          await page.goto(
+            `${baseUrl}/collection/?edition=${encodeURIComponent(synthetic.singletonEdition.edition)}&status=need`,
+            { waitUntil: 'networkidle' },
+          );
+          assert.equal(
+            await page.locator('[data-view] [data-item-id]').count(),
+            1,
+            `${name}: singleton filtered row fixture`,
+          );
+          const singletonControls = controlsForItem(page, synthetic.singletonEdition.itemId);
+          await singletonControls.getByRole('radio', { name: 'Have' }).waitFor();
+          await selectHaveWithoutWaitingForDetach(synthetic.singletonEdition.itemId);
+          await page.waitForFunction(
+            (itemId) => [...document.querySelectorAll('[data-item-id]')].every((row) => row.dataset.itemId !== itemId),
+            synthetic.singletonEdition.itemId,
+          );
+          assert.equal(
+            await page.evaluate(() => document.activeElement?.matches('[data-results-summary]')),
+            true,
+            `${name}: removing the only filtered row focuses the result summary`,
+          );
+        }
+        await page.evaluate(({ fingerprint, itemId }) => {
+          localStorage.setItem(
+            'snoredex-checklist.private-state',
+            JSON.stringify({
+              schema: 'snoredex-collection-state',
+              schemaVersion: '1.0.0',
+              datasetId: 'snoredex-data/snorlax-current-known',
+              catalogueFingerprint: fingerprint,
+              items: [{ itemId, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],
+            }),
+          );
+        }, synthetic);
+        await page.goto(`${baseUrl}/collection/?localization=${encodeURIComponent(synthetic.localizationId)}`, {
+          waitUntil: 'networkidle',
+        });
         await page.reload({ waitUntil: 'networkidle' });
         await page.getByText('Backup and recovery', { exact: true }).click();
         const exportButton = page.getByRole('button', { name: 'Export collection' });
