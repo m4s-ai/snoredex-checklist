@@ -36,12 +36,14 @@ jobs:
         run: npm ci
       - name: Run deterministic repository gates
         env:
-          SNOREDEX_PUBLICATION_ID: pages-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          SNOREDEX_PUBLICATION_ID: pages-${{ github.run_id }}-${{ github.run_attempt }}
         run: npm run check
 
   browser:
     name: browser (ubuntu-24.04)
     runs-on: ubuntu-24.04
+    env:
+      SNOREDEX_PUBLICATION_ID: pages-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

@@ -161,6 +161,7 @@ button[data-theme-toggle] {
 }
 h1,
 h2 {
+  overflow-wrap: anywhere;
   font-weight: 500;
   line-height: 1.15;
   letter-spacing: -0.025em;
@@ -280,6 +281,7 @@ h2 {
 }
 .link-list a {
   display: block;
+  overflow-wrap: anywhere;
   padding: 0.55rem 0.7rem;
   border-radius: 12px;
 }
@@ -818,8 +820,12 @@ textarea {
   .proof-list,
   .query-primary,
   .query-advanced-grid,
-  .item-detail-list {
+  .item-detail-list,
+  .provenance {
     grid-template-columns: 1fr;
+  }
+  .provenance dd {
+    margin-bottom: 0.6rem;
   }
   .directory-heading {
     align-items: start;

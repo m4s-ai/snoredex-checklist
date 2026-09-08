@@ -86,6 +86,31 @@ async function inspectPage(page, engine, viewport, path) {
   assert.equal(home?.status(), 200, `${engine}/${viewport}/${route}: status`);
   assert.equal(await page.locator('main#main-content').count(), 1, `${engine}/${viewport}/${route}: main landmark`);
   assert.equal(await page.locator('h1').count(), 1, `${engine}/${viewport}/${route}: one h1`);
+  const provenanceSummary = page.locator('.provenance-disclosure > summary');
+  await provenanceSummary.click();
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = '200%';
+  });
+  assert.equal(
+    await page.locator('.provenance dd').evaluateAll((values) =>
+      values.every((value) => {
+        const rect = value.getBoundingClientRect();
+        return rect.width >= 44 && rect.right <= innerWidth + 1;
+      }),
+    ),
+    true,
+    `${engine}/${viewport}/${route}: readable provenance values at 200%`,
+  );
+  await expectTouchTargets(page, engine, viewport, `${route}-provenance-200-percent`);
+  assert.equal(
+    await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+    true,
+    `${engine}/${viewport}/${route}: open provenance reflow at 200%`,
+  );
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = '';
+  });
+  await provenanceSummary.click();
   assert.equal(
     await page
       .locator('a:visible, button:visible, input:visible, select:visible, textarea:visible')
