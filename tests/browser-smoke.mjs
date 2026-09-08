@@ -979,6 +979,8 @@ try {
           );
         }
         await page.evaluate(({ fingerprint, itemId }) => {
+          for (const key of Object.keys(localStorage))
+            if (key.startsWith('snoredex-checklist.private-state')) localStorage.removeItem(key);
           localStorage.setItem(
             'snoredex-checklist.private-state',
             JSON.stringify({
@@ -1019,7 +1021,30 @@ try {
         if (synthetic.localizationItemCount > 24) {
           const showMore = page.locator('[data-show-more]');
           assert.equal(await showMore.count(), 1, `${name}: progressive result control`);
+          const mountedRows = await page.locator('[data-view] [data-item-id]').elementHandles();
+          const editableRow = page
+            .locator('[data-view] .item-row')
+            .filter({ has: page.locator('.collection-controls') })
+            .first();
+          const quantity = editableRow.locator('.quantity-control');
+          await editableRow.getByRole('radio', { name: 'Have', exact: true }).check();
+          await quantity.locator('summary').click();
+          const ownedDraft = quantity.locator('input').first();
+          await ownedDraft.fill('7');
           await showMore.click();
+          for (const row of mountedRows)
+            assert.equal(
+              await row.evaluate((node) => node.isConnected),
+              true,
+              `${name}: reveal preserves mounted rows`,
+            );
+          assert.equal(
+            await firstIdentityRow.locator('.item-details').getAttribute('open'),
+            '',
+            `${name}: reveal preserves open evidence`,
+          );
+          assert.equal(await quantity.getAttribute('open'), '', `${name}: reveal preserves open quantities`);
+          assert.equal(await ownedDraft.inputValue(), '7', `${name}: reveal preserves the quantity draft`);
           assert.equal(
             await page.locator('[data-view] [data-item-id]').count(),
             Math.min(48, synthetic.localizationItemCount),
@@ -1044,7 +1069,19 @@ try {
               `${name}: final first reveal focuses the completion target`,
             );
           }
-          while ((await showMore.count()) > 0) await showMore.click();
+          while ((await showMore.count()) > 0) {
+            const existing = await page.locator('[data-view] [data-item-id]').elementHandles();
+            await showMore.click();
+            for (const row of existing) {
+              assert.equal(
+                await row.evaluate((node) => node.isConnected),
+                true,
+                `${name}: every reveal only appends rows`,
+              );
+              await row.dispose();
+            }
+          }
+          for (const row of mountedRows) await row.dispose();
           assert.equal(
             await page.locator('[data-view] [data-item-id]').count(),
             synthetic.localizationItemCount,
@@ -1060,6 +1097,7 @@ try {
             new RegExp(`Showing all ${synthetic.localizationItemCount} matching catalogue items\\.`, 'u'),
             `${name}: final progressive result summary`,
           );
+          console.log(`${name}: progressive results preserve each of ${synthetic.localizationItemCount} row instances`);
         }
 
         assert.notEqual(synthetic.focusLocalizationId, undefined, `${name}: focus localization fixture`);
