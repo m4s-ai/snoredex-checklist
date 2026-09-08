@@ -1019,6 +1019,18 @@ try {
           `${name}: initial result chunk`,
         );
         if (synthetic.localizationItemCount > 24) {
+          const assertNoVisibleEmptyLists = async () => {
+            assert.equal(
+              await page
+                .locator('[data-view] ul.item-list')
+                .evaluateAll(
+                  (lists) => lists.filter((list) => !list.closest('[hidden]') && list.childElementCount === 0).length,
+                ),
+              0,
+              `${name}: pending editions expose headings without empty lists`,
+            );
+          };
+          await assertNoVisibleEmptyLists();
           const showMore = page.locator('[data-show-more]');
           assert.equal(await showMore.count(), 1, `${name}: progressive result control`);
           const mountedRows = await page.locator('[data-view] [data-item-id]').elementHandles();
@@ -1032,6 +1044,7 @@ try {
           const ownedDraft = quantity.locator('input').first();
           await ownedDraft.fill('7');
           await showMore.click();
+          await assertNoVisibleEmptyLists();
           for (const row of mountedRows)
             assert.equal(
               await row.evaluate((node) => node.isConnected),
@@ -1072,6 +1085,7 @@ try {
           while ((await showMore.count()) > 0) {
             const existing = await page.locator('[data-view] [data-item-id]').elementHandles();
             await showMore.click();
+            await assertNoVisibleEmptyLists();
             for (const row of existing) {
               assert.equal(
                 await row.evaluate((node) => node.isConnected),

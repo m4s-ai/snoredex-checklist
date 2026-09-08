@@ -1855,11 +1855,10 @@ function renderResults(
             list.append(
               renderItemRow(item, catalogue, false, undefined, itemIdentity, stateController, registerCleanup),
             );
+            if (list.parentNode === null)
+              editionSection.insertBefore(list, editionSection.querySelector('.research-section'));
             showEdition();
           });
-        }
-        if (currentItems.length > 0) {
-          editionSection.append(list);
         }
         const research = edition.items.filter((item) => item.active && item.progressClass === 'research');
         if (research.length > 0) {
