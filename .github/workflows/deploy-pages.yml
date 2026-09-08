@@ -39,10 +39,17 @@ jobs:
     name: reserve deployment lane
     runs-on: ubuntu-24.04
     permissions:
+      contents: read
       actions: write
     outputs:
       proceed: ${{ steps.lane.outputs.proceed }}
     steps:
+      - name: Check out workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
       - name: Protect rollback priority
         id: lane
         env:
@@ -51,57 +58,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          set -euo pipefail
-          export DEPLOYMENT_MODE CURRENT_RUN_ID REPOSITORY
-          node --input-type=module <<'NODE'
-          import { appendFileSync } from 'node:fs';
-          import { execFileSync } from 'node:child_process';
-
-          const mode = process.env.DEPLOYMENT_MODE;
-          const currentRunId = String(process.env.CURRENT_RUN_ID);
-          const repository = process.env.REPOSITORY;
-          const readRuns = () => {
-            const response = execFileSync(
-              'gh',
-              [
-                'api',
-                '--paginate',
-                '--slurp',
-                `repos/${repository}/actions/workflows/deploy-pages.yml/runs?per_page=100`,
-              ],
-              { encoding: 'utf8' },
-            );
-            return JSON.parse(response).flatMap((page) => page.workflow_runs ?? []);
-          };
-
-          const activeStatuses = new Set(['queued', 'in_progress', 'waiting', 'pending']);
-          const currentRuns = () => readRuns().filter((run) => String(run.id) !== currentRunId && activeStatuses.has(run.status));
-          const isRollbackRun = (run) => run.event === 'workflow_dispatch' && /\/ rollback$/u.test(run.display_title ?? '');
-          const runs = currentRuns();
-          const rollbackRuns = runs.filter(isRollbackRun);
-          let proceed = true;
-
-          if (mode === 'adopt') {
-            proceed = rollbackRuns.length === 0;
-            if (!proceed) console.log('automatic adoption deferred while a rollback run is queued or active');
-          } else if (mode === 'rollback') {
-            const activeRuns = runs.filter((run) => !isRollbackRun(run));
-            const deadline = Date.now() + 30 * 60 * 1000;
-            while (activeRuns.length > 0 && Date.now() < deadline) {
-              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15000);
-              activeRuns.splice(
-                0,
-                activeRuns.length,
-                ...currentRuns().filter((run) => !isRollbackRun(run)),
-              );
-            }
-            if (activeRuns.length > 0) throw new Error('rollback could not acquire the deployment lane');
-          } else {
-            throw new Error('invalid deployment mode');
-          }
-
-          appendFileSync(process.env.GITHUB_OUTPUT, `proceed=${proceed}\n`);
-          NODE
+          node scripts/deployment-boundaries.mjs lane
       - name: Trigger independent catalogue intake
         if: steps.lane.outputs.proceed == 'true' && (github.event_name == 'push' || inputs.deployment_mode == 'adopt')
         env:
@@ -125,9 +82,13 @@ jobs:
       SNOREDEX_PUBLICATION_ID: pages-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Check out workflow revision
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+      - name: Set up workflow Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .node-version
       - name: Resolve deployment inputs
         id: deployment-inputs
         env:
@@ -137,30 +98,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           WORKFLOW_REVISION: ${{ github.sha }}
         run: |
-          set -euo pipefail
-          deployment_mode="${DEPLOYMENT_MODE_INPUT:-adopt}"
-          bootstrap_authorized="${BOOTSTRAP_INPUT:-false}"
-          if [[ "$deployment_mode" == "rollback" && -z "$CONSUMER_REVISION_INPUT" ]]; then
-            echo "consumer_revision is required for rollback"
-            exit 1
-          fi
-          if [[ "$bootstrap_authorized" == "true" && "$EVENT_NAME" != "workflow_dispatch" ]]; then
-            echo "bootstrap authorization requires workflow_dispatch"
-            exit 1
-          fi
-          if [[ "$bootstrap_authorized" == "true" && "$deployment_mode" != "adopt" ]]; then
-            echo "bootstrap authorization is only valid for adopt"
-            exit 1
-          fi
-          consumer_revision="${CONSUMER_REVISION_INPUT:-$WORKFLOW_REVISION}"
-          if [[ ! "$consumer_revision" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "consumer_revision must resolve to a full lowercase commit SHA"
-            exit 1
-          fi
-          echo "deployment_mode=$deployment_mode" >> "$GITHUB_OUTPUT"
-          echo "consumer_revision=$consumer_revision" >> "$GITHUB_OUTPUT"
-          echo "bootstrap_authorized=$bootstrap_authorized" >> "$GITHUB_OUTPUT"
-          echo "SNOREDEX_APP_REVISION=$consumer_revision" >> "$GITHUB_ENV"
+          node scripts/deployment-boundaries.mjs inputs
       - name: Validate consumer revision
         env:
           CONSUMER_REVISION: ${{ steps.deployment-inputs.outputs.consumer_revision }}
@@ -173,7 +111,10 @@ jobs:
       - name: Preserve current adoption guard
         env:
           WORKFLOW_REVISION: ${{ github.sha }}
-        run: git show "$WORKFLOW_REVISION:scripts/check-production-adoption.mjs" > "$RUNNER_TEMP/check-production-adoption.mjs"
+        run: |
+          git show "$WORKFLOW_REVISION:scripts/check-production-adoption.mjs" > "$RUNNER_TEMP/check-production-adoption.mjs"
+          git show "$WORKFLOW_REVISION:scripts/deployment-boundaries.mjs" > "$RUNNER_TEMP/deployment-boundaries.mjs"
+          git show "$WORKFLOW_REVISION:scripts/browser-gates.mjs" > "$RUNNER_TEMP/browser-gates.mjs"
       - name: Check out consumer revision
         env:
           CONSUMER_REVISION: ${{ steps.deployment-inputs.outputs.consumer_revision }}
@@ -201,7 +142,7 @@ jobs:
             exit 1
           fi
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version-file: .node-version
           cache: npm
@@ -266,10 +207,7 @@ jobs:
               echo "current production provenance unavailable (HTTP $provenance_status)"
               exit 1
             fi
-            fingerprint="$(node --input-type=module -e 'import fs from "node:fs"; const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).catalogueFingerprint; if (!/^sha256:[0-9a-f]{64}$/.test(value ?? "")) process.exit(1); process.stdout.write(value);' "$manifest")"
-            app_revision="$(node --input-type=module -e 'import fs from "node:fs"; const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).appRevision; if (!/^[0-9a-f]{40}$/.test(value ?? "")) process.exit(1); process.stdout.write(value);' "$manifest")"
-            echo "catalogue_fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
-            echo "app_revision=$app_revision" >> "$GITHUB_OUTPUT"
+            CURRENT_DEPLOYMENT_PATH="$manifest" node "$RUNNER_TEMP/deployment-boundaries.mjs" production
             echo "manifest_path=$manifest" >> "$GITHUB_OUTPUT"
             echo "provenance_path=$provenance" >> "$GITHUB_OUTPUT"
             echo "module_manifest_path=$module_manifest" >> "$GITHUB_OUTPUT"
@@ -284,57 +222,7 @@ jobs:
           CONSUMER_REVISION: ${{ steps.deployment-inputs.outputs.consumer_revision }}
           CURRENT_DEPLOYMENT_PATH: ${{ steps.current-production.outputs.manifest_path }}
         run: |
-          set -euo pipefail
-          if [[ -z "$CURRENT_DEPLOYMENT_PATH" ]]; then
-            echo "rollback requires an existing published deployment manifest"
-            exit 1
-          fi
-          node --input-type=module - "$CURRENT_DEPLOYMENT_PATH" "$CONSUMER_REVISION" <<'NODE'
-          import fs from 'node:fs';
-
-          const [manifestPath, targetRevision] = process.argv.slice(2);
-          const current = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-          const lock = JSON.parse(fs.readFileSync('catalogue.lock.json', 'utf8'));
-          const commit = /^[0-9a-f]{40}$/u;
-          const digest = /^sha256:[0-9a-f]{64}$/u;
-          const runtimePointer = (value, revision) =>
-            value?.appRevision === revision &&
-            value?.path === `runtime/${revision}` &&
-            digest.test(value?.manifestSha256 ?? '') &&
-            validLength(value?.manifestByteLength);
-          const previous = current?.rollback;
-          const sources = current?.sourceFingerprints;
-          const sameCatalogueDeployment = current?.catalogueFingerprint === previous?.catalogueFingerprint;
-          const validLength = (value) => Number.isSafeInteger(value) && value > 0;
-          if (
-            current?.schema !== 'snoredex-checklist-deployment' ||
-            current?.schemaVersion !== '1.0.0' ||
-            current?.pageUrl !== 'https://m4s-ai.github.io/snoredex-checklist/' ||
-            !previous ||
-            previous.appRevision !== targetRevision ||
-            !commit.test(targetRevision) ||
-            !commit.test(previous.producerRevision) ||
-            previous.producerRevision !== lock.producerRevision ||
-            previous.contractVersion !== lock.contractVersion ||
-            previous.catalogueFingerprint !== lock.catalogueFingerprint ||
-            previous.catalogueByteSha256 !== lock.catalogueByteSha256 ||
-            previous.catalogueByteLength !== lock.catalogueByteLength ||
-            previous.migrationByteSha256 !== lock.migrationByteSha256 ||
-            previous.migrationByteLength !== lock.migrationByteLength ||
-            !runtimePointer(previous.runtimeAssetSet, targetRevision) ||
-            !digest.test(current.catalogueFingerprint ?? '') ||
-            !digest.test(previous.catalogueFingerprint ?? '') ||
-            !digest.test(previous.catalogueByteSha256 ?? '') ||
-            !validLength(previous.catalogueByteLength) ||
-            !Array.isArray(sources) ||
-            sources.length === 0 ||
-            sources.some((value) => !digest.test(value)) ||
-            new Set(sources).size !== sources.length ||
-            !sameCatalogueDeployment
-          ) {
-            throw new Error('rollback target must match the exact published recovery tuple');
-          }
-          NODE
+          node "$RUNNER_TEMP/deployment-boundaries.mjs" rollback
       - name: Require reviewed producer migration target
         if: steps.deployment-inputs.outputs.deployment_mode == 'adopt' || steps.deployment-inputs.outputs.deployment_mode == 'rollback'
         env:
@@ -346,9 +234,7 @@ jobs:
           SNOREDEX_REPOSITORY_ROOT: ${{ github.workspace }}
         run: node "$RUNNER_TEMP/check-production-adoption.mjs"
       - name: Run browser and accessibility gates
-        run: |
-          npm run test:browser
-          npm run test:accessibility
+        run: node "$RUNNER_TEMP/browser-gates.mjs"
       - name: Retain revision-coherent runtime assets
         env:
           SNOREDEX_PAGE_URL: https://m4s-ai.github.io/snoredex-checklist/
@@ -361,7 +247,7 @@ jobs:
           fi
           node scripts/retain-runtime-assets.mjs
       - name: Configure GitHub Pages
-        uses: actions/configure-pages@v6
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
       - name: Add deployment provenance
         env:
           SNOREDEX_PAGE_URL: https://m4s-ai.github.io/snoredex-checklist/
@@ -370,22 +256,14 @@ jobs:
       - name: Recheck published artifact
         run: npm run artifact:check
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v5
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: dist/site
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
       - name: Smoke-test deployed Pages site
         env:
           SNOREDEX_PAGE_URL: ${{ steps.deployment.outputs.page_url }}
           SNOREDEX_EXPECTED_GITHUB_SHA: ${{ steps.deployment-inputs.outputs.consumer_revision }}
-        run: |
-          export SNOREDEX_EXPECTED_PRODUCER_REVISION="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('dist/site/provenance.json', 'utf8')).catalogue.sourceCommit)")"
-          export SNOREDEX_EXPECTED_CONTRACT_VERSION="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('dist/site/provenance.json', 'utf8')).catalogue.contractVersion)")"
-          export SNOREDEX_EXPECTED_CATALOGUE_FINGERPRINT="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('dist/site/provenance.json', 'utf8')).catalogue.catalogueFingerprint)")"
-          export SNOREDEX_EXPECTED_CATALOGUE_BYTE_SHA256="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('dist/site/provenance.json', 'utf8')).catalogue.catalogueByteSha256)")"
-          export SNOREDEX_EXPECTED_CATALOGUE_BYTE_LENGTH="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(String(JSON.parse(fs.readFileSync('dist/site/provenance.json', 'utf8')).catalogue.catalogueByteLength))")"
-          export SNOREDEX_EXPECTED_MIGRATION_BYTE_SHA256="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(JSON.parse(fs.readFileSync('dist/site/provenance.json', 'utf8')).catalogue.migrationByteSha256)")"
-          export SNOREDEX_EXPECTED_MIGRATION_BYTE_LENGTH="$(node --input-type=module -e "import fs from 'node:fs'; process.stdout.write(String(JSON.parse(fs.readFileSync('dist/site/provenance.json', 'utf8')).catalogue.migrationByteLength))")"
-          npm run smoke:pages
+        run: node scripts/deployment-boundaries.mjs smoke

@@ -1,3 +1,4 @@
+import { canonicalize as canonicalizeDirectoryValue } from './canonical-json.ts';
 import {
   localizationLabel,
   localizationDisplayLabel,
@@ -83,17 +84,6 @@ async function renderFullSnapshotHome(appRevision: string): Promise<void> {
     return;
   }
   renderIndex(validated.snapshot, snapshotModule.provenance);
-}
-
-function canonicalizeDirectoryValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalizeDirectoryValue);
-  if (typeof value !== 'object' || value === null) return value;
-  const record = value as Record<string, unknown>;
-  return Object.fromEntries(
-    Object.keys(record)
-      .sort()
-      .map((key) => [key, canonicalizeDirectoryValue(record[key])]),
-  );
 }
 
 async function canonicalDirectoryDigest(value: unknown): Promise<string | undefined> {

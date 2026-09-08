@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "allowJs": true, "checkJs": true },
+  "include": ["scripts/artifact-html.mjs", "scripts/deployment-boundaries.mjs", "scripts/browser-gates.mjs"]
+}

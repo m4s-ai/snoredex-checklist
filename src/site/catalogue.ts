@@ -1,3 +1,4 @@
+import { canonicalize } from './canonical-json.ts';
 export interface SnapshotMeta {
   readonly schema: string;
   readonly schemaVersion: string;
@@ -210,16 +211,6 @@ function hasUniqueIds(rows: readonly unknown[], key: string): boolean {
     ids.add(row[key]);
   }
   return true;
-}
-
-function canonicalize(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (!isRecord(value)) return value;
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map((key) => [key, canonicalize(value[key])]),
-  );
 }
 
 async function hasMatchingFingerprint(value: unknown, expected: string): Promise<boolean> {
