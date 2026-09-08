@@ -2040,13 +2040,22 @@ async function renderCollection(
       renderOverview(stateController.state);
     });
   }
-  const onPageshow = (event: PageTransitionEvent): void => {
-    if (!event.persisted || progressOverview?.hidden === true) return;
+  const refreshOverviewFromStorage = (): void => {
+    if (progressOverview?.hidden === true) return;
     void readPrivateState(catalogue.meta.catalogueFingerprint, knownTrackableItemIds).then((restoredState) => {
       renderOverview(restoredState);
     });
   };
+  const onPageshow = (event: PageTransitionEvent): void => {
+    if (!event.persisted) return;
+    refreshOverviewFromStorage();
+  };
+  const onStorage = (event: StorageEvent): void => {
+    if (event.key !== null && !RECOVERY_STORAGE_KEYS.has(event.key)) return;
+    refreshOverviewFromStorage();
+  };
   window.addEventListener('pageshow', onPageshow);
+  window.addEventListener('storage', onStorage);
   renderQueryForm($('[data-query]'), parsed.criteria, catalogue);
   renderResults($('[data-view]'), parsed.criteria, catalogue, renderState, stateController);
   const recoveryTools = document.querySelector<HTMLElement>('[data-recovery-tools]');

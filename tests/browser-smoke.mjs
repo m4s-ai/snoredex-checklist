@@ -840,6 +840,40 @@ try {
           true,
           `${name}: persisted pageshow refreshes overview`,
         );
+        const overviewContext = await browser.newContext();
+        const overviewTab = await overviewContext.newPage();
+        const overviewWriter = await overviewContext.newPage();
+        try {
+          await overviewTab.goto(`${baseUrl}/collection/`, { waitUntil: 'networkidle' });
+          await overviewWriter.goto(`${baseUrl}/collection/`, { waitUntil: 'networkidle' });
+          await overviewWriter.evaluate(
+            (value) => {
+              localStorage.setItem('snoredex-checklist.private-state', JSON.stringify(value));
+            },
+            {
+              schema: 'snoredex-collection-state',
+              schemaVersion: '1.0.0',
+              datasetId: 'snoredex-data/snorlax-current-known',
+              catalogueFingerprint: synthetic.fingerprint,
+              items: [{ itemId: synthetic.itemId, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],
+            },
+          );
+          await overviewTab.waitForFunction(() => {
+            const overall = [...document.querySelectorAll('.progress-card')].find(
+              (card) => card.querySelector('h3')?.textContent === 'Overall',
+            );
+            return /1 Have/u.test(overall?.textContent ?? '');
+          });
+          await overviewWriter.evaluate((key) => localStorage.removeItem(key), PRIVATE_STATE_KEY);
+          await overviewTab.waitForFunction(() => {
+            const overall = [...document.querySelectorAll('.progress-card')].find(
+              (card) => card.querySelector('h3')?.textContent === 'Overall',
+            );
+            return /0 Have/u.test(overall?.textContent ?? '');
+          });
+        } finally {
+          await overviewContext.close();
+        }
         await page.evaluate(() => {
           for (const key of Object.keys(localStorage))
             if (key.startsWith('snoredex-checklist.private-state')) localStorage.removeItem(key);
