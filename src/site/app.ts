@@ -902,6 +902,8 @@ function statusKey(state: PrivateStateRead): string {
 interface ResultFocus {
   readonly itemId: string;
   readonly index: number;
+  readonly nextItemIds: readonly string[];
+  readonly previousItemIds: readonly string[];
 }
 
 function captureResultFocus(container: HTMLElement): ResultFocus | undefined {
@@ -910,13 +912,34 @@ function captureResultFocus(container: HTMLElement): ResultFocus | undefined {
   if (!row || !container.contains(row) || !row.dataset.itemId) return undefined;
   const rows = [...container.querySelectorAll<HTMLElement>('[data-item-id]')];
   const index = rows.indexOf(row);
-  return index < 0 ? undefined : { itemId: row.dataset.itemId, index };
+  if (index < 0) return undefined;
+  return {
+    itemId: row.dataset.itemId,
+    index,
+    nextItemIds: rows
+      .slice(index + 1)
+      .flatMap((candidate) => (candidate.dataset.itemId ? [candidate.dataset.itemId] : [])),
+    previousItemIds: rows
+      .slice(0, index)
+      .reverse()
+      .flatMap((candidate) => (candidate.dataset.itemId ? [candidate.dataset.itemId] : [])),
+  };
 }
 
 function focusResultSuccessor(container: HTMLElement, previous: ResultFocus): void {
   const rows = [...container.querySelectorAll<HTMLElement>('[data-item-id]')];
-  const retained = rows.find((row) => row.dataset.itemId === previous.itemId);
-  const target = retained ?? rows[previous.index] ?? rows[previous.index - 1];
+  const rowsByItemId = new Map<string, HTMLElement>();
+  for (const row of rows) {
+    if (row.dataset.itemId) rowsByItemId.set(row.dataset.itemId, row);
+  }
+  const retained = rowsByItemId.get(previous.itemId);
+  const next = previous.nextItemIds
+    .map((itemId) => rowsByItemId.get(itemId))
+    .find((row): row is HTMLElement => row !== undefined);
+  const before = previous.previousItemIds
+    .map((itemId) => rowsByItemId.get(itemId))
+    .find((row): row is HTMLElement => row !== undefined);
+  const target = retained ?? next ?? before ?? rows[previous.index] ?? rows[previous.index - 1];
   if (target) {
     target.tabIndex = -1;
     target.focus();

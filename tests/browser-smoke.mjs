@@ -1028,6 +1028,39 @@ try {
             `${name}: filtered row removal announces the update`,
           );
         }
+        await page.evaluate(() => {
+          for (const key of Object.keys(localStorage))
+            if (key.startsWith('snoredex-checklist.private-state')) localStorage.removeItem(key);
+        });
+        await page.goto(focusUrl, { waitUntil: 'networkidle' });
+        await page.evaluate(
+          ([focusedId, removedId]) => {
+            const selectHave = (itemId, focus) => {
+              const input = [...document.querySelectorAll('input[type="radio"]')].find(
+                (candidate) => candidate.name === `status-${itemId}` && candidate.value === 'have',
+              );
+              if (!(input instanceof HTMLInputElement)) throw new Error(`missing status input for ${itemId}`);
+              if (focus) input.focus();
+              input.checked = true;
+              input.dispatchEvent(new Event('change', { bubbles: true }));
+            };
+            selectHave(focusedId, true);
+            selectHave(removedId, false);
+          },
+          [focusIds[1], focusIds[0]],
+        );
+        await page.waitForFunction(
+          ([focusedId, removedId]) =>
+            [...document.querySelectorAll('[data-item-id]')].every(
+              (row) => row.dataset.itemId !== focusedId && row.dataset.itemId !== removedId,
+            ),
+          [focusIds[1], focusIds[0]],
+        );
+        assert.equal(
+          await page.evaluate(() => document.activeElement?.closest('[data-item-id]')?.getAttribute('data-item-id')),
+          focusIds[2],
+          `${name}: batched removals focus the first surviving successor`,
+        );
         assert.notEqual(synthetic.singletonEdition, undefined, `${name}: singleton focus fixture`);
         if (synthetic.singletonEdition !== undefined) {
           await page.evaluate(() => {
