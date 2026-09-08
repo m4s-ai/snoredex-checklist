@@ -182,33 +182,15 @@ try {
           `${engineName}/${viewportName}: progress heading`,
         );
         assert.equal(
-          (await page.getByRole('button', { name: 'Inspect image', exact: false }).count()) > 0,
-          true,
-          `${engineName}/${viewportName}: image inspection control`,
+          await page.locator('.image-button, .image-dialog').count(),
+          0,
+          `${engineName}/${viewportName}: placeholders do not create inspection controls`,
         );
-        const imageButton = page.getByRole('button', { name: 'Inspect image', exact: false }).first();
-        await imageButton.hover();
-        assert.notEqual(
-          await imageButton.locator('img').evaluate((image) => getComputedStyle(image).transform),
-          'none',
-          `${engineName}/${viewportName}: hover image inspection`,
-        );
-        await imageButton.focus();
-        await page.keyboard.press('Enter');
-        const dialog = page.getByRole('dialog');
-        await dialog.waitFor({ state: 'visible' });
-        await expectNoSeriousAxeViolations(page, engineName, viewportName, 'collection-dialog');
         assert.equal(
-          await dialog.getByRole('button', { name: 'Close image' }).count(),
-          1,
-          `${engineName}/${viewportName}: dialog close`,
+          await page.locator('.item-image-placeholder figcaption').first().innerText(),
+          'No card image',
+          `${engineName}/${viewportName}: honest placeholder label`,
         );
-        await page.keyboard.press('Escape');
-        await dialog.waitFor({ state: 'hidden' });
-        await imageButton.tap();
-        await dialog.waitFor({ state: 'visible' });
-        await dialog.getByRole('button', { name: 'Close image' }).tap();
-        await dialog.waitFor({ state: 'hidden' });
         const have = page.getByRole('radio', { name: 'Have' }).first();
         await have.check();
         await page
@@ -243,14 +225,14 @@ try {
         );
         assert.ok(
           (await page
-            .locator('.image-button img')
+            .locator('.item-image-placeholder img')
             .first()
             .evaluate((image) => Number.parseFloat(getComputedStyle(image).transitionDuration))) <= 0.01,
           `${engineName}/${viewportName}: reduced motion transition`,
         );
         assert.equal(
           await page
-            .locator('.image-button img')
+            .locator('.item-image-placeholder img')
             .first()
             .evaluate((image) => getComputedStyle(image).transform),
           'none',
@@ -268,7 +250,25 @@ try {
             .filter(({ right }) => right > window.innerWidth + 1),
         );
         assert.deepEqual(textResizeOverflow, [], `${engineName}/${viewportName}: 200% text reflow`);
+        if (viewportName === 'narrow') {
+          assert.equal(
+            await page
+              .locator('.status-controls')
+              .first()
+              .locator('.status-option span')
+              .evaluateAll((labels) =>
+                labels.every((label) => {
+                  const range = document.createRange();
+                  range.selectNodeContents(label);
+                  return range.getClientRects().length === 1;
+                }),
+              ),
+            true,
+            `${engineName}/${viewportName}: 200% status words remain readable`,
+          );
+        }
         await page.goto(`${baseUrl}${researchScope}&research=true`, { waitUntil: 'networkidle' });
+        await page.locator('.query-advanced > summary').click();
         await page.getByRole('combobox', { name: 'Research' }).selectOption('true');
         await Promise.all([
           page.waitForURL(/research=true/u),

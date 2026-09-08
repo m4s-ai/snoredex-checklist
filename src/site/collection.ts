@@ -37,7 +37,17 @@ import {
   type PreparedCatalogueResults,
 } from './results.js';
 import type { SiteProvenance } from './snapshot.js';
-import { $, text, link, setViewStatus, renderInvalid, isRuntimeRecord, matchesShellRevision } from './route-common.js';
+import {
+  $,
+  text,
+  link,
+  setViewStatus,
+  renderInvalid,
+  renderUnavailable,
+  finishStartup,
+  isRuntimeRecord,
+  matchesShellRevision,
+} from './route-common.js';
 import { renderProvenance, sortedLocalizations } from './catalogue-view.js';
 
 import type {
@@ -285,8 +295,11 @@ function renderQueryForm(container: HTMLElement, criteria: QueryCriteria, catalo
   const primary = text('div', undefined, 'query-primary');
   primary.append(query, localization, edition, submit);
   const advanced = text('details', undefined, 'query-advanced') as HTMLDetailsElement;
-  advanced.open = Boolean(criteria.status || criteria.kind || criteria.research);
-  advanced.append(text('summary', 'More filters'));
+  const selectedFilters = [status, kind, research]
+    .map((label) => label.querySelector('select'))
+    .filter((select) => select?.value)
+    .map((select) => select!.selectedOptions[0].textContent);
+  advanced.append(text('summary', ['More filters', ...selectedFilters].join(' · ')));
   const advancedGrid = text('div', undefined, 'query-advanced-grid');
   advancedGrid.append(status, kind, research);
   advanced.append(advancedGrid);
@@ -570,9 +583,13 @@ function renderItemImage(item: SnapshotItem, catalogue: CatalogueSnapshot): HTML
   image.alt = alt;
   image.loading = 'lazy';
   image.decoding = 'async';
-  if (item.progressClass === 'research') {
+  if (asset.placeholder || item.progressClass === 'research') {
     figure.classList.add('item-image-placeholder');
     figure.append(image);
+    if (asset.placeholder) {
+      image.alt = '';
+      figure.append(text('figcaption', 'No card image'));
+    }
     return figure;
   }
   const button = document.createElement('button');
@@ -1491,6 +1508,33 @@ function renderItemRow(
   return row;
 }
 
+function renderUnreadableState(criteria: QueryCriteria): HTMLElement {
+  const section = text('section', undefined, 'state-panel');
+  section.setAttribute('aria-live', 'polite');
+  section.append(
+    text('h2', criteria.status ? 'Status filter unavailable' : 'Saved collection unavailable'),
+    text(
+      'p',
+      'Your saved collection could not be read. Your existing data has been kept; collection editing and private progress are unavailable.',
+    ),
+  );
+  const actions = text('p');
+  const recovery = link('#backup-and-recovery', 'Open backup and recovery');
+  recovery.addEventListener('click', () => {
+    const details = document.querySelector<HTMLDetailsElement>('#backup-and-recovery > details');
+    if (details) details.open = true;
+  });
+  actions.append(recovery);
+  if (criteria.status) {
+    actions.append(
+      ' · ',
+      link(`./${serializeQuery({ ...criteria, status: undefined })}`, 'Browse without status filter'),
+    );
+  }
+  section.append(actions);
+  return section;
+}
+
 function renderResults(
   container: HTMLElement,
   criteria: QueryCriteria,
@@ -1526,15 +1570,7 @@ function renderResults(
           registerCleanup,
         );
   if (criteria.status && !state.readable) {
-    const deferred = text('section', undefined, 'state-panel');
-    deferred.setAttribute('aria-live', 'polite');
-    deferred.append(
-      text('h2', 'Status filter unavailable'),
-      text(
-        'p',
-        'The local collection state could not be read, so this status filter was not applied. Reload the page or restore a valid local collection and try again.',
-      ),
-    );
+    const deferred = renderUnreadableState(criteria);
     container.replaceChildren(...(recoveryPanel === undefined ? [deferred] : [recoveryPanel, deferred]));
     setViewStatus('Status filter unavailable.');
     return;
@@ -1550,7 +1586,11 @@ function renderResults(
         'Search the public catalogue across set groups, or browse one localization. Every result keeps its owning localization and set visible.',
       ),
     );
-    container.replaceChildren(...(recoveryPanel === undefined ? [summary] : [recoveryPanel, summary]));
+    container.replaceChildren(
+      ...(recoveryPanel === undefined ? [] : [recoveryPanel]),
+      ...(!state.readable ? [renderUnreadableState(criteria)] : []),
+      summary,
+    );
     setViewStatus('Collection ready. Search or choose a localization.');
     return;
   }
@@ -1584,6 +1624,7 @@ function renderResults(
   const pendingRows: (() => void)[] = [];
   const content: Node[] = [];
   if (recoveryPanel !== undefined) content.push(recoveryPanel);
+  if (!state.readable) content.push(renderUnreadableState(criteria));
   content.push(progress);
   if (!criteria.edition) content.push(text('p', model.activeSummary));
   const groups = model.groups;
@@ -1932,12 +1973,15 @@ export async function startCollection(appRevision: string): Promise<void> {
   try {
     [snapshotModule, migrationsModule] = await Promise.all([import('./snapshot.js'), import('./migrations.js')]);
   } catch {
-    renderInvalid($('[data-view]'), undefined, true);
+    renderUnavailable($('[data-view]'));
     return;
   }
   const validated = await validateSnapshot(snapshotModule.default);
+  if (!validated.ok) {
+    renderUnavailable($('[data-view]'), validated.reason === 'unsupported');
+    return;
+  }
   if (
-    !validated.ok ||
     !matchesShellRevision(snapshotModule.provenance, appRevision) ||
     !validateProvenance(snapshotModule.provenance, validated.snapshot) ||
     !matchesMigrationRuntime(
@@ -1947,9 +1991,10 @@ export async function startCollection(appRevision: string): Promise<void> {
       appRevision,
     )
   ) {
-    renderInvalid($('[data-view]'), undefined, true);
+    renderUnavailable($('[data-view]'));
     return;
   }
+  finishStartup();
   await renderCollection(
     validated.snapshot,
     snapshotModule.provenance,

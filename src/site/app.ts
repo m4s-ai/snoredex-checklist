@@ -1,22 +1,27 @@
-import { $, enableThemeControl, renderInvalid, shellAppRevision } from './route-common.js';
+import { $, enableThemeControl, renderUnavailable, shellAppRevision } from './route-common.js';
 
 async function start(): Promise<void> {
   const appRevision = shellAppRevision();
   if (!appRevision) {
-    renderInvalid($('[data-view]'), undefined, true);
+    renderUnavailable($('[data-view]'));
     return;
   }
-  if (document.body.dataset.page === 'collection') {
-    const { startCollection } = await import('./collection.js');
-    await startCollection(appRevision);
+  let startRoute: () => Promise<void>;
+  try {
+    if (document.body.dataset.page === 'collection') {
+      const { startCollection } = await import('./collection.js');
+      startRoute = () => startCollection(appRevision);
+    } else if (document.body.dataset.page === 'index') {
+      const { renderHome } = await import('./home.js');
+      startRoute = renderHome;
+    } else {
+      throw new Error('Unsupported page');
+    }
+  } catch {
+    renderUnavailable($('[data-view]'));
     return;
   }
-  if (document.body.dataset.page === 'index') {
-    const { renderHome } = await import('./home.js');
-    await renderHome();
-    return;
-  }
-  throw new Error('Unsupported page');
+  await startRoute();
 }
 
 enableThemeControl();

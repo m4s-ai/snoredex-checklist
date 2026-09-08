@@ -5,6 +5,7 @@ export type SiteProvenance =
       readonly mode: 'synthetic-fixture';
       readonly sourceCommit: 'synthetic-fixture';
       readonly appRevision?: string;
+      readonly publicationId?: string;
       readonly contractVersion: string;
       readonly sourceRepository: string;
       readonly catalogueFingerprint: string;
@@ -14,6 +15,7 @@ export type SiteProvenance =
       readonly mode: 'pinned-snapshot';
       readonly sourceCommit: string;
       readonly appRevision?: string;
+      readonly publicationId?: string;
       readonly contractVersion: string;
       readonly sourceRepository: string;
       readonly catalogueFingerprint: string;

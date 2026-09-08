@@ -3,18 +3,18 @@
 > Advisory AST-derived estimate; this is not a release gate or a conformance claim.
 
 Scope: `src/` and `scripts/` (44 production code files).
-Lines: 15,204.
-Function-like nodes: 960.
-McCabe estimate: sum 4,421; mean 4.6; median 2; P90 10; P95 18.
-Hotspots: 91 functions exceed 10; 41 exceed 20.
+Lines: 15,342.
+Function-like nodes: 969.
+McCabe estimate: sum 4,451; mean 4.6; median 2; P90 10; P95 18.
+Hotspots: 92 functions exceed 10; 41 exceed 20.
 
 The report parses each source file with the bundled TypeScript compiler and counts runtime function-like declarations plus structural decision nodes: if/for/while/do/catch/case statements, conditional expressions and logical (&&/||/??) binary expressions. Type-only function signatures and nested function bodies are excluded from their enclosing function. It is intended to make refactoring candidates reproducible, not to prescribe a threshold.
 
 | Location                                  | Function                         | Complexity |
 | ----------------------------------------- | -------------------------------- | ---------: |
-| `src/site/catalogue.ts:237`               | `validateSnapshot`               |         90 |
+| `src/site/catalogue.ts:239`               | `validateSnapshot`               |         90 |
 | `src/state/storage.ts:716`                | `persistPendingNoteDraft`        |         75 |
-| `src/site/collection.ts:1494`             | `renderResults`                  |         62 |
+| `src/site/collection.ts:1538`             | `renderResults`                  |         64 |
 | `src/state/reconciliation.ts:515`         | `reconcilePrivateState`          |         58 |
 | `src/catalogue/validate.ts:235`           | `validateSemantics`              |         56 |
 | `src/catalogue/validate.ts:416`           | `validateCatalogueFixture`       |         54 |
@@ -26,9 +26,9 @@ The report parses each source file with the bundled TypeScript compiler and coun
 | `src/state/storage.ts:1153`               | `setDraftOwnerState`             |         36 |
 | `src/catalogue/sync.ts:517`               | `parseJournal`                   |         34 |
 | `scripts/check-artifact.mjs:278`          | `stripHtmlComments`              |         32 |
+| `src/site/catalogue.ts:93`                | `validateProvenance`             |         32 |
 | `src/state/domain.ts:211`                 | `parseState`                     |         32 |
 | `src/catalogue/sync.ts:763`               | `syncCataloguePair`              |         29 |
-| `src/site/catalogue.ts:93`                | `validateProvenance`             |         29 |
-| `src/site/collection.ts:1190`             | `refresh`                        |         29 |
+| `src/site/collection.ts:1207`             | `refresh`                        |         29 |
 | `src/site/query.ts:57`                    | `criteriaFromParameters`         |         28 |
 | `src/state/browser-reconciliation.ts:127` | `writeAuthority`                 |         28 |

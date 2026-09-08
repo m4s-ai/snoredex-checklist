@@ -23,7 +23,7 @@
     <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="site-header">
       <a class="brand" href="../">Snoredex Checklist</a
-      ><button type="button" data-theme-toggle aria-pressed="false">Dark theme</button>
+      ><button type="button" data-theme-toggle disabled aria-pressed="false">Dark theme</button>
     </header>
     <main id="main-content" class="page-shell collection-shell">
       <nav class="breadcrumb" aria-label="Breadcrumb">
@@ -33,13 +33,25 @@
         <section class="content-column" aria-labelledby="collection-title">
           <div class="surface">
             <h1 id="collection-title">Collection</h1>
-            <p data-catalogue-dependent>Your progress stays private in this browser.</p>
-            <div data-query data-catalogue-dependent></div>
-            <p data-view-status class="sr-only" role="status" aria-live="polite">Loading collection…</p>
-            <div data-progress-overview data-catalogue-dependent></div>
-            <div data-view><p>Loading collection…</p></div>
+
+            <div data-query data-catalogue-dependent hidden></div>
+            <p data-view-status class="sr-only" role="status" aria-live="polite"></p>
+            <div data-progress-overview data-catalogue-dependent hidden></div>
+            <section data-startup-fallback class="state-panel">
+              <h2>Collection has not loaded</h2>
+              <p>If this message remains, reload the page. JavaScript must be enabled to use the checklist.</p>
+              <p>Your saved collection stays in this browser.</p>
+              <p><a href="">Reload page</a> · <a href="../">Home</a></p>
+            </section>
+            <div data-view></div>
           </div>
-          <section class="surface secondary-panel recovery-tools" data-recovery-tools>
+          <section
+            class="surface secondary-panel recovery-tools"
+            data-recovery-tools
+            data-catalogue-dependent
+            hidden
+            id="backup-and-recovery"
+          >
             <details>
               <summary>Backup and recovery</summary>
               <p>Export, import, or restore this browser-local collection.</p>
@@ -48,7 +60,7 @@
               <p data-recovery-status class="state-feedback" role="status" aria-live="polite"></p>
             </details>
           </section>
-          <section class="surface secondary-panel" data-catalogue-dependent>
+          <section class="surface secondary-panel" data-catalogue-dependent hidden>
             <div data-provenance></div>
           </section>
         </section>

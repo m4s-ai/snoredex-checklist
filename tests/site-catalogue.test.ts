@@ -205,6 +205,10 @@ test('validates generated provenance and keeps localization labels nonempty', ()
     lock: null,
   };
   assert.equal(validateProvenance(valid, fixture.catalogue), true);
+  assert.equal(validateProvenance({ ...valid, publicationId: 'pages-123-2' }, fixture.catalogue), true);
+  for (const publicationId of [null, {}, '', '../123', 'https://example.com', 'a'.repeat(129)]) {
+    assert.equal(validateProvenance({ ...valid, publicationId }, fixture.catalogue), false);
+  }
   assert.equal(validateProvenance({ ...valid, contractVersion: '0.0.0' }, fixture.catalogue), false);
   assert.equal(validateProvenance({ ...valid, mode: {} }, fixture.catalogue), false);
   const pinned = {
