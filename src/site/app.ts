@@ -117,6 +117,13 @@ const $ = <T extends Element>(selector: string): T => {
 type Cleanup = () => void;
 const resultCleanups = new WeakMap<HTMLElement, Set<Cleanup>>();
 const recoveryToolsCleanups = new WeakMap<HTMLElement, Cleanup>();
+const RECOVERY_STORAGE_KEYS = new Set([
+  'snoredex-checklist.private-state',
+  'snoredex-checklist.private-state.recovery',
+  'snoredex-checklist.private-state.recovery-records',
+  'snoredex-checklist.private-state.authority.quarantine',
+  'snoredex-checklist.private-state.recovery-records.quarantine',
+]);
 
 function text(tag: string, value?: unknown, className?: string): HTMLElement {
   const element = document.createElement(tag);
@@ -1501,10 +1508,21 @@ function renderRecoveryTools(
     fileInput,
   );
   refresh();
-  if (stateController !== undefined) {
-    const stopChangeListener = stateController.onChange(() => refresh());
-    recoveryToolsCleanups.set(container, stopChangeListener);
-  }
+  let previousConfirmedRevision = stateController?.confirmedRevision;
+  const stopChangeListener = stateController?.onChange(() => {
+    const nextConfirmedRevision = stateController.confirmedRevision;
+    if (nextConfirmedRevision === previousConfirmedRevision) return;
+    previousConfirmedRevision = nextConfirmedRevision;
+    refresh();
+  });
+  const onStorageChange = (event: StorageEvent): void => {
+    if (event.key === null || RECOVERY_STORAGE_KEYS.has(event.key)) refresh();
+  };
+  window.addEventListener('storage', onStorageChange);
+  recoveryToolsCleanups.set(container, () => {
+    stopChangeListener?.();
+    window.removeEventListener('storage', onStorageChange);
+  });
 }
 
 function renderItemRow(

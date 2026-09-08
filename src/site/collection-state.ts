@@ -118,6 +118,8 @@ export interface CollectionRecoverySummary {
 export interface CollectionStateController {
   readonly available: true;
   readonly state: PrivateStateRead;
+  /** Monotonic signal for durable collection/recovery changes; drafts do not advance it. */
+  readonly confirmedRevision: number;
   readonly recovery: CollectionRecoverySummary | undefined;
   item(itemId: string): CollectionItemEditSnapshot;
   setStatus(itemId: string, status: CollectionStatus): Promise<CollectionEditResult>;
@@ -237,6 +239,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
   private nextRevision = 0;
   private nextOperationId = 0;
   private lastConfirmedOperationId = 0;
+  private durableRevision = 0;
   private lastSettledOperationId = 0;
   private commitUncertain = false;
   private recoveryActionPending = false;
@@ -265,6 +268,10 @@ export class BrowserCollectionStateController implements CollectionStateControll
     const statuses = new Map<string, CollectionStatus>();
     for (const [itemId, record] of this.confirmedRecords) statuses.set(itemId, record.status);
     return { readable: true, hasActiveState: this.hasActiveState, statuses };
+  }
+
+  public get confirmedRevision(): number {
+    return this.durableRevision;
   }
 
   public get recovery(): CollectionRecoverySummary | undefined {
@@ -507,6 +514,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
       this.edits.clear();
       this.hasActiveState = true;
       this.recoveryDraft = undefined;
+      this.durableRevision += 1;
       this.notify();
       return outcome;
     } finally {
@@ -521,6 +529,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     this.store.discardUnsavedDraft();
     if (this.store.unsaved() !== undefined) return failure('STORAGE_WRITE_FAILED');
     this.recoveryDraft = undefined;
+    this.durableRevision += 1;
     this.notify();
     return { ok: true };
   }
@@ -647,6 +656,7 @@ export class BrowserCollectionStateController implements CollectionStateControll
     this.lastSettledOperationId = operation.id;
     if (result.ok && !result.skipped && operation.id > this.lastConfirmedOperationId) {
       this.lastConfirmedOperationId = operation.id;
+      this.durableRevision += 1;
       for (const itemId of this.confirmedRecords.keys()) touched.add(itemId);
       for (const itemId of operation.records.keys()) touched.add(itemId);
       this.confirmedRecords = new Map(operation.records);

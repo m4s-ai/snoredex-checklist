@@ -149,6 +149,26 @@ test('moves a valid quantity through dirty, saving, and saved with a confirmed s
   assert.equal(controller.state.statuses.get(ITEM_A), 'have');
 });
 
+test('advances the confirmed revision only after durable state changes', async () => {
+  const { controller, immediateSaves } = makeHarness();
+  const initialRevision = controller.confirmedRevision;
+
+  controller.setQuantityDraft(ITEM_A, '4', '0');
+  assert.equal(controller.confirmedRevision, initialRevision);
+
+  const failed = controller.setStatus(ITEM_A, 'have');
+  assert.equal(controller.confirmedRevision, initialRevision);
+  immediateSaves[0].resolve({ ok: false, error: 'STORAGE_WRITE_FAILED' });
+  await failed;
+  assert.equal(controller.confirmedRevision, initialRevision);
+
+  const retry = controller.retry(ITEM_A);
+  assert.equal(controller.confirmedRevision, initialRevision);
+  immediateSaves[1].resolve(saved);
+  await retry;
+  assert.equal(controller.confirmedRevision, initialRevision + 1);
+});
+
 test('canonicalizes equivalent quantity drafts on no-op and persisted commits', async () => {
   const unchanged = makeHarness({
     active: [{ itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],

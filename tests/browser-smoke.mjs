@@ -833,6 +833,47 @@ try {
           true,
           `${name}: recovery export follows a successful save without reload`,
         );
+        const crossTabContext = await browser.newContext();
+        const firstTab = await crossTabContext.newPage();
+        const secondTab = await crossTabContext.newPage();
+        try {
+          await firstTab.goto(`${baseUrl}/collection/?localization=${encodeURIComponent(synthetic.localizationId)}`, {
+            waitUntil: 'networkidle',
+          });
+          await firstTab.getByText('Backup and recovery', { exact: true }).click();
+          const firstTabExport = firstTab.getByRole('button', { name: 'Export collection' });
+          await secondTab.goto(`${baseUrl}/collection/?localization=${encodeURIComponent(synthetic.localizationId)}`, {
+            waitUntil: 'networkidle',
+          });
+          const secondTabControls = controlsForItem(secondTab, synthetic.itemId);
+          while ((await secondTabControls.count()) === 0 && (await secondTab.locator('[data-show-more]').count()) > 0)
+            await secondTab.locator('[data-show-more]').click();
+          await secondTabControls.getByRole('radio', { name: 'Have' }).check();
+          await secondTabControls.locator('.state-feedback').filter({ hasText: 'Saved' }).waitFor();
+          await firstTab.waitForFunction(() => {
+            return [...document.querySelectorAll('button')].some(
+              (candidate) => candidate.textContent === 'Export collection' && !candidate.disabled,
+            );
+          });
+          assert.equal(
+            await firstTabExport.isEnabled(),
+            true,
+            `${name}: recovery export follows a confirmed save from another tab`,
+          );
+          await secondTab.evaluate((key) => localStorage.removeItem(key), PRIVATE_STATE_KEY);
+          await firstTab.waitForFunction(() =>
+            [...document.querySelectorAll('button')].some(
+              (candidate) => candidate.textContent === 'Export collection' && candidate.disabled,
+            ),
+          );
+          assert.equal(
+            await firstTabExport.isEnabled(),
+            false,
+            `${name}: recovery export follows a clear from another tab`,
+          );
+        } finally {
+          await crossTabContext.close();
+        }
 
         assert.notEqual(synthetic.emptyBrowse, undefined, `${name}: localization with an empty edition`);
         if (synthetic.emptyBrowse !== undefined) {
