@@ -594,13 +594,22 @@ export class BrowserCollectionStateController implements CollectionStateControll
 
   private saveImmediate(): Promise<CollectionEditResult> {
     this.cancelNoteTimer();
+    const pendingNoteItemIds = new Set(this.pendingNoteNotifications);
     this.pendingNote = undefined;
-    this.pendingNoteNotifications.clear();
     if (this.commitUncertain) {
+      this.pendingNoteNotifications.clear();
       this.notify();
       return Promise.resolve(failure('STORAGE_COMMIT_UNCERTAIN'));
     }
-    const operation = this.beginOperation(this.pendingSnapshot());
+    const snapshot = this.pendingSnapshot();
+    const affected = new Map(snapshot.affected);
+    for (const itemId of pendingNoteItemIds) {
+      const fields = affected.get(itemId);
+      if (fields === undefined) affected.set(itemId, new Set(['note']));
+      else if (!fields.has('note')) affected.set(itemId, new Set([...fields, 'note']));
+    }
+    this.pendingNoteNotifications.clear();
+    const operation = this.beginOperation({ ...snapshot, affected });
     return this.store.saveImmediate(operation.state).then((result) => {
       const outcome = persistenceResult(result);
       this.finishOperation(operation, outcome);

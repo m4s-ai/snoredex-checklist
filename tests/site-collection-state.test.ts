@@ -270,6 +270,46 @@ test('retains pending note completions across item switches and reverts', async 
   assert.ok(notifications.every((itemId) => itemId === ITEM_A || itemId === ITEM_B));
 });
 
+test('completes a reverted note before an immediate status save', async () => {
+  const { controller, immediateSaves } = makeHarness({
+    active: [
+      { itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0, note: 'old-a' },
+      { itemId: ITEM_B, status: 'ordered', quantityOwned: 0, quantityOrdered: 1 },
+    ],
+  });
+  const notifications: Array<string | undefined> = [];
+  controller.onChange((itemId) => notifications.push(itemId));
+
+  controller.scheduleNote(ITEM_A, 'new-a');
+  controller.scheduleNote(ITEM_A, 'old-a');
+  const save = controller.setStatus(ITEM_B, 'have');
+  immediateSaves[0].resolve(saved);
+  assert.deepEqual(await save, { ok: true, skipped: undefined });
+
+  assert.equal(controller.item(ITEM_A).save.phase, 'saved');
+  assert.equal(controller.item(ITEM_A).confirmed?.note, 'old-a');
+  assert.equal(notifications.filter((itemId) => itemId === ITEM_A).length, 4);
+});
+
+test('completes a reverted note before an immediate quantity save', async () => {
+  const { controller, immediateSaves } = makeHarness({
+    active: [
+      { itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0, note: 'old-a' },
+      { itemId: ITEM_B, status: 'ordered', quantityOwned: 0, quantityOrdered: 1 },
+    ],
+  });
+
+  controller.scheduleNote(ITEM_A, 'new-a');
+  controller.scheduleNote(ITEM_A, 'old-a');
+  controller.setQuantityDraft(ITEM_B, '2', '1');
+  const save = controller.commitQuantities(ITEM_B);
+  immediateSaves[0].resolve(saved);
+  assert.deepEqual(await save, { ok: true, skipped: undefined });
+
+  assert.equal(controller.item(ITEM_A).save.phase, 'saved');
+  assert.equal(controller.item(ITEM_A).confirmed?.note, 'old-a');
+});
+
 test('canonicalizes equivalent quantity drafts on no-op and persisted commits', async () => {
   const unchanged = makeHarness({
     active: [{ itemId: ITEM_A, status: 'have', quantityOwned: 1, quantityOrdered: 0 }],
