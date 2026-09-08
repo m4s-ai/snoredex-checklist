@@ -11,8 +11,8 @@ import type { QueryCriteria } from './query.js';
 export type CollectionStatus = 'need' | 'ordered' | 'have' | 'skip';
 
 export interface ResultViewModel {
-  readonly activeItems: SnapshotItem[];
-  readonly inactiveItems: SnapshotItem[];
+  readonly activeItems: readonly SnapshotItem[];
+  readonly inactiveItems: readonly SnapshotItem[];
   readonly activeSummary: string;
   readonly inactiveHeading?: string;
   readonly inactiveSummary?: string;
@@ -33,17 +33,29 @@ export interface ProgressViewModel {
 
 export interface BrowseEditionViewModel {
   readonly edition: SnapshotSetEdition;
-  readonly items: SnapshotItem[];
+  readonly items: readonly SnapshotItem[];
 }
 
 export interface BrowseSetViewModel {
   readonly set: SnapshotLocalSet;
-  readonly editions: BrowseEditionViewModel[];
+  readonly editions: readonly BrowseEditionViewModel[];
 }
 
 export interface BrowseLocalizationViewModel {
   readonly localization: SnapshotLocalization;
-  readonly sets: BrowseSetViewModel[];
+  readonly sets: readonly BrowseSetViewModel[];
+}
+
+export interface PreparedCatalogueResults {
+  readonly items: readonly SnapshotItem[];
+  readonly searchText: ReadonlyMap<string, string>;
+  readonly itemById: ReadonlyMap<string, SnapshotItem>;
+  readonly itemsByEdition: ReadonlyMap<string, readonly SnapshotItem[]>;
+  readonly editionById: ReadonlyMap<string, SnapshotSetEdition>;
+  readonly editionsByLocalization: ReadonlyMap<string, readonly SnapshotSetEdition[]>;
+  readonly setById: ReadonlyMap<string, SnapshotLocalSet>;
+  readonly localizationById: ReadonlyMap<string, SnapshotLocalization>;
+  readonly localizations: readonly SnapshotLocalization[];
 }
 
 function publicSearchValue(value: unknown): string {
@@ -90,8 +102,10 @@ function sortKey(value: unknown): string {
 }
 
 function compareStable(a: unknown, b: unknown): number {
-  return sortKey(a).localeCompare(sortKey(b), 'en', { numeric: true }) || 0;
+  return resultCollator.compare(sortKey(a), sortKey(b)) || 0;
 }
+
+const resultCollator = new Intl.Collator('en', { numeric: true });
 
 function compareItems(a: SnapshotItem, b: SnapshotItem): number {
   return (
@@ -106,14 +120,15 @@ function matchesCriteria(
   item: SnapshotItem,
   criteria: QueryCriteria,
   matchesResearch: (progressClass: string, criterion?: ResearchCriterion) => boolean,
-  privateStatuses?: ReadonlyMap<string, CollectionStatus>,
+  privateStatuses: ReadonlyMap<string, CollectionStatus> | undefined,
+  terms: readonly string[],
+  searchText: string,
 ): boolean {
-  const terms = searchTerms(criteria.q);
   const status = privateStatuses?.get(item.itemId) ?? 'need';
   return (
     (!criteria.localization || item.localizationId === criteria.localization) &&
     (!criteria.edition || item.setEditionId === criteria.edition) &&
-    (terms.length === 0 || terms.every((term) => publicSearchText(item).includes(term))) &&
+    terms.every((term) => searchText.includes(term)) &&
     (!criteria.kind || item.itemKind === criteria.kind) &&
     (!criteria.research || matchesResearch(item.progressClass ?? '', criteria.research)) &&
     (!criteria.status || (item.active && item.progressClass === 'current-known' && status === criteria.status))
@@ -126,9 +141,70 @@ export function filterCatalogueItems(
   matchesResearch: (progressClass: string, criterion?: ResearchCriterion) => boolean,
   privateStatuses?: ReadonlyMap<string, CollectionStatus>,
 ): SnapshotItem[] {
-  return catalogue.items
-    .filter((item) => matchesCriteria(item, criteria, matchesResearch, privateStatuses))
-    .sort(compareItems);
+  return filterPreparedItems(criteria, prepareCatalogueResults(catalogue), matchesResearch, privateStatuses);
+}
+
+/** Owned by one validated snapshot, never shared across catalogue generations. */
+export function prepareCatalogueResults(catalogue: CatalogueSnapshot): PreparedCatalogueResults {
+  const itemsByEdition = new Map<string, SnapshotItem[]>();
+  for (const item of catalogue.items) {
+    if (!item.setEditionId) continue;
+    const rows = itemsByEdition.get(item.setEditionId) ?? [];
+    rows.push(item);
+    itemsByEdition.set(item.setEditionId, rows);
+  }
+  const editionsByLocalization = new Map<string, SnapshotSetEdition[]>();
+  for (const edition of catalogue.setEditions) {
+    const rows = editionsByLocalization.get(edition.localizationId) ?? [];
+    rows.push(edition);
+    editionsByLocalization.set(edition.localizationId, rows);
+  }
+  return {
+    items: [...catalogue.items].sort(compareItems),
+    searchText: new Map(catalogue.items.map((item) => [item.itemId, publicSearchText(item)])),
+    itemById: new Map(catalogue.items.map((item) => [item.itemId, item])),
+    itemsByEdition,
+    editionById: new Map(catalogue.setEditions.map((edition) => [edition.setEditionId, edition])),
+    editionsByLocalization,
+    setById: new Map(catalogue.localSets.map((set) => [set.localSetId, set])),
+    localizationById: new Map(
+      catalogue.localizations.map((localization) => [localization.localizationId, localization]),
+    ),
+    localizations: [...catalogue.localizations].sort(
+      (a, b) => compareStable(a.displayOrder, b.displayOrder) || compareStable(a.localizationId, b.localizationId),
+    ),
+  };
+}
+
+function filterPreparedItems(
+  criteria: QueryCriteria,
+  prepared: PreparedCatalogueResults,
+  matchesResearch: (progressClass: string, criterion?: ResearchCriterion) => boolean,
+  privateStatuses?: ReadonlyMap<string, CollectionStatus>,
+): SnapshotItem[] {
+  const terms = searchTerms(criteria.q);
+  return prepared.items.filter((item) =>
+    matchesCriteria(
+      item,
+      criteria,
+      matchesResearch,
+      privateStatuses,
+      terms,
+      prepared.searchText.get(item.itemId) ?? '',
+    ),
+  );
+}
+
+/** One filtered feed supplies counts and all visible groupings for this revision. */
+export function buildCatalogueResult(
+  criteria: QueryCriteria,
+  prepared: PreparedCatalogueResults,
+  matchesResearch: (progressClass: string, criterion?: ResearchCriterion) => boolean,
+  privateStatuses?: ReadonlyMap<string, CollectionStatus>,
+): ResultViewModel & { readonly groups: readonly BrowseLocalizationViewModel[] } {
+  const currentCriteria = { ...criteria };
+  const items = filterPreparedItems(currentCriteria, prepared, matchesResearch, privateStatuses);
+  return { ...summarizeResults(items), groups: groupResults(currentCriteria, prepared, items) };
 }
 
 export function buildProgressViewModel(
@@ -172,6 +248,10 @@ export function buildResultViewModel(
   privateStatuses?: ReadonlyMap<string, CollectionStatus>,
 ): ResultViewModel {
   const filteredItems = filterCatalogueItems(criteria, catalogue, matchesResearch, privateStatuses);
+  return summarizeResults(filteredItems);
+}
+
+function summarizeResults(filteredItems: readonly SnapshotItem[]): ResultViewModel {
   const activeItems: SnapshotItem[] = [];
   const inactiveItems: SnapshotItem[] = [];
   for (const item of filteredItems) (item.active ? activeItems : inactiveItems).push(item);
@@ -202,7 +282,15 @@ export function buildBrowseHierarchy(
   matchesResearch: (progressClass: string, criterion?: ResearchCriterion) => boolean,
   privateStatuses?: ReadonlyMap<string, CollectionStatus>,
 ): BrowseLocalizationViewModel[] {
-  const matches = filterCatalogueItems(criteria, catalogue, matchesResearch, privateStatuses);
+  const prepared = prepareCatalogueResults(catalogue);
+  return groupResults(criteria, prepared, filterPreparedItems(criteria, prepared, matchesResearch, privateStatuses));
+}
+
+function groupResults(
+  criteria: QueryCriteria,
+  prepared: PreparedCatalogueResults,
+  matches: readonly SnapshotItem[],
+): BrowseLocalizationViewModel[] {
   const itemByEdition = new Map<string, SnapshotItem[]>();
   for (const item of matches) {
     const editionId = item.setEditionId;
@@ -211,15 +299,12 @@ export function buildBrowseHierarchy(
     rows.push(item);
     itemByEdition.set(editionId, rows);
   }
-  const sets = new Map(catalogue.localSets.map((set) => [set.localSetId, set] as const));
+  const sets = prepared.setById;
   const result: BrowseLocalizationViewModel[] = [];
-  for (const localization of [...catalogue.localizations].sort(
-    (a, b) => compareStable(a.displayOrder, b.displayOrder) || compareStable(a.localizationId, b.localizationId),
-  )) {
+  for (const localization of prepared.localizations) {
     if (criteria.localization && localization.localizationId !== criteria.localization) continue;
     const bySet = new Map<string, BrowseEditionViewModel[]>();
-    for (const edition of catalogue.setEditions) {
-      if (edition.localizationId !== localization.localizationId) continue;
+    for (const edition of prepared.editionsByLocalization.get(localization.localizationId) ?? []) {
       const set = sets.get(edition.localSetId);
       if (!set) continue;
       const editionItems = (itemByEdition.get(edition.setEditionId) ?? []).filter((item) => item.active);

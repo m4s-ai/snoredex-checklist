@@ -15,7 +15,118 @@ import {
   validateDirectorySnapshot,
 } from '../src/site/directory.ts';
 import { matchesResearch } from '../src/site/filter.ts';
-import { buildBrowseHierarchy, buildProgressViewModel, buildResultViewModel } from '../src/site/results.ts';
+import {
+  buildBrowseHierarchy,
+  buildProgressViewModel,
+  buildResultViewModel,
+  buildCatalogueResult,
+  prepareCatalogueResults,
+} from '../src/site/results.ts';
+
+test('prepares public text once and shares one parsed query and filtered feed', () => {
+  const catalogue = structuredClone(fixture.catalogue);
+  let textReads = 0;
+  Object.defineProperty(catalogue.items[0], 'cardName', {
+    get: () => {
+      textReads++;
+      return 'Poke\u0301mon';
+    },
+  });
+  const prepared = prepareCatalogueResults(catalogue);
+  assert.equal(textReads, 1);
+  let queryReads = 0;
+  const criteria = {
+    get q() {
+      queryReads++;
+      return 'Pokémon Pokémon';
+    },
+    research: 'false' as const,
+  };
+  const result = buildCatalogueResult(criteria, prepared, matchesResearch);
+  assert.equal(queryReads, 1);
+  assert.deepEqual(
+    result.activeItems.map((item) => item.itemId),
+    [catalogue.items[0].itemId],
+  );
+  assert.deepEqual(
+    result.groups.flatMap((loc) => loc.sets.flatMap((set) => set.editions.flatMap((edition) => edition.items))),
+    result.activeItems,
+  );
+  const have = buildCatalogueResult(
+    { status: 'have' },
+    prepared,
+    matchesResearch,
+    new Map([[catalogue.items[0].itemId, 'have']]),
+  );
+  assert.deepEqual(have.activeItems, result.activeItems);
+  assert.equal(textReads, 1, 'status revisions reuse the public index');
+  assert.deepEqual(buildCatalogueResult({ status: 'have' }, prepared, matchesResearch).activeItems, []);
+  assert.deepEqual(
+    result.activeItems.map((item) => item.itemId),
+    [catalogue.items[0].itemId],
+    'older views remain unchanged',
+  );
+});
+
+test('prepared hierarchy retains empty known editions only for plain browsing', () => {
+  const catalogue = structuredClone(fixture.catalogue);
+  const source = catalogue.setEditions[0];
+  catalogue.setEditions.push({ ...source, setEditionId: 'empty-edition' });
+  const prepared = prepareCatalogueResults(catalogue);
+  const editions = (criteria: { localization: string; q?: string }) =>
+    buildCatalogueResult(criteria, prepared, matchesResearch).groups.flatMap((loc) =>
+      loc.sets.flatMap((set) => set.editions),
+    );
+  assert.ok(
+    editions({ localization: source.localizationId }).some(
+      (entry) => entry.edition.setEditionId === 'empty-edition' && entry.items.length === 0,
+    ),
+  );
+  assert.ok(
+    !editions({ localization: source.localizationId, q: 'Snorlax' }).some(
+      (entry) => entry.edition.setEditionId === 'empty-edition',
+    ),
+  );
+});
+
+test('prepared item order preserves natural collector numbers and stable opaque-ID ties', () => {
+  const catalogue = structuredClone(fixture.catalogue);
+  const item = catalogue.items[0];
+  catalogue.items = ['item10', 'item2', 'item1'].map((itemId) => ({ ...item, itemId, collectorNumberSortKey: '2' }));
+  catalogue.items.unshift({ ...catalogue.items[0], itemId: 'first-input', collectorNumberSortKey: '10' });
+  const result = buildCatalogueResult({}, prepareCatalogueResults(catalogue), matchesResearch);
+  assert.deepEqual(
+    result.activeItems.map((row) => row.itemId),
+    ['item1', 'item2', 'item10', 'first-input'],
+  );
+});
+
+test('preserves input set order when natural ID comparisons tie', () => {
+  const catalogue = structuredClone(fixture.catalogue);
+  const localization = catalogue.localizations[0];
+  catalogue.localSets = ['set1', 'set01'].map((localSetId) => ({
+    ...catalogue.localSets[0],
+    localSetId,
+    sortKey: 'same',
+  }));
+  catalogue.setEditions = catalogue.localSets.map((set, index) => ({
+    ...catalogue.setEditions[0],
+    localSetId: set.localSetId,
+    setEditionId: `edition-${index}`,
+    localizationId: localization.localizationId,
+    sortKey: String(2 - index),
+  }));
+  catalogue.items = [];
+  const result = buildCatalogueResult(
+    { localization: localization.localizationId },
+    prepareCatalogueResults(catalogue),
+    matchesResearch,
+  );
+  assert.deepEqual(
+    result.groups[0].sets.map((entry) => entry.set.localSetId),
+    ['set1', 'set01'],
+  );
+});
 
 function reseal(value: any): any {
   value.meta.catalogueFingerprint = semanticFingerprint(value);

@@ -129,6 +129,13 @@ declarations plus structural decision nodes. It is a refactoring aid, not a rele
 claim of semantic complexity. Review any proposed seam split and its regression coverage in the
 owning issue before changing the baseline or introducing a CI threshold.
 
+For the incremental-results comparison in [#97](https://github.com/m4s-ai/snoredex-checklist/issues/97),
+run `node scripts/measure-results.ts <full-baseline-commit>` with a trusted local revision that
+exposes the previous result-model and hierarchy APIs. The command checks result parity against
+the same committed public catalogue, then reports preparation time and median computation time
+after five warmups and 30 samples. It uses no private state and does not measure browser or hosted
+performance. Record the baseline, candidate revision and measurements in the owning issue.
+
 ### Catalogue release and issue-backed sync
 
 The **Release catalogue update** workflow resolves the current merged `snoredex-data/main` to a

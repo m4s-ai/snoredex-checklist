@@ -31,7 +31,12 @@ import {
 } from './item-presentation.js';
 import { readPrivateState, type PrivateStateRead } from './private-state.js';
 import { parseQuery, serializeQuery, type QueryCriteria } from './query.js';
-import { buildBrowseHierarchy, buildProgressViewModel, buildResultViewModel } from './results.js';
+import {
+  buildCatalogueResult,
+  buildProgressViewModel,
+  prepareCatalogueResults,
+  type PreparedCatalogueResults,
+} from './results.js';
 import type { SiteProvenance } from './snapshot.js';
 
 interface BackupExport {
@@ -1695,6 +1700,7 @@ function renderResults(
   state: PrivateStateRead,
   stateController?: CollectionStateController,
   visibleItemLimit = RESULT_CHUNK_SIZE,
+  prepared: PreparedCatalogueResults = prepareCatalogueResults(catalogue),
 ): void {
   resultCleanups.get(container)?.forEach((cleanup) => cleanup());
   const cleanups = new Set<Cleanup>();
@@ -1708,7 +1714,15 @@ function renderResults(
       : renderRecoveryPanel(
           stateController,
           (announcement) => {
-            renderResults(container, criteria, catalogue, stateController.state, stateController, visibleItemLimit);
+            renderResults(
+              container,
+              criteria,
+              catalogue,
+              stateController.state,
+              stateController,
+              visibleItemLimit,
+              prepared,
+            );
             announceRecoveryResult(container, announcement);
           },
           registerCleanup,
@@ -1757,7 +1771,7 @@ function renderResults(
       if (!updateStatusSnapshot(previousStatuses, stateController.state.statuses, changedItemId)) return;
       const previousFocus = captureResultFocus(container);
       stopStatusListener?.();
-      renderResults(container, criteria, catalogue, stateController.state, stateController, visibleItemLimit);
+      renderResults(container, criteria, catalogue, stateController.state, stateController, visibleItemLimit, prepared);
       if (previousFocus !== undefined) {
         focusResultSuccessor(container, previousFocus);
         announceStatusFilterUpdate(container);
@@ -1765,21 +1779,16 @@ function renderResults(
     });
     registerCleanup(() => stopStatusListener?.());
   }
-  const model = buildResultViewModel(criteria, catalogue, matchesResearch, state.readable ? state.statuses : undefined);
+  const model = buildCatalogueResult(criteria, prepared, matchesResearch, state.readable ? state.statuses : undefined);
   const { activeItems: items, inactiveItems } = model;
   const matchingItemCount = items.length + inactiveItems.length;
-  let remainingItemSlots = Math.min(Math.max(visibleItemLimit, RESULT_CHUNK_SIZE), matchingItemCount);
   let mountedItemCount = 0;
+  const pendingRows: (() => void)[] = [];
   const content: Node[] = [];
   if (recoveryPanel !== undefined) content.push(recoveryPanel);
   content.push(progress);
   if (!criteria.edition) content.push(text('p', model.activeSummary));
-  const groups = buildBrowseHierarchy(
-    criteria,
-    catalogue,
-    matchesResearch,
-    state.readable ? state.statuses : undefined,
-  );
+  const groups = model.groups;
   const grouped = text('div', undefined, 'browse-results');
   const localizationLabelCounts = new Map<string, number>();
   for (const candidate of catalogue.localizations) {
@@ -1789,7 +1798,7 @@ function renderResults(
   }
   for (const localization of groups) {
     const localizationSection = text('section', undefined, 'result-localization');
-    let localizationHasItems = false;
+    localizationSection.hidden = !retainEmptyBrowseStructure;
     const displayLocalizationLabel = localizationDisplayLabel(localization.localization, localizationLabelCounts);
     const editionEntries = editionEntriesForLocalization(catalogue, localization.localization.localizationId);
     const editionLabels = new Map(editionEntries.map(({ edition, label }) => [edition.setEditionId, label] as const));
@@ -1814,12 +1823,17 @@ function renderResults(
       if (!setLabels.has(edition.localSetId)) setLabels.set(edition.localSetId, label);
     for (const set of localization.sets) {
       const setSection = text('section', undefined, 'result-set');
-      let setHasItems = false;
+      setSection.hidden = !retainEmptyBrowseStructure;
       const displaySetLabel = setLabels.get(set.set.localSetId) ?? 'Unidentified set';
       if (!selectedEditionLabel) setSection.append(text('h3', displaySetLabel));
       for (const edition of set.editions) {
         const editionSection = text('section', undefined, 'result-edition');
-        let editionHasItems = false;
+        editionSection.hidden = !retainEmptyBrowseStructure;
+        const showEdition = (): void => {
+          editionSection.hidden = false;
+          setSection.hidden = false;
+          localizationSection.hidden = false;
+        };
         const headingLabel = editionLabels.get(edition.edition.setEditionId) ?? displaySetLabel;
         const hasEditionHeading = !selectedEditionLabel && headingLabel !== displaySetLabel;
         if (hasEditionHeading) editionSection.append(text('h4', headingLabel));
@@ -1828,7 +1842,7 @@ function renderResults(
           (candidate) => candidate.active && candidate.progressClass !== 'research',
         );
         const currentDisambiguators = itemRowDisambiguators(
-          catalogue.items.filter(
+          (prepared.itemsByEdition.get(edition.edition.setEditionId) ?? []).filter(
             (candidate) =>
               candidate.setEditionId === edition.edition.setEditionId &&
               candidate.active &&
@@ -1836,19 +1850,20 @@ function renderResults(
           ),
         );
         for (const item of currentItems) {
-          if (remainingItemSlots === 0) break;
-          const itemIdentity = currentDisambiguators.get(item.itemId);
-          list.append(renderItemRow(item, catalogue, false, undefined, itemIdentity, stateController, registerCleanup));
-          remainingItemSlots -= 1;
-          mountedItemCount += 1;
-        }
-        if (list.childElementCount > 0) {
-          editionSection.append(list);
-          editionHasItems = true;
+          pendingRows.push(() => {
+            const itemIdentity = currentDisambiguators.get(item.itemId);
+            list.append(
+              renderItemRow(item, catalogue, false, undefined, itemIdentity, stateController, registerCleanup),
+            );
+            if (list.parentNode === null)
+              editionSection.insertBefore(list, editionSection.querySelector('.research-section'));
+            showEdition();
+          });
         }
         const research = edition.items.filter((item) => item.active && item.progressClass === 'research');
-        if (research.length > 0 && remainingItemSlots > 0) {
+        if (research.length > 0) {
           const researchSection = text('section', undefined, 'research-section');
+          researchSection.hidden = true;
           researchSection.append(
             text(selectedEditionLabel ? 'h3' : hasEditionHeading ? 'h5' : 'h4', 'Research (read-only)'),
           );
@@ -1858,7 +1873,7 @@ function renderResults(
             );
           const researchList = text('ul', undefined, 'item-list');
           const researchDisambiguators = itemRowDisambiguators(
-            catalogue.items.filter(
+            (prepared.itemsByEdition.get(edition.edition.setEditionId) ?? []).filter(
               (candidate) =>
                 candidate.setEditionId === edition.edition.setEditionId &&
                 candidate.active &&
@@ -1866,31 +1881,23 @@ function renderResults(
             ),
           );
           for (const item of research) {
-            if (remainingItemSlots === 0) break;
-            const itemIdentity = researchDisambiguators.get(item.itemId);
-            researchList.append(
-              renderItemRow(item, catalogue, false, undefined, itemIdentity, stateController, registerCleanup),
-            );
-            remainingItemSlots -= 1;
-            mountedItemCount += 1;
+            pendingRows.push(() => {
+              const itemIdentity = researchDisambiguators.get(item.itemId);
+              researchList.append(
+                renderItemRow(item, catalogue, false, undefined, itemIdentity, stateController, registerCleanup),
+              );
+              researchSection.hidden = false;
+              showEdition();
+            });
           }
-          if (researchList.childElementCount > 0) {
-            researchSection.append(researchList);
-            editionSection.append(researchSection);
-            editionHasItems = true;
-          }
+          researchSection.append(researchList);
+          editionSection.append(researchSection);
         }
-        if (editionHasItems || retainEmptyBrowseStructure) {
-          setSection.append(editionSection);
-          setHasItems = true;
-        }
+        setSection.append(editionSection);
       }
-      if (setHasItems) {
-        localizationSection.append(setSection);
-        localizationHasItems = true;
-      }
+      localizationSection.append(setSection);
     }
-    if (localizationHasItems) grouped.append(localizationSection);
+    grouped.append(localizationSection);
   }
   if (items.length > 0 || (retainEmptyBrowseStructure && grouped.childElementCount > 0)) content.push(grouped);
   else if (inactiveItems.length === 0) {
@@ -1901,6 +1908,7 @@ function renderResults(
   }
   if (inactiveItems.length > 0) {
     const inactive = text('section', undefined, 'notice-panel');
+    inactive.hidden = true;
     inactive.append(text('h2', model.inactiveHeading), text('p', model.inactiveSummary));
     const inactiveList = text('ul', undefined, 'item-list');
     const inactiveSetIdentityCounts = new Map<string, Set<string>>();
@@ -1915,10 +1923,8 @@ function renderResults(
       catalogue.items.filter((candidate) => !candidate.active),
       false,
     );
-    for (const item of inactiveItems.slice(0, remainingItemSlots)) {
-      const localization = catalogue.localizations.find(
-        (candidate) => candidate.localizationId === item.localizationId,
-      );
+    for (const item of inactiveItems) {
+      const localization = prepared.localizationById.get(item.localizationId);
       let ownerLabel = item.localizationId;
       if (localization) {
         const displayLabel = localizationDisplayLabel(localization, localizationLabelCounts);
@@ -1935,57 +1941,61 @@ function renderResults(
           : undefined;
       const itemIdentity = inactiveDisambiguators.get(item.itemId);
       const identitySuffix = [setIdentity, itemIdentity].filter(Boolean).join(' · ') || undefined;
-      inactiveList.append(
-        renderItemRow(item, catalogue, true, ownerLabel, identitySuffix, stateController, registerCleanup),
-      );
-      mountedItemCount += 1;
+      pendingRows.push(() => {
+        inactiveList.append(
+          renderItemRow(item, catalogue, true, ownerLabel, identitySuffix, stateController, registerCleanup),
+        );
+        inactive.hidden = false;
+      });
     }
-    if (inactiveList.childElementCount > 0) {
-      inactive.append(inactiveList);
-      content.push(inactive);
-    }
+    inactive.append(inactiveList);
+    content.push(inactive);
   }
+  const appendRows = (): void => {
+    const end = Math.min(visibleItemLimit, pendingRows.length);
+    while (mountedItemCount < end) pendingRows[mountedItemCount++]?.();
+  };
+  appendRows();
   if (matchingItemCount > 0) {
     const more = text('div', undefined, 'results-more');
     more.dataset.resultsProgress = '';
     more.dataset.resultsSummary = '';
     more.tabIndex = -1;
-    more.append(
-      text(
-        'p',
-        mountedItemCount < matchingItemCount
-          ? `Showing ${mountedItemCount} of ${matchingItemCount} matching catalogue items.`
-          : `Showing all ${matchingItemCount} matching catalogue items.`,
-      ),
-    );
-    if (mountedItemCount < matchingItemCount) {
-      const remainingCount = matchingItemCount - mountedItemCount;
-      const nextCount = Math.min(RESULT_CHUNK_SIZE, remainingCount);
-      const reveal = text('button', `Show ${nextCount} more item${nextCount === 1 ? '' : 's'}`) as HTMLButtonElement;
-      reveal.type = 'button';
-      reveal.dataset.showMore = '';
-      reveal.addEventListener('click', () => {
-        const firstNewItemIndex = mountedItemCount;
-        renderResults(
-          container,
-          criteria,
-          catalogue,
-          stateController?.state ?? state,
-          stateController,
-          visibleItemLimit + RESULT_CHUNK_SIZE,
-        );
-        if (container.querySelector('[data-show-more]')) {
-          const firstNewItem = container.querySelectorAll<HTMLElement>('[data-item-id]').item(firstNewItemIndex);
-          if (firstNewItem) {
-            firstNewItem.tabIndex = -1;
-            firstNewItem.focus();
-            return;
+    const updateMore = (): void => {
+      more.replaceChildren(
+        text(
+          'p',
+          mountedItemCount < matchingItemCount
+            ? `Showing ${mountedItemCount} of ${matchingItemCount} matching catalogue items.`
+            : `Showing all ${matchingItemCount} matching catalogue items.`,
+        ),
+      );
+      if (mountedItemCount < matchingItemCount) {
+        const remainingCount = matchingItemCount - mountedItemCount;
+        const nextCount = Math.min(RESULT_CHUNK_SIZE, remainingCount);
+        const reveal = text('button', `Show ${nextCount} more item${nextCount === 1 ? '' : 's'}`) as HTMLButtonElement;
+        reveal.type = 'button';
+        reveal.dataset.showMore = '';
+        reveal.addEventListener('click', () => {
+          const firstNewItemIndex = mountedItemCount;
+          visibleItemLimit += RESULT_CHUNK_SIZE;
+          appendRows();
+          updateMore();
+          setViewStatus(`Showing ${mountedItemCount} of ${matchingItemCount} matching catalogue items.`);
+          if (container.querySelector('[data-show-more]')) {
+            const firstNewItem = container.querySelectorAll<HTMLElement>('[data-item-id]').item(firstNewItemIndex);
+            if (firstNewItem) {
+              firstNewItem.tabIndex = -1;
+              firstNewItem.focus();
+              return;
+            }
           }
-        }
-        container.querySelector<HTMLElement>('[data-results-progress]')?.focus();
-      });
-      more.append(reveal);
-    }
+          container.querySelector<HTMLElement>('[data-results-progress]')?.focus();
+        });
+        more.append(reveal);
+      }
+    };
+    updateMore();
     content.push(more);
   }
   container.replaceChildren(...content);
@@ -2002,8 +2012,9 @@ async function renderCollection(
   migrationManifest: typeof import('./migrations.js').migrationManifest,
   knownSourceItemIdsByFingerprint: typeof import('./migrations.js').knownSourceItemIdsByFingerprint,
 ): Promise<void> {
-  const ids = new Set(sortedLocalizations(catalogue).map((row) => row.localizationId));
-  const editionIds = new Set(catalogue.setEditions.map((row) => row.setEditionId));
+  const prepared = prepareCatalogueResults(catalogue);
+  const ids = new Set(prepared.localizationById.keys());
+  const editionIds = new Set(prepared.editionById.keys());
   const parsed = parseQuery(window.location.search, ids, editionIds);
   renderProvenance($('[data-provenance]'), catalogue, provenance);
   if (!parsed.ok) {
@@ -2011,14 +2022,16 @@ async function renderCollection(
     return;
   }
   if (parsed.criteria.edition) {
-    const edition = catalogue.setEditions.find((row) => row.setEditionId === parsed.criteria.edition);
+    const edition = prepared.editionById.get(parsed.criteria.edition);
     if (!edition || (parsed.criteria.localization && edition.localizationId !== parsed.criteria.localization)) {
       renderInvalid($('[data-view]'), parsed.criteria.localization);
       return;
     }
   }
   const knownTrackableItemIds = new Set(
-    catalogue.items.filter((item) => item.active && item.progressClass === 'current-known').map((item) => item.itemId),
+    [...prepared.itemById.values()]
+      .filter((item) => item.active && item.progressClass === 'current-known')
+      .map((item) => item.itemId),
   );
   const targetItemClasses = new Map(
     catalogue.items
@@ -2073,7 +2086,15 @@ async function renderCollection(
   window.addEventListener('pageshow', onPageshow);
   window.addEventListener('storage', onStorage);
   renderQueryForm($('[data-query]'), parsed.criteria, catalogue);
-  renderResults($('[data-view]'), parsed.criteria, catalogue, renderState, stateController);
+  renderResults(
+    $('[data-view]'),
+    parsed.criteria,
+    catalogue,
+    renderState,
+    stateController,
+    RESULT_CHUNK_SIZE,
+    prepared,
+  );
   const recoveryTools = document.querySelector<HTMLElement>('[data-recovery-tools]');
   if (recoveryTools) {
     const lifecycle = await createBackupLifecycle(reconciliation, provenance.appRevision ?? provenance.sourceCommit);
