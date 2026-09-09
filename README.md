@@ -104,6 +104,32 @@ Chromium requests, per-response raw/gzip bytes, AST-derived static/dynamic impor
 and runtime manifest membership as JSON. The directory defaults to `dist/site`. Measure
 each revision's artifact separately; totals describe payload size, not transfer timing.
 
+The collection shell also preloads its route, full snapshot, migrations and reconciliation
+module through their revision-addressed URLs and explicit integrity bindings. Native
+`modulepreload` fetches/compiles without executing: the existing complete-tuple validation
+still precedes private-state access. The homepage does not preload these modules.
+
+For constrained startup measurements, build once and run
+`node scripts/measure-collection-startup.mjs [artifact-directory] [matching-hosted-base-url]`.
+Keep the resulting JSON outside the repository and publish only the relevant aggregates in
+the owning issue. The harness uses fresh empty Chromium contexts, a 390×844 viewport, 4× CPU
+slowdown, 150 ms imposed network latency, 200000 B/s download and 93750 B/s upload. It alternates
+three local baseline/candidate pairs, each with a cold navigation and a same-context warm
+navigation to `collection/?research=false`. Both serve the exact same artifact with real gzip;
+the baseline removes only module-preload links using the pinned HTML parser. The artifact
+must remain byte-identical throughout. Optional hosted measurements require the same app and
+catalogue identity and are reported separately because hosting/compression differ.
+
+First usable row is the second animation frame after an enabled status control mounts, a
+repeatable presentation proxy rather than a Core Web Vital. Resource Timing reports actual
+encoded/decoded/transfer sizes and request timing; the existing route tool supplies static
+and dynamic import edges. CPU samples attribute synchronous validation, result preparation,
+state and rendering work; async waits and unassigned samples stay separate. Trace durations
+include overlapping events: report `v8.parseOnBackgroundParsing` separately from background
+waiting, compile and module evaluation; never add nested events into a claimed CPU total.
+Sampling/tracing adds overhead, and throttling is a documented profile, not a physical-device
+claim. Compare medians and ranges, not a brittle timing threshold.
+
 The build also copies the authored card-shaped placeholders from `site-src/assets/` into the
 same-origin `assets/images/` tree and writes a digest-pinned `assets/image-manifest.json`. The
 image resolver currently retains the local placeholder for every catalogue reference. Producer

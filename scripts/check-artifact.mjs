@@ -461,8 +461,20 @@ try {
         .toLowerCase()
         .split(/[\t\n\f\r ]+/u)
         .filter(Boolean);
-      if (!rel.includes('stylesheet')) continue;
       const source = htmlAttribute(tag, 'href') ?? '';
+      if (rel.includes('modulepreload')) {
+        const expectedIntegrity = bindings && JSON.parse(bindings.importMap).integrity[source];
+        if (
+          page !== 'collection/index.html' ||
+          tag.namespaceURI !== 'http://www.w3.org/1999/xhtml' ||
+          !expectedIntegrity ||
+          htmlAttribute(tag, 'integrity') !== expectedIntegrity ||
+          importMapOffset === undefined ||
+          importMapOffset > tag.sourceCodeLocation.startOffset
+        )
+          throw new Error(`ARTIFACT_RUNTIME_PRELOAD_INVALID: ${page}`);
+      }
+      if (!rel.includes('stylesheet')) continue;
       if (
         !source ||
         source !== source.trim() ||

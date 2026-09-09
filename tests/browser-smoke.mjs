@@ -105,13 +105,15 @@ async function retainedRuntimeFixture({ unsupported = false, invalidDigest = fal
     ['/collection/', 'collection/index.html', collectionBindings, `../${runtimePath}`],
   ]) {
     const bindings = runtimeShellBindings(manifest, prefix);
+    let shell = await readFile(join(root, file), 'utf8');
+    const nextIntegrity = JSON.parse(bindings.importMap).integrity;
+    for (const [url, integrity] of Object.entries(JSON.parse(original.importMap).integrity)) {
+      shell = shell.replaceAll(integrity, nextIntegrity[url.replace(runtimeManifest.runtime.appRevision, revision)]);
+    }
     shells.set(
       route,
-      (await readFile(join(root, file), 'utf8'))
-        .replace(original.importMap, bindings.importMap)
+      shell
         .replaceAll(original.importMapCsp, bindings.importMapCsp)
-        .replaceAll(original.appIntegrity, bindings.appIntegrity)
-        .replaceAll(original.themeIntegrity, bindings.themeIntegrity)
         .replaceAll(runtimeManifest.runtime.appRevision, revision)
         .replace(/(name="snoredex-directory-sha256" content=")[^"]+/u, `$1${digest}`),
     );
@@ -302,35 +304,48 @@ async function assertRetainedRoutes(browser, name) {
         );
       }
     }
-    await probePrivateAccess(page);
     for (const retained of [false, true]) {
-      retainedShell = retained;
       for (const [path, module] of [
         ['/', 'home.js'],
         ['/collection/', 'collection.js'],
       ]) {
+        // A preloaded WebKit module may survive navigation in the resource cache.
+        // Keep the warm forward/rollback loop above; inject changed bytes cold.
+        const attackPage = await browser.newPage();
+        await attackPage.route(`${baseUrl}/${retainedRuntime.runtimePath}**`, (route) => {
+          const modulePath = new URL(route.request().url()).pathname.slice(retainedRuntime.runtimePath.length + 1);
+          return route.fulfill({ contentType: 'text/javascript', body: retainedRuntime.modules.get(modulePath) });
+        });
+        if (retained)
+          await attackPage.route(`${baseUrl}${path}`, (route) =>
+            route.fulfill({ contentType: 'text/html', body: retainedRuntime.shells.get(path) }),
+          );
+        await attackPage.goto(`${baseUrl}/missing`);
+        await attackPage.evaluate((value) => localStorage.setItem('snoredex-checklist.private-state', value), state);
+        await probePrivateAccess(attackPage);
         const target = `${baseUrl}/${retained ? retainedRuntime.runtimePath : `assets/${moduleManifest.runtimeAssetSet.path}/`}${module}`;
         const body = retained
           ? await readFile(join(root, 'assets', module), 'utf8')
           : retainedRuntime.modules.get(module);
         let intercepted = false;
-        await page.route(target, (route) => {
+        await attackPage.route(target, (route) => {
           intercepted = true;
           return route.fulfill({ contentType: 'text/javascript', body });
         });
-        await page.goto(`${baseUrl}${path}`, { waitUntil: 'networkidle' });
+        await attackPage.goto(`${baseUrl}${path}`, { waitUntil: 'networkidle' });
         assert.ok(intercepted, `${name}: mixed ${retained ? 'retained' : 'active'} ${module} bytes requested`);
         assert.equal(
-          await page.locator(path === '/' ? '.localization-group' : '.query-primary').count(),
+          await attackPage.locator(path === '/' ? '.localization-group' : '.query-primary').count(),
           0,
           `${name}: cross-generation ${module} rejected in both directions`,
         );
         assert.equal(
-          await page.evaluate(() => window.privateAccesses),
+          await attackPage.evaluate(() => window.privateAccesses),
           0,
           `${name}: mixed route never accesses private state`,
         );
-        await page.unroute(target);
+        assert.equal(await attackPage.evaluate(() => localStorage.getItem('snoredex-checklist.private-state')), state);
+        await attackPage.close();
       }
     }
   } finally {
