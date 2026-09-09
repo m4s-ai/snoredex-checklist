@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { htmlAttribute, parseArtifactHtml } from '../scripts/artifact-html.mjs';
 
 import { replaceOutput } from '../scripts/site-output.ts';
 import { buildValidatedSourceMembershipIndex } from '../scripts/migration-membership.ts';
@@ -329,6 +330,47 @@ test('stamps the exact app revision into served shells and module', async () => 
       assert.equal(checked.status === 0, valid, `${name}: ${checked.stdout}${checked.stderr}`);
     }
     await writeFile(resolve(output, 'index.html'), home);
+    const preloads = parseArtifactHtml(collection).activeElements.filter(
+      (node) => node.tagName === 'link' && htmlAttribute(node, 'rel') === 'modulepreload',
+    );
+    assert.equal(preloads.length, 4);
+    assert.deepEqual(
+      preloads.map((node) => htmlAttribute(node, 'href')),
+      ['collection.js', 'snapshot.js', 'migrations.js', 'state/browser-reconciliation.js'].map(
+        (module) => `../assets/runtime/${revision}/${module}`,
+      ),
+    );
+    assert.ok(!home.includes('modulepreload'));
+    const preload = preloads[0]!;
+    const location = preload.sourceCodeLocation!;
+    const tag = collection.slice(location.startOffset, location.endOffset);
+    const invalidPreloads = [
+      tag.replace(htmlAttribute(preload, 'integrity')!, 'sha256-invalid'),
+      tag.replace(htmlAttribute(preload, 'href')!, '../assets/collection.js'),
+      tag.replace(htmlAttribute(preload, 'href')!, 'https://example.invalid/collection.js'),
+    ];
+    for (const replacement of invalidPreloads) {
+      await writeFile(resolve(output, 'collection/index.html'), collection.replace(tag, replacement));
+      const checked = spawnSync(process.execPath, [resolve(root, 'scripts/check-artifact.mjs'), output], {
+        cwd: root,
+        env: { ...process.env, SNOREDEX_APP_REVISION: revision },
+        encoding: 'utf8',
+      });
+      assert.notEqual(checked.status, 0);
+      assert.match(`${checked.stdout}${checked.stderr}`, /ARTIFACT_RUNTIME_PRELOAD_INVALID/u);
+    }
+    const misplaced = collection
+      .replace(tag, '')
+      .replace('<script type="importmap">', `${tag}<script type="importmap">`);
+    await writeFile(resolve(output, 'collection/index.html'), misplaced);
+    const checked = spawnSync(process.execPath, [resolve(root, 'scripts/check-artifact.mjs'), output], {
+      cwd: root,
+      env: { ...process.env, SNOREDEX_APP_REVISION: revision },
+      encoding: 'utf8',
+    });
+    assert.notEqual(checked.status, 0);
+    assert.match(`${checked.stdout}${checked.stderr}`, /ARTIFACT_RUNTIME_PRELOAD_INVALID/u);
+    await writeFile(resolve(output, 'collection/index.html'), collection);
     for (const entry of runtimeManifest.modules) {
       const module = await readFile(resolve(output, 'assets', moduleManifest.runtimeAssetSet.path, entry.path), 'utf8');
       assert.match(module, new RegExp(`snoredex-app-revision:${revision}`, 'u'));

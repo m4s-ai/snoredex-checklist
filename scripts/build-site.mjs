@@ -332,6 +332,19 @@ try {
   await cp(resolve(assets, 'theme.js'), resolve(staging, 'theme.js'));
   await mkdir(resolve(staging, 'collection'), { recursive: true });
   await copyRevisionShell(resolve(root, 'site-src/collection/index.html'), resolve(staging, 'collection/index.html'), {
+    __SNOREDEX_COLLECTION_PRELOADS__: [
+      'collection.js',
+      'snapshot.js',
+      'migrations.js',
+      'state/browser-reconciliation.js',
+    ]
+      .map((module) => {
+        const href = `../assets/${runtimeAssetSet.path}/${module}`;
+        const integrity = JSON.parse(collectionBindings.importMap).integrity[href];
+        if (!integrity) throw new Error('COLLECTION_PRELOAD_MODULE_MISSING');
+        return `<link rel="modulepreload" href="${href}" integrity="${integrity}" />`;
+      })
+      .join('\n    '),
     __SNOREDEX_RUNTIME_IMPORT_MAP__: collectionBindings.importMap,
     __SNOREDEX_IMPORT_MAP_CSP__: collectionBindings.importMapCsp,
     __SNOREDEX_APP_INTEGRITY__: collectionBindings.appIntegrity,

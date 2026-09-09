@@ -105,13 +105,15 @@ async function retainedRuntimeFixture({ unsupported = false, invalidDigest = fal
     ['/collection/', 'collection/index.html', collectionBindings, `../${runtimePath}`],
   ]) {
     const bindings = runtimeShellBindings(manifest, prefix);
+    let shell = await readFile(join(root, file), 'utf8');
+    const nextIntegrity = JSON.parse(bindings.importMap).integrity;
+    for (const [url, integrity] of Object.entries(JSON.parse(original.importMap).integrity)) {
+      shell = shell.replaceAll(integrity, nextIntegrity[url.replace(runtimeManifest.runtime.appRevision, revision)]);
+    }
     shells.set(
       route,
-      (await readFile(join(root, file), 'utf8'))
-        .replace(original.importMap, bindings.importMap)
+      shell
         .replaceAll(original.importMapCsp, bindings.importMapCsp)
-        .replaceAll(original.appIntegrity, bindings.appIntegrity)
-        .replaceAll(original.themeIntegrity, bindings.themeIntegrity)
         .replaceAll(runtimeManifest.runtime.appRevision, revision)
         .replace(/(name="snoredex-directory-sha256" content=")[^"]+/u, `$1${digest}`),
     );
