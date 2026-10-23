@@ -43,7 +43,7 @@
     "smoke:pages": "node scripts/smoke-pages.mjs"
   },
   "devDependencies": {
-    "@axe-core/playwright": "4.13.0",
+    "@axe-core/playwright": "4.14.0",
     "@playwright/test": "1.63.0",
     "@types/node": "26.5.0",
     "ajv": "8.20.0",
